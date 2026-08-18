@@ -3,8 +3,11 @@ import { tko_config } from "../../../packages/config/src/tasko-config";
 import { getPlatformStore } from "../../../packages/database/src/platform-store";
 import { tko_logger } from "../../../packages/observability/src/logger";
 import { getRedisAdapter } from "../../../packages/redis/src/redis-adapter";
+import { requireCapability } from "../../permissions/src/authorization";
+import { resolveWorkerServiceActor } from "../../tenancy/src/tenant-context";
 
 export type OutboxConsumer = (tko_record: OutboxRecord) => Promise<void>;
+type RegisteredConsumer = { consumer: OutboxConsumer; requiredCapability: "job.process" | "workspace.members.manage" };
 
 export interface WorkerStatus {
   name: "worker";
@@ -14,7 +17,7 @@ export interface WorkerStatus {
   lastError: string | null;
 }
 
-const tko_consumers = new Map<string, OutboxConsumer>();
+const tko_consumers = new Map<string, RegisteredConsumer>();
 let tko_workerStatus: WorkerStatus = {
   name: "worker",
   status: "standby",
@@ -23,8 +26,12 @@ let tko_workerStatus: WorkerStatus = {
   lastError: null,
 };
 
-export function registerOutboxConsumer(tko_eventType: string, tko_consumer: OutboxConsumer): void {
-  tko_consumers.set(tko_eventType, tko_consumer);
+export function registerOutboxConsumer(
+  tko_eventType: string,
+  tko_consumer: OutboxConsumer,
+  tko_requiredCapability: RegisteredConsumer["requiredCapability"] = "job.process",
+): void {
+  tko_consumers.set(tko_eventType, { consumer: tko_consumer, requiredCapability: tko_requiredCapability });
 }
 
 export function getWorkerStatus(): WorkerStatus {
@@ -38,8 +45,21 @@ export async function processOutboxOnce(tko_limit = 25): Promise<number> {
 
   for (const tko_record of tko_records) {
     try {
-      const tko_consumer = tko_consumers.get(tko_record.eventType);
-      if (tko_consumer) await tko_consumer(tko_record);
+      const tko_registeredConsumer = tko_consumers.get(tko_record.eventType);
+      if (tko_registeredConsumer) {
+        const tko_serviceActor = await resolveWorkerServiceActor({
+          tenantId: tko_record.tenantId,
+          correlationId: tko_record.correlationId,
+        });
+        if (!tko_serviceActor) throw new Error("TASKO_AUTHORIZATION_DENIED:worker_service_membership_missing");
+        requireCapability(tko_serviceActor, tko_registeredConsumer.requiredCapability, {
+          tenantId: tko_record.tenantId,
+          type: "outbox_job",
+          id: tko_record.id,
+          visibility: "internal",
+        });
+        await tko_registeredConsumer.consumer(tko_record);
+      }
       await getRedisAdapter().publishTenant({
         tenantId: tko_record.tenantId,
         eventId: tko_record.eventId,

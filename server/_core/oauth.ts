@@ -4,6 +4,9 @@ import type { Express, Request, Response } from "express";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
+import { getPlatformStore } from "../../packages/database/src/platform-store";
+import { recordAuthenticationEvent } from "../../modules/audit/src/audit-service";
+import { createPlatformActor } from "../../modules/tenancy/src/tenant-context";
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
@@ -47,6 +50,18 @@ export function registerOAuthRoutes(app: Express) {
         loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
         lastSignedIn: new Date(),
       });
+
+      const tko_memberships = await getPlatformStore().listMemberships(userInfo.openId);
+      await Promise.all(
+        tko_memberships.map(tko_membership =>
+          recordAuthenticationEvent({
+            actor: createPlatformActor(tko_membership, req.header("x-request-id") ?? undefined),
+            action: "login",
+            correlationId: req.header("x-request-id") ?? crypto.randomUUID(),
+            metadata: { loginMethod: userInfo.loginMethod ?? userInfo.platform ?? "oauth" },
+          }),
+        ),
+      );
 
       const sessionToken = await sdk.createSessionToken(userInfo.openId, {
         name: userInfo.name || "",

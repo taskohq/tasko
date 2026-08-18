@@ -16,6 +16,7 @@ export const tko_config = {
   redisUrl: process.env.TASKO_REDIS_URL ?? "",
   workerPollIntervalMs: readPositiveInteger(process.env.TASKO_WORKER_POLL_MS, 1_000),
   workerMaxAttempts: readPositiveInteger(process.env.TASKO_WORKER_MAX_ATTEMPTS, 8),
+  workerServiceAuthSubject: process.env.TASKO_WORKER_SERVICE_SUBJECT ?? "service:tasko-worker",
   ownerAuthSubject: process.env.OWNER_OPEN_ID ?? "",
   isProduction: process.env.NODE_ENV === "production",
 } as const;

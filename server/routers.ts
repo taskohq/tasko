@@ -6,6 +6,8 @@ import { tko_config } from "../packages/config/src/tasko-config";
 import { getPlatformStore } from "../packages/database/src/platform-store";
 import { can } from "../modules/permissions/src/authorization";
 import { enqueueDurableEvent } from "../modules/events/src/outbox-service";
+import { recordAuthenticationEvent } from "../modules/audit/src/audit-service";
+import { changeMemberRole } from "../modules/tenancy/src/membership-service";
 import { z } from "zod";
 
 export const appRouter = router({
@@ -13,9 +15,17 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      if (ctx.platform) {
+        await recordAuthenticationEvent({
+          actor: ctx.platform.actor,
+          action: "logout",
+          correlationId: ctx.correlationId,
+          metadata: { transport: "http" },
+        });
+      }
       return {
         success: true,
       } as const;
@@ -96,6 +106,22 @@ export const appRouter = router({
         correlationId: ctx.correlationId,
       });
     }),
+    changeMemberRole: tenantProcedure
+      .input(
+        z.object({
+          memberId: z.string().min(1),
+          newRole: z.enum(["owner", "admin", "member", "guest"]),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        await changeMemberRole({
+          actor: ctx.platform.actor,
+          memberId: input.memberId,
+          newRole: input.newRole,
+          correlationId: ctx.correlationId,
+        });
+        return { success: true } as const;
+      }),
     seedDemo: protectedProcedure.mutation(async ({ ctx }) => {
       if (!tko_config.ownerAuthSubject || ctx.user.openId !== tko_config.ownerAuthSubject) {
         throw new Error("TASKO_AUTHORIZATION_DENIED:seed_owner_required");

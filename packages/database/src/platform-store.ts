@@ -2,6 +2,7 @@ import { Pool, type PoolClient } from "pg";
 import { tko_config } from "../../config/src/tasko-config";
 import type {
   AuditLogRecord,
+  ChangeTenantMemberRoleInput,
   DurableMutationInput,
   OutboxRecord,
   Tenant,
@@ -31,6 +32,7 @@ export interface PlatformStore {
     tko_tenantSlug: string,
   ): Promise<TenantMembership | null>;
   seedDemoWorkspace(tko_input: SeedWorkspaceInput): Promise<Tenant>;
+  changeTenantMemberRole(tko_input: ChangeTenantMemberRoleInput): Promise<void>;
   writeDurableMutation(tko_input: DurableMutationInput): Promise<OutboxRecord>;
   reserveOutbox(tko_limit: number): Promise<OutboxRecord[]>;
   markOutboxProcessed(tko_outboxId: string): Promise<void>;
@@ -104,24 +106,57 @@ export class MemoryPlatformStore implements PlatformStore {
   async seedDemoWorkspace(tko_input: SeedWorkspaceInput): Promise<Tenant> {
     const tko_tenant = createTenant(tko_input);
     this.tko_tenants.set(tko_tenant.id, tko_tenant);
-    const tko_existingMemberships = this.tko_memberships.get(tko_input.ownerAuthSubject) ?? [];
-    const tko_hasMembership = tko_existingMemberships.some(
-      tko_membership => tko_membership.tenant.id === tko_tenant.id,
-    );
+    const tko_seedMembers: Array<Pick<TenantMembership, "authSubject" | "role" | "displayName">> = [
+      { authSubject: tko_input.ownerAuthSubject, role: "owner", displayName: "Demo Owner" },
+      { authSubject: `demo-admin:${tko_tenant.slug}`, role: "admin", displayName: "Demo Admin" },
+      { authSubject: `demo-member:${tko_tenant.slug}`, role: "member", displayName: "Demo Member" },
+      { authSubject: `demo-guest:${tko_tenant.slug}`, role: "guest", displayName: "Demo Guest" },
+      { authSubject: tko_config.workerServiceAuthSubject, role: "service_account", displayName: "Tasko Worker" },
+    ];
 
-    if (!tko_hasMembership) {
-      tko_existingMemberships.push({
-        id: "tko-member-demo-owner",
-        tenant: tko_tenant,
-        authSubject: tko_input.ownerAuthSubject,
-        role: "owner",
-        status: "active",
-        displayName: "Demo Owner",
-      });
-      this.tko_memberships.set(tko_input.ownerAuthSubject, tko_existingMemberships);
+    for (const tko_seedMember of tko_seedMembers) {
+      const tko_existingMemberships = this.tko_memberships.get(tko_seedMember.authSubject) ?? [];
+      const tko_hasMembership = tko_existingMemberships.some(
+        tko_membership => tko_membership.tenant.id === tko_tenant.id,
+      );
+      if (!tko_hasMembership) {
+        tko_existingMemberships.push({
+          id: `tko-member-${tko_tenant.slug}-${tko_seedMember.role}`,
+          tenant: tko_tenant,
+          authSubject: tko_seedMember.authSubject,
+          role: tko_seedMember.role,
+          status: "active",
+          displayName: tko_seedMember.displayName,
+        });
+        this.tko_memberships.set(tko_seedMember.authSubject, tko_existingMemberships);
+      }
     }
 
     return { ...tko_tenant };
+  }
+
+  async changeTenantMemberRole(tko_input: ChangeTenantMemberRoleInput): Promise<void> {
+    for (const [tko_authSubject, tko_memberships] of Array.from(this.tko_memberships.entries())) {
+      const tko_membership = tko_memberships.find(tko_item => tko_item.id === tko_input.memberId);
+      if (!tko_membership) continue;
+      if (tko_membership.tenant.id !== tko_input.tenantId) throw new Error("TASKO_AUTHORIZATION_DENIED:tenant_mismatch");
+      const tko_previousRole = tko_membership.role;
+      tko_membership.role = tko_input.newRole;
+      this.tko_memberships.set(tko_authSubject, tko_memberships);
+      await this.writeDurableMutation({
+        actor: tko_input.actor,
+        tenantId: tko_input.tenantId,
+        eventType: "tenant.membership.role_changed.v1",
+        topic: "tenant.membership",
+        payload: { memberId: tko_membership.id, previousRole: tko_previousRole, newRole: tko_input.newRole },
+        auditAction: "tenant.membership.role_changed",
+        resourceType: "tenant_member",
+        resourceId: tko_membership.id,
+        correlationId: tko_input.correlationId,
+      });
+      return;
+    }
+    throw new Error("Tenant member not found");
   }
 
   async writeDurableMutation(tko_input: DurableMutationInput): Promise<OutboxRecord> {
@@ -266,21 +301,29 @@ export class PostgresPlatformStore implements PlatformStore {
          returning id, slug, name, status, deployment_profile, created_at`,
         [tko_slug, tko_name, tko_config.deploymentProfile],
       );
-      const tko_userResult = await tko_client.query(
-        `insert into users (id, auth_subject, email, status)
-         values (gen_random_uuid(), $1, null, 'active')
-         on conflict (auth_subject) do update set status = 'active'
-         returning id`,
-        [tko_input.ownerAuthSubject],
-      );
       const tko_tenant = tko_tenantResult.rows[0];
-      const tko_user = tko_userResult.rows[0];
-      await tko_client.query(
-        `insert into tenant_members (id, tenant_id, user_id, role, status, display_name)
-         values (gen_random_uuid(), $1, $2, 'owner', 'active', 'Demo Owner')
-         on conflict (tenant_id, user_id) do update set role = 'owner', status = 'active'`,
-        [tko_tenant.id, tko_user.id],
-      );
+      const tko_seedMembers = [
+        [tko_input.ownerAuthSubject, "owner", "Demo Owner"],
+        [`demo-admin:${tko_slug}`, "admin", "Demo Admin"],
+        [`demo-member:${tko_slug}`, "member", "Demo Member"],
+        [`demo-guest:${tko_slug}`, "guest", "Demo Guest"],
+        [tko_config.workerServiceAuthSubject, "service_account", "Tasko Worker"],
+      ] as const;
+      for (const [tko_authSubject, tko_role, tko_displayName] of tko_seedMembers) {
+        const tko_userResult = await tko_client.query(
+          `insert into users (id, auth_subject, email, status)
+           values (gen_random_uuid(), $1, null, 'active')
+           on conflict (auth_subject) do update set status = 'active'
+           returning id`,
+          [tko_authSubject],
+        );
+        await tko_client.query(
+          `insert into tenant_members (id, tenant_id, user_id, role, status, display_name)
+           values (gen_random_uuid(), $1, $2, $3, 'active', $4)
+           on conflict (tenant_id, user_id) do update set role = excluded.role, status = 'active', display_name = excluded.display_name`,
+          [tko_tenant.id, tko_userResult.rows[0].id, tko_role, tko_displayName],
+        );
+      }
       await tko_client.query("COMMIT");
       return {
         id: tko_tenant.id,
@@ -337,6 +380,46 @@ export class PostgresPlatformStore implements PlatformStore {
       );
       await tko_client.query("COMMIT");
       return this.mapOutbox(tko_outboxResult.rows[0]);
+    } catch (tko_error) {
+      await tko_client.query("ROLLBACK");
+      throw tko_error;
+    } finally {
+      tko_client.release();
+    }
+  }
+
+  async changeTenantMemberRole(tko_input: ChangeTenantMemberRoleInput): Promise<void> {
+    const tko_client = await this.tko_pool.connect();
+    const tko_eventId = crypto.randomUUID();
+    const tko_outboxId = crypto.randomUUID();
+    try {
+      await tko_client.query("BEGIN");
+      await tko_client.query("select set_config('app.tenant_id', $1, true)", [tko_input.tenantId]);
+      const tko_current = await tko_client.query(
+        "select role from tenant_members where id = $1 and tenant_id = $2 for update",
+        [tko_input.memberId, tko_input.tenantId],
+      );
+      if (tko_current.rowCount !== 1) throw new Error("Tenant member not found");
+      await tko_client.query(
+        "update tenant_members set role = $1 where id = $2 and tenant_id = $3",
+        [tko_input.newRole, tko_input.memberId, tko_input.tenantId],
+      );
+      const tko_payload = {
+        memberId: tko_input.memberId,
+        previousRole: tko_current.rows[0].role as string,
+        newRole: tko_input.newRole,
+      };
+      await tko_client.query(
+        `insert into audit_logs (id, tenant_id, actor_auth_subject, action, resource_type, resource_id, correlation_id, metadata_json)
+         values (gen_random_uuid(), $1, $2, 'tenant.membership.role_changed', 'tenant_member', $3, $4, $5::jsonb)`,
+        [tko_input.tenantId, tko_input.actor.authSubject, tko_input.memberId, tko_input.correlationId, JSON.stringify(tko_payload)],
+      );
+      await tko_client.query(
+        `insert into outbox (id, event_id, tenant_id, topic, event_type, payload_json, actor_auth_subject, correlation_id, status, attempts, available_at)
+         values ($1, $2, $3, 'tenant.membership', 'tenant.membership.role_changed.v1', $4::jsonb, $5, $6, 'pending', 0, now())`,
+        [tko_outboxId, tko_eventId, tko_input.tenantId, JSON.stringify(tko_payload), tko_input.actor.authSubject, tko_input.correlationId],
+      );
+      await tko_client.query("COMMIT");
     } catch (tko_error) {
       await tko_client.query("ROLLBACK");
       throw tko_error;

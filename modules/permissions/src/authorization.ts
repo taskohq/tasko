@@ -29,7 +29,7 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
   ],
   member: ["workspace.read", "attachment.upload", "attachment.download", "realtime.connect"],
   guest: ["workspace.read", "attachment.download", "realtime.connect"],
-  service_account: ["workspace.read", "attachment.upload", "attachment.download", "job.enqueue"],
+  service_account: ["workspace.read", "attachment.upload", "attachment.download", "job.enqueue", "job.process"],
 };
 
 function denied(tko_reason: AuthorizationDecision["reason"]): AuthorizationDecision {

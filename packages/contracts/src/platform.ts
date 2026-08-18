@@ -14,7 +14,8 @@ export type Capability =
   | "attachment.upload"
   | "attachment.download"
   | "realtime.connect"
-  | "job.enqueue";
+  | "job.enqueue"
+  | "job.process";
 
 export interface Tenant {
   id: string;
@@ -100,5 +101,13 @@ export interface DurableMutationInput {
   resourceType: string;
   resourceId: string;
   auditMetadata?: Record<string, unknown>;
+  correlationId: string;
+}
+
+export interface ChangeTenantMemberRoleInput {
+  actor: PlatformActor;
+  tenantId: string;
+  memberId: string;
+  newRole: Exclude<TenantRole, "service_account">;
   correlationId: string;
 }
