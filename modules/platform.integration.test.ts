@@ -4,7 +4,7 @@ import {
   MemoryPlatformStore,
   setPlatformStoreForTests,
 } from "../packages/database/src/platform-store";
-import { setRedisAdapterForTests, getRedisAdapter } from "../packages/redis/src/redis-adapter";
+import { createInMemoryRedisAdapter, setRedisAdapterForTests, getRedisAdapter } from "../packages/redis/src/redis-adapter";
 import { can } from "./permissions/src/authorization";
 import { resolveTenantRequestContext } from "./tenancy/src/tenant-context";
 import { enqueueDurableEvent } from "./events/src/outbox-service";
@@ -33,7 +33,7 @@ describe("Tasko M0 platform boundaries", () => {
   beforeEach(async () => {
     tko_store = new MemoryPlatformStore();
     setPlatformStoreForTests(tko_store);
-    setRedisAdapterForTests(null);
+    setRedisAdapterForTests(createInMemoryRedisAdapter());
     await tko_store.seedDemoWorkspace({ ownerAuthSubject: tko_ownerSubject, tenantSlug: "tasko-demo" });
     await tko_store.seedDemoWorkspace({ ownerAuthSubject: tko_otherSubject, tenantSlug: "other-tenant" });
   });

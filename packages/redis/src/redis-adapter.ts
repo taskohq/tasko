@@ -245,6 +245,10 @@ class RedisAdapter implements TenantRedisAdapter {
 
 let tko_redisAdapter: TenantRedisAdapter | null = null;
 
+export function createInMemoryRedisAdapter(): TenantRedisAdapter {
+  return new NoopRedisAdapter();
+}
+
 export function getRedisAdapter(): TenantRedisAdapter {
   if (!tko_redisAdapter) tko_redisAdapter = tko_config.redisUrl ? new RedisAdapter(tko_config.redisUrl) : new NoopRedisAdapter();
   return tko_redisAdapter;
