@@ -24,17 +24,17 @@
 - [x] Khởi tạo/xác minh repository Git cục bộ và commit mốc nền tảng M0 theo tính năng.
 - [x] Tạo và xác nhận các commit Git riêng cho các hạng mục M0 còn lại (audit/membership, Redis utilities, seed, tests và verification).
 - [x] Đọc roadmap/source of truth M1 và xác định acceptance criteria trước khi triển khai.
-- [ ] Triển khai M1 theo phạm vi đã được roadmap xác nhận, kèm tests, build, checkpoint và commit Git theo tính năng.
+- [x] Triển khai M1 theo phạm vi đã được roadmap xác nhận, kèm tests, build, checkpoint và commit Git theo tính năng.
 - [ ] Tiếp tục các milestone sau M1 theo roadmap chỉ sau khi M1 đạt acceptance criteria.
 - [x] M1: thêm migration tenant-aware cho Spaces, Projects, workflows/statuses, WorkItems, comments, dependencies, sprints, custom fields và saved views.
 - [x] M1: xây dựng Work store/service với project template, sequence key ổn định, workflow transition, history, audit và transactional outbox nguyên tử.
 - [x] M1: áp dụng authorization và tenant isolation cho mọi truy vấn/mutation Work, gồm project-scoped authorization và negative tests.
 - [x] M1: mở rộng API typed cho project, item, board/list, comments, dependencies, sprint, custom fields và saved views.
 - [x] M1: tạo desktop Work shell, list, Kanban board, item detail inspector và các interaction P1 cần thiết.
-- [ ] M1: tạo seed product team/sprint mẫu, test acceptance flow board + sprint, typecheck/build/visual verification và commits/checkpoint.
+- [x] M1: tạo seed product team/sprint mẫu, test acceptance flow board + sprint, typecheck/build/visual verification và commits/checkpoint.
 - [x] M1: thay thế memory-only Work store bằng PostgreSQL adapter khi `TASKO_POSTGRES_URL` được cấu hình, giữ RLS và outbox/audit trong cùng transaction.
 - [x] M1: thêm API và tests cho custom fields của WorkItem.
 - [x] M1: hoàn thiện item detail inspector và interaction P1, rồi kiểm tra trực quan.
 - [x] M1: thêm seed executable cho product team, scrum project, sprint và work items mẫu.
-- [ ] M1: tạo commit Git theo hạng mục và checkpoint sau verification cuối cùng.
-- [ ] M1: lưu checkpoint sau verification cuối và ghi nhận version bàn giao.
+- [x] M1: tạo commit Git theo hạng mục và checkpoint sau verification cuối cùng.
+- [x] M1: lưu checkpoint sau verification cuối và ghi nhận version bàn giao (`e64c581c`).
