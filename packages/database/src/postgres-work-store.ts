@@ -1,0 +1,154 @@
+import crypto from "node:crypto";
+import { Pool, type PoolClient } from "pg";
+import type {
+  CreateCommentInput,
+  CreateProjectInput,
+  CreateSprintInput,
+  CreateWorkItemInput,
+  WorkComment,
+  WorkCustomFieldDefinition,
+  WorkCustomFieldType,
+  WorkCustomFieldValue,
+  WorkHistoryEntry,
+  WorkItem,
+  WorkItemRelationType,
+  WorkProject,
+  WorkSpace,
+  WorkSprint,
+  WorkType,
+  WorkflowStatus,
+} from "../../contracts/src/work";
+import type { PlatformActor } from "../../contracts/src/platform";
+import type { WorkBoardData, WorkSavedView, WorkStore } from "./work-store";
+
+const tko_statusBlueprint = [
+  ["To do", "todo", "status.todo", 100],
+  ["In progress", "in_progress", "status.progress", 200],
+  ["Done", "done", "status.done", 300],
+] as const;
+const tko_typeBlueprint = [
+  ["Epic", "epic", "layers"], ["Story", "story", "book-open"], ["Task", "task", "check-square"],
+  ["Bug", "bug", "bug"], ["Request", "request", "inbox"], ["Milestone", "milestone", "flag"],
+] as const;
+
+type Row = Record<string, unknown>;
+const tko_date = (tko_value: unknown): Date | null => tko_value ? new Date(String(tko_value)) : null;
+const tko_json = (tko_value: unknown): Record<string, unknown> => {
+  if (!tko_value) return {};
+  return typeof tko_value === "string" ? JSON.parse(tko_value) as Record<string, unknown> : tko_value as Record<string, unknown>;
+};
+
+export class PostgresWorkStore implements WorkStore {
+  private readonly tko_pool: Pool;
+
+  constructor(tko_connectionString: string) {
+    this.tko_pool = new Pool({ connectionString: tko_connectionString, max: 10 });
+  }
+
+  async createSpace(tko_actor: PlatformActor, tko_input: { name: string; slug: string; visibility: WorkSpace["visibility"]; correlationId: string }): Promise<WorkSpace> {
+    return this.tko_withTransaction(tko_actor.tenantId, async tko_client => {
+      const tko_id = crypto.randomUUID();
+      const tko_result = await tko_client.query(`insert into spaces (id, tenant_id, name, slug, visibility) values ($1,$2,$3,$4,$5) on conflict (tenant_id,slug) do update set name=excluded.name returning *`, [tko_id, tko_actor.tenantId, tko_input.name.trim(), tko_slug(tko_input.slug), tko_input.visibility]);
+      const tko_space = this.tko_space(tko_result.rows[0]);
+      await this.tko_emit(tko_client, tko_actor, "work.space_created.v1", "work.space", { spaceId: tko_space.id, name: tko_space.name }, "work.space.created", "space", tko_space.id, tko_input.correlationId);
+      return tko_space;
+    });
+  }
+
+  async listSpaces(tko_tenantId: string): Promise<WorkSpace[]> {
+    return this.tko_read(tko_tenantId, async tko_client => (await tko_client.query(`select * from spaces where tenant_id=$1 and archived_at is null order by name`, [tko_tenantId])).rows.map(this.tko_space));
+  }
+
+  async createProject(tko_input: CreateProjectInput): Promise<WorkProject> {
+    return this.tko_withTransaction(tko_input.actor.tenantId, async tko_client => {
+      const tko_space = await tko_client.query(`select id from spaces where id=$1 and tenant_id=$2 and archived_at is null`, [tko_input.spaceId, tko_input.actor.tenantId]);
+      if (!tko_space.rowCount) throw new Error("WORK_SPACE_NOT_FOUND");
+      const tko_key = tko_keyOf(tko_input.key);
+      const tko_workflowId = crypto.randomUUID();
+      const tko_projectId = crypto.randomUUID();
+      await tko_client.query(`insert into workflows (id,tenant_id,name) values ($1,$2,$3)`, [tko_workflowId, tko_input.actor.tenantId, `${tko_input.name.trim()} workflow`]);
+      for (const [tko_name, tko_category, tko_color, tko_order] of tko_statusBlueprint) {
+        await tko_client.query(`insert into workflow_statuses (id,tenant_id,workflow_id,name,category,color_token,sort_order) values ($1,$2,$3,$4,$5,$6,$7)`, [crypto.randomUUID(), tko_input.actor.tenantId, tko_workflowId, tko_name, tko_category, tko_color, tko_order]);
+      }
+      const tko_result = await tko_client.query(`insert into projects (id,tenant_id,space_id,key,name,description,owner_member_id,visibility,methodology,workflow_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`, [tko_projectId, tko_input.actor.tenantId, tko_input.spaceId, tko_key, tko_input.name.trim(), tko_input.description?.trim() ?? "", tko_input.actor.memberId, tko_input.visibility, tko_input.methodology, tko_workflowId]);
+      for (const [tko_name, tko_category, tko_icon] of tko_typeBlueprint) {
+        await tko_client.query(`insert into work_types (id,tenant_id,project_id,name,category,icon) values ($1,$2,$3,$4,$5,$6)`, [crypto.randomUUID(), tko_input.actor.tenantId, tko_projectId, tko_name, tko_category, tko_icon]);
+      }
+      const tko_project = this.tko_project(tko_result.rows[0]);
+      await this.tko_emit(tko_client, tko_input.actor, "work.project_created.v1", "work.project", { projectId: tko_project.id, key: tko_project.key, methodology: tko_project.methodology }, "work.project.created", "project", tko_project.id, tko_input.correlationId);
+      return tko_project;
+    });
+  }
+
+  async listProjects(tko_tenantId: string): Promise<WorkProject[]> { return this.tko_read(tko_tenantId, async c => (await c.query(`select * from projects where tenant_id=$1 and archived_at is null order by name`, [tko_tenantId])).rows.map(this.tko_project)); }
+  async getProject(tko_tenantId: string, tko_projectId: string): Promise<WorkProject | null> { return this.tko_read(tko_tenantId, async c => { const r = await c.query(`select * from projects where tenant_id=$1 and id=$2`, [tko_tenantId, tko_projectId]); return r.rowCount ? this.tko_project(r.rows[0]) : null; }); }
+  async listStatuses(tko_tenantId: string, tko_workflowId: string): Promise<WorkflowStatus[]> { return this.tko_read(tko_tenantId, async c => (await c.query(`select * from workflow_statuses where tenant_id=$1 and workflow_id=$2 order by sort_order`, [tko_tenantId, tko_workflowId])).rows.map(this.tko_status)); }
+  async listWorkTypes(tko_tenantId: string, tko_projectId: string): Promise<WorkType[]> { return this.tko_read(tko_tenantId, async c => (await c.query(`select * from work_types where tenant_id=$1 and (project_id is null or project_id=$2) order by name`, [tko_tenantId, tko_projectId])).rows.map(this.tko_type)); }
+
+  async createCustomField(tko_actor: PlatformActor, tko_input: { projectId: string; name: string; fieldType: WorkCustomFieldType; config?: Record<string, unknown>; correlationId: string }): Promise<WorkCustomFieldDefinition> { return this.tko_withTransaction(tko_actor.tenantId, async c => { const p = await c.query(`select id from projects where id=$1 and tenant_id=$2`, [tko_input.projectId, tko_actor.tenantId]); if (!p.rowCount) throw new Error("WORK_PROJECT_NOT_FOUND"); const r = await c.query(`insert into custom_field_definitions (id,tenant_id,scope_type,scope_id,name,field_type,config_json) values ($1,$2,'project',$3,$4,$5,$6::jsonb) returning *`, [crypto.randomUUID(), tko_actor.tenantId, tko_input.projectId, tko_input.name.trim(), tko_input.fieldType, JSON.stringify(tko_input.config ?? {})]); const field = this.tko_customField(r.rows[0]); await this.tko_emit(c,tko_actor,"work.custom_field_created.v1","work.project",{projectId:field.projectId,fieldId:field.id,fieldType:field.fieldType},"work.custom_field.created","custom_field",field.id,tko_input.correlationId); return field; }); }
+  async listCustomFields(tko_tenantId: string, tko_projectId: string): Promise<WorkCustomFieldDefinition[]> { return this.tko_read(tko_tenantId, async c => (await c.query(`select * from custom_field_definitions where tenant_id=$1 and scope_type='project' and scope_id=$2 order by created_at`, [tko_tenantId,tko_projectId])).rows.map(this.tko_customField)); }
+  async setCustomFieldValue(tko_actor: PlatformActor, tko_input: { workItemId: string; fieldId: string; value: unknown; correlationId: string }): Promise<WorkCustomFieldValue> { return this.tko_withTransaction(tko_actor.tenantId, async c => { const item = await c.query(`select project_id from work_items where id=$1 and tenant_id=$2`,[tko_input.workItemId,tko_actor.tenantId]); const field = await c.query(`select * from custom_field_definitions where id=$1 and tenant_id=$2`,[tko_input.fieldId,tko_actor.tenantId]); if (!item.rowCount || !field.rowCount || String(field.rows[0].scope_id) !== String(item.rows[0].project_id)) throw new Error("WORK_CUSTOM_FIELD_NOT_FOUND"); const before = await c.query(`select value_json from custom_field_values where tenant_id=$1 and field_id=$2 and entity_type='work_item' and entity_id=$3`,[tko_actor.tenantId,tko_input.fieldId,tko_input.workItemId]); await c.query(`insert into custom_field_values (tenant_id,field_id,entity_type,entity_id,value_json) values ($1,$2,'work_item',$3,$4::jsonb) on conflict (field_id,entity_type,entity_id) do update set value_json=excluded.value_json`,[tko_actor.tenantId,tko_input.fieldId,tko_input.workItemId,JSON.stringify(tko_input.value)]); const value: WorkCustomFieldValue = {id:`${tko_input.fieldId}:${tko_input.workItemId}`,tenantId:tko_actor.tenantId,type:"custom_field_value",fieldId:tko_input.fieldId,workItemId:tko_input.workItemId,value:tko_input.value}; await this.tko_history(c,tko_actor,tko_input.workItemId,`custom:${tko_input.fieldId}`,before.rowCount ? before.rows[0].value_json : null,tko_input.value); await this.tko_emit(c,tko_actor,"work.custom_field_value_set.v1","work.item",{workItemId:tko_input.workItemId,fieldId:tko_input.fieldId},"work.custom_field.value_set","work_item",tko_input.workItemId,tko_input.correlationId); return value; }); }
+  async listCustomFieldValues(tko_tenantId: string, tko_workItemId: string): Promise<WorkCustomFieldValue[]> { return this.tko_read(tko_tenantId, async c => (await c.query(`select field_id,entity_id,value_json from custom_field_values where tenant_id=$1 and entity_type='work_item' and entity_id=$2 order by field_id`,[tko_tenantId,tko_workItemId])).rows.map(r => ({id:`${String(r.field_id)}:${String(r.entity_id)}`,tenantId:tko_tenantId,type:"custom_field_value",fieldId:String(r.field_id),workItemId:String(r.entity_id),value:r.value_json}))); }
+
+  async createWorkItem(tko_input: CreateWorkItemInput): Promise<WorkItem> {
+    return this.tko_withTransaction(tko_input.actor.tenantId, async c => {
+      const p = await c.query(`select * from projects where id=$1 and tenant_id=$2 and archived_at is null for update`, [tko_input.projectId, tko_input.actor.tenantId]);
+      if (!p.rowCount) throw new Error("WORK_PROJECT_NOT_FOUND");
+      const project = this.tko_project(p.rows[0]);
+      const s = await c.query(`select * from workflow_statuses where tenant_id=$1 and workflow_id=$2 and category='todo' limit 1`, [tko_input.actor.tenantId, project.workflowId]);
+      const types = await c.query(`select * from work_types where tenant_id=$1 and (project_id is null or project_id=$2) and ${tko_input.workTypeId ? "id=$3" : "category='task'"} limit 1`, tko_input.workTypeId ? [tko_input.actor.tenantId, project.id, tko_input.workTypeId] : [tko_input.actor.tenantId, project.id]);
+      if (!s.rowCount) throw new Error("WORKFLOW_INITIAL_STATUS_MISSING");
+      if (!types.rowCount) throw new Error("WORK_TYPE_NOT_FOUND");
+      if (tko_input.parentId) { const parent = await c.query(`select id from work_items where id=$1 and tenant_id=$2 and project_id=$3`, [tko_input.parentId, tko_input.actor.tenantId, project.id]); if (!parent.rowCount) throw new Error("WORK_PARENT_INVALID"); }
+      const next = project.sequenceCounter + 1;
+      await c.query(`update projects set sequence_counter=$1,updated_at=now() where id=$2`, [next, project.id]);
+      const id = crypto.randomUUID();
+      const r = await c.query(`insert into work_items (id,tenant_id,project_id,sequence_no,work_type_id,parent_id,workflow_id,status_id,title,description_text,priority,reporter_member_id,start_at,due_at,estimate_minutes,rank) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning *`, [id,tko_input.actor.tenantId,project.id,next,types.rows[0].id,tko_input.parentId ?? null,project.workflowId,s.rows[0].id,tko_input.title.trim(),tko_input.description?.trim() ?? "",tko_input.priority ?? "none",tko_input.actor.memberId,tko_input.startAt ?? null,tko_input.dueAt ?? null,tko_input.estimateMinutes ?? null,tko_input.rank ?? "m"]);
+      for (const memberId of Array.from(new Set(tko_input.assigneeMemberIds ?? []))) await c.query(`insert into work_item_assignees (tenant_id,work_item_id,member_id) values ($1,$2,$3) on conflict do nothing`, [tko_input.actor.tenantId,id,memberId]);
+      const item = await this.tko_item(c, r.rows[0]);
+      await this.tko_history(c, tko_input.actor, item.id, "created", null, { key: item.key, title: item.title });
+      await this.tko_emit(c,tko_input.actor,"work.work_item_created.v1","work.item",{workItemId:item.id,key:item.key,projectId:item.projectId},"work.work_item.created","work_item",item.id,tko_input.correlationId);
+      return item;
+    });
+  }
+
+  async listWorkItems(tko_tenantId: string, tko_projectId: string, tko_options: { includeArchived?: boolean } = {}): Promise<WorkItem[]> { return this.tko_read(tko_tenantId, async c => { const r = await c.query(`select * from work_items where tenant_id=$1 and project_id=$2 ${tko_options.includeArchived ? "" : "and archived_at is null"} order by rank,sequence_no`, [tko_tenantId,tko_projectId]); return Promise.all(r.rows.map(row => this.tko_item(c,row))); }); }
+  async getWorkItem(tko_tenantId: string, tko_workItemId: string): Promise<WorkItem | null> { return this.tko_read(tko_tenantId, async c => { const r=await c.query(`select * from work_items where tenant_id=$1 and id=$2`,[tko_tenantId,tko_workItemId]); return r.rowCount ? this.tko_item(c,r.rows[0]) : null; }); }
+
+  async transitionWorkItem(tko_input: { actor: PlatformActor; workItemId: string; targetStatusId: string; expectedVersion: number; correlationId: string }): Promise<WorkItem> { return this.tko_withTransaction(tko_input.actor.tenantId, async c => { const r=await c.query(`select * from work_items where id=$1 and tenant_id=$2 for update`,[tko_input.workItemId,tko_input.actor.tenantId]); if(!r.rowCount) throw new Error("WORK_ITEM_NOT_FOUND"); const current=await this.tko_item(c,r.rows[0]); if(current.version!==tko_input.expectedVersion) throw new Error("WORK_ITEM_VERSION_CONFLICT"); const target=await c.query(`select * from workflow_statuses where id=$1 and tenant_id=$2 and workflow_id=$3`,[tko_input.targetStatusId,tko_input.actor.tenantId,current.workflowId]); if(!target.rowCount) throw new Error("WORK_ITEM_TRANSITION_NOT_ALLOWED"); const updated=await c.query(`update work_items set status_id=$1,version=version+1,updated_at=now(),completed_at=case when $2='done' then now() else null end where id=$3 returning *`,[tko_input.targetStatusId,target.rows[0].category,current.id]); const item=await this.tko_item(c,updated.rows[0]); await this.tko_history(c,tko_input.actor,item.id,"status_id",current.statusId,item.statusId); await this.tko_emit(c,tko_input.actor,"work.work_item_status_changed.v1","work.item",{workItemId:item.id,key:item.key,beforeStatusId:current.statusId,afterStatusId:item.statusId,version:item.version},"work.work_item.status_changed","work_item",item.id,tko_input.correlationId); return item; }); }
+
+  async createComment(tko_input: CreateCommentInput): Promise<WorkComment> { return this.tko_withTransaction(tko_input.actor.tenantId, async c => { const item=await c.query(`select id from work_items where id=$1 and tenant_id=$2`,[tko_input.workItemId,tko_input.actor.tenantId]); if(!item.rowCount) throw new Error("WORK_ITEM_NOT_FOUND"); const r=await c.query(`insert into work_comments (id,tenant_id,work_item_id,author_member_id,body_text) values ($1,$2,$3,$4,$5) returning *`,[crypto.randomUUID(),tko_input.actor.tenantId,tko_input.workItemId,tko_input.actor.memberId,tko_input.body.trim()]); const comment=this.tko_comment(r.rows[0]); await this.tko_emit(c,tko_input.actor,"work.comment_created.v1","work.item",{workItemId:tko_input.workItemId,commentId:comment.id},"work.comment.created","work_comment",comment.id,tko_input.correlationId); return comment; }); }
+  async listComments(tko_tenantId: string,tko_workItemId:string):Promise<WorkComment[]>{return this.tko_read(tko_tenantId,async c=>(await c.query(`select * from work_comments where tenant_id=$1 and work_item_id=$2 and deleted_at is null order by created_at`,[tko_tenantId,tko_workItemId])).rows.map(this.tko_comment));}
+
+  async addDependency(tko_actor: PlatformActor,tko_input:{sourceWorkItemId:string;targetWorkItemId:string;relationType:WorkItemRelationType;correlationId:string}):Promise<void>{await this.tko_withTransaction(tko_actor.tenantId,async c=>{const r=await c.query(`select id,project_id from work_items where tenant_id=$1 and id=any($2::uuid[])`,[tko_actor.tenantId,[tko_input.sourceWorkItemId,tko_input.targetWorkItemId]]);if(r.rowCount!==2||tko_input.sourceWorkItemId===tko_input.targetWorkItemId)throw new Error("WORK_RELATION_INVALID");const id=crypto.randomUUID();await c.query(`insert into work_item_relations (id,tenant_id,source_work_item_id,target_work_item_id,relation_type,created_by_member_id) values ($1,$2,$3,$4,$5,$6) on conflict do nothing`,[id,tko_actor.tenantId,tko_input.sourceWorkItemId,tko_input.targetWorkItemId,tko_input.relationType,tko_actor.memberId]);await this.tko_emit(c,tko_actor,"work.work_item_relation_created.v1","work.item",{sourceWorkItemId:tko_input.sourceWorkItemId,targetWorkItemId:tko_input.targetWorkItemId,relationType:tko_input.relationType},"work.work_item.relation_created","work_item_relation",id,tko_input.correlationId);});}
+
+  async createSprint(tko_input: CreateSprintInput):Promise<WorkSprint>{return this.tko_withTransaction(tko_input.actor.tenantId,async c=>{const p=await c.query(`select * from projects where id=$1 and tenant_id=$2 and methodology='scrum'`,[tko_input.projectId,tko_input.actor.tenantId]);if(!p.rowCount)throw new Error("WORK_SPRINT_PROJECT_INVALID");const r=await c.query(`insert into sprints (id,tenant_id,project_id,name,goal,start_at,end_at) values ($1,$2,$3,$4,$5,$6,$7) returning *`,[crypto.randomUUID(),tko_input.actor.tenantId,tko_input.projectId,tko_input.name.trim(),tko_input.goal?.trim()??"",tko_input.startAt??null,tko_input.endAt??null]);const sprint=this.tko_sprint(r.rows[0]);await this.tko_emit(c,tko_input.actor,"work.sprint_created.v1","work.sprint",{sprintId:sprint.id,projectId:sprint.projectId},"work.sprint.created","sprint",sprint.id,tko_input.correlationId);return sprint;});}
+  async addItemsToSprint(tko_actor:PlatformActor,tko_input:{sprintId:string;workItemIds:string[];correlationId:string}):Promise<void>{await this.tko_withTransaction(tko_actor.tenantId,async c=>{const s=await c.query(`select * from sprints where id=$1 and tenant_id=$2 and state<>'completed'`,[tko_input.sprintId,tko_actor.tenantId]);if(!s.rowCount)throw new Error("WORK_SPRINT_NOT_FOUND");const items=await c.query(`select id from work_items where tenant_id=$1 and project_id=$2 and id=any($3::uuid[])`,[tko_actor.tenantId,s.rows[0].project_id,tko_input.workItemIds]);if(items.rowCount!==tko_input.workItemIds.length)throw new Error("WORK_SPRINT_ITEM_INVALID");for(const id of tko_input.workItemIds)await c.query(`insert into sprint_items (tenant_id,sprint_id,work_item_id) values ($1,$2,$3) on conflict do nothing`,[tko_actor.tenantId,tko_input.sprintId,id]);await c.query(`update work_items set sprint_id=$1,updated_at=now() where tenant_id=$2 and id=any($3::uuid[])`,[tko_input.sprintId,tko_actor.tenantId,tko_input.workItemIds]);await this.tko_emit(c,tko_actor,"work.sprint_items_added.v1","work.sprint",{sprintId:tko_input.sprintId,workItemIds:tko_input.workItemIds},"work.sprint.items_added","sprint",tko_input.sprintId,tko_input.correlationId);});}
+  async completeSprint(tko_actor:PlatformActor,tko_input:{sprintId:string;incompleteDisposition:"backlog"|"next_sprint";correlationId:string}):Promise<WorkSprint>{return this.tko_withTransaction(tko_actor.tenantId,async c=>{const r=await c.query(`update sprints set state='completed',updated_at=now() where id=$1 and tenant_id=$2 and state<>'completed' returning *`,[tko_input.sprintId,tko_actor.tenantId]);if(!r.rowCount)throw new Error("WORK_SPRINT_NOT_FOUND");if(tko_input.incompleteDisposition==="backlog")await c.query(`update work_items set sprint_id=null,updated_at=now() where tenant_id=$1 and sprint_id=$2 and status_id not in (select id from workflow_statuses where tenant_id=$1 and category='done')`,[tko_actor.tenantId,tko_input.sprintId]);const sprint=this.tko_sprint(r.rows[0]);await this.tko_emit(c,tko_actor,"work.sprint_completed.v1","work.sprint",{sprintId:sprint.id,incompleteDisposition:tko_input.incompleteDisposition},"work.sprint.completed","sprint",sprint.id,tko_input.correlationId);return sprint;});}
+  async listSprints(tko_tenantId:string,tko_projectId:string):Promise<WorkSprint[]>{return this.tko_read(tko_tenantId,async c=>(await c.query(`select * from sprints where tenant_id=$1 and project_id=$2 order by created_at desc`,[tko_tenantId,tko_projectId])).rows.map(this.tko_sprint));}
+
+  async saveView(tko_actor:PlatformActor,tko_input:Omit<WorkSavedView,"id"|"tenantId"|"ownerMemberId">&{correlationId:string}):Promise<WorkSavedView>{return this.tko_withTransaction(tko_actor.tenantId,async c=>{const id=crypto.randomUUID();const r=await c.query(`insert into saved_views (id,tenant_id,owner_member_id,project_id,renderer,name,filter_json,layout_json,visibility) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9) returning *`,[id,tko_actor.tenantId,tko_actor.memberId,tko_input.projectId,tko_input.renderer,tko_input.name,JSON.stringify(tko_input.filter),JSON.stringify(tko_input.layout),tko_input.visibility]);const view=this.tko_view(r.rows[0]);await this.tko_emit(c,tko_actor,"work.saved_view_created.v1","work.view",{viewId:view.id,projectId:view.projectId,renderer:view.renderer},"work.saved_view.created","saved_view",view.id,tko_input.correlationId);return view;});}
+  async listViews(tko_tenantId:string,tko_projectId:string,tko_memberId:string):Promise<WorkSavedView[]>{return this.tko_read(tko_tenantId,async c=>(await c.query(`select * from saved_views where tenant_id=$1 and project_id=$2 and (visibility='workspace' or owner_member_id=$3) order by created_at`,[tko_tenantId,tko_projectId,tko_memberId])).rows.map(this.tko_view));}
+  async listHistory(tko_tenantId:string,tko_workItemId:string):Promise<WorkHistoryEntry[]>{return this.tko_read(tko_tenantId,async c=>(await c.query(`select * from work_item_history where tenant_id=$1 and work_item_id=$2 order by created_at`,[tko_tenantId,tko_workItemId])).rows.map(this.tko_historyRow));}
+
+  async seedDemoWork(tko_actor:PlatformActor):Promise<WorkBoardData>{const existing=(await this.listProjects(tko_actor.tenantId))[0];if(existing)return this.tko_board(tko_actor.tenantId,existing.id);const space=await this.createSpace(tko_actor,{name:"Product",slug:"product",visibility:"internal",correlationId:tko_actor.correlationId});const project=await this.createProject({actor:tko_actor,spaceId:space.id,name:"Tasko Work Alpha",key:"TASKO",description:"M1 pilot workspace",methodology:"scrum",visibility:"internal",correlationId:tko_actor.correlationId});const items=await Promise.all([this.createWorkItem({actor:tko_actor,projectId:project.id,title:"Define sprint objective",priority:"high",estimateMinutes:120,correlationId:tko_actor.correlationId}),this.createWorkItem({actor:tko_actor,projectId:project.id,title:"Ship project board",priority:"urgent",estimateMinutes:480,correlationId:tko_actor.correlationId}),this.createWorkItem({actor:tko_actor,projectId:project.id,title:"Confirm tenant isolation tests",priority:"high",estimateMinutes:180,correlationId:tko_actor.correlationId})]);const statuses=await this.listStatuses(tko_actor.tenantId,project.workflowId);await this.transitionWorkItem({actor:tko_actor,workItemId:items[1].id,targetStatusId:statuses[1].id,expectedVersion:1,correlationId:tko_actor.correlationId});await this.transitionWorkItem({actor:tko_actor,workItemId:items[2].id,targetStatusId:statuses[2].id,expectedVersion:1,correlationId:tko_actor.correlationId});const sprint=await this.createSprint({actor:tko_actor,projectId:project.id,name:"Sprint 1",goal:"Establish the Work Alpha operating loop",correlationId:tko_actor.correlationId});await this.addItemsToSprint(tko_actor,{sprintId:sprint.id,workItemIds:items.map(i=>i.id),correlationId:tko_actor.correlationId});return this.tko_board(tko_actor.tenantId,project.id);}
+
+  private async tko_board(t:string,p:string):Promise<WorkBoardData>{const project=await this.getProject(t,p);if(!project)throw new Error("WORK_PROJECT_NOT_FOUND");return {project,statuses:await this.listStatuses(t,project.workflowId),items:await this.listWorkItems(t,p)};}
+  private async tko_read<T>(tenantId:string,fn:(c:PoolClient)=>Promise<T>):Promise<T>{return this.tko_withTransaction(tenantId,fn);}
+  private async tko_withTransaction<T>(tenantId:string,fn:(c:PoolClient)=>Promise<T>):Promise<T>{const c=await this.tko_pool.connect();try{await c.query("begin");await c.query(`select set_config('app.tenant_id',$1,true)`,[tenantId]);const value=await fn(c);await c.query("commit");return value;}catch(error){await c.query("rollback");throw error;}finally{c.release();}}
+  private async tko_emit(c:PoolClient,actor:PlatformActor,eventType:string,topic:string,payload:Record<string,unknown>,action:string,resourceType:string,resourceId:string,correlationId:string){await c.query(`insert into audit_logs (id,tenant_id,actor_auth_subject,action,resource_type,resource_id,correlation_id,metadata_json) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,[crypto.randomUUID(),actor.tenantId,actor.authSubject,action,resourceType,resourceId,correlationId,JSON.stringify(payload)]);await c.query(`insert into outbox (id,event_id,tenant_id,topic,event_type,payload_json,actor_auth_subject,correlation_id) values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`,[crypto.randomUUID(),crypto.randomUUID(),actor.tenantId,topic,eventType,JSON.stringify(payload),actor.authSubject,correlationId]);}
+  private async tko_history(c:PoolClient,actor:PlatformActor,workItemId:string,field:string,before:unknown,after:unknown){await c.query(`insert into work_item_history (id,tenant_id,work_item_id,actor_member_id,field_name,before_json,after_json) values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)`,[crypto.randomUUID(),actor.tenantId,workItemId,actor.memberId,field,JSON.stringify(before),JSON.stringify(after)]);}
+  private tko_space=(r:Row):WorkSpace=>({id:String(r.id),tenantId:String(r.tenant_id),type:"space",name:String(r.name),slug:String(r.slug),visibility:r.visibility as WorkSpace["visibility"],archivedAt:tko_date(r.archived_at)});
+  private tko_project=(r:Row):WorkProject=>({id:String(r.id),tenantId:String(r.tenant_id),type:"project",spaceId:String(r.space_id),key:String(r.key),name:String(r.name),description:String(r.description),ownerMemberId:String(r.owner_member_id),visibility:r.visibility as WorkProject["visibility"],methodology:r.methodology as WorkProject["methodology"],workflowId:String(r.workflow_id),sequenceCounter:Number(r.sequence_counter),archivedAt:tko_date(r.archived_at)});
+  private tko_status=(r:Row):WorkflowStatus=>({id:String(r.id),tenantId:String(r.tenant_id),type:"workflow_status",workflowId:String(r.workflow_id),name:String(r.name),category:r.category as WorkflowStatus["category"],colorToken:String(r.color_token),sortOrder:Number(r.sort_order)});
+  private tko_type=(r:Row):WorkType=>({id:String(r.id),tenantId:String(r.tenant_id),type:"work_type",projectId:r.project_id?String(r.project_id):null,name:String(r.name),category:r.category as WorkType["category"],icon:String(r.icon)});
+  private async tko_item(c:PoolClient,r:Row):Promise<WorkItem>{const [a,p]=await Promise.all([c.query(`select member_id from work_item_assignees where tenant_id=$1 and work_item_id=$2`,[r.tenant_id,r.id]),c.query(`select key from projects where tenant_id=$1 and id=$2`,[r.tenant_id,r.project_id])]);const projectKey=String(p.rows[0]?.key??"");return {id:String(r.id),tenantId:String(r.tenant_id),type:"work_item",projectId:String(r.project_id),sequenceNo:Number(r.sequence_no),key:`${projectKey}-${Number(r.sequence_no)}`,workTypeId:String(r.work_type_id),parentId:r.parent_id?String(r.parent_id):null,workflowId:String(r.workflow_id),statusId:String(r.status_id),title:String(r.title),description:String(r.description_text),priority:r.priority as WorkItem["priority"],reporterMemberId:String(r.reporter_member_id),assigneeMemberIds:a.rows.map(x=>String(x.member_id)),startAt:tko_date(r.start_at),dueAt:tko_date(r.due_at),estimateMinutes:r.estimate_minutes===null?null:Number(r.estimate_minutes),rank:String(r.rank),sprintId:r.sprint_id?String(r.sprint_id):null,version:Number(r.version),completedAt:tko_date(r.completed_at),archivedAt:tko_date(r.archived_at),createdAt:new Date(String(r.created_at)),updatedAt:new Date(String(r.updated_at))};}
+  private tko_comment=(r:Row):WorkComment=>({id:String(r.id),tenantId:String(r.tenant_id),type:"work_comment",workItemId:String(r.work_item_id),authorMemberId:String(r.author_member_id),body:String(r.body_text),createdAt:new Date(String(r.created_at)),editedAt:tko_date(r.edited_at),deletedAt:tko_date(r.deleted_at)});
+  private tko_sprint=(r:Row):WorkSprint=>({id:String(r.id),tenantId:String(r.tenant_id),type:"sprint",projectId:String(r.project_id),name:String(r.name),goal:String(r.goal),state:r.state as WorkSprint["state"],startAt:tko_date(r.start_at),endAt:tko_date(r.end_at)});
+  private tko_view=(r:Row):WorkSavedView=>({id:String(r.id),tenantId:String(r.tenant_id),ownerMemberId:String(r.owner_member_id),projectId:String(r.project_id),name:String(r.name),renderer:r.renderer as WorkSavedView["renderer"],visibility:r.visibility as WorkSavedView["visibility"],filter:tko_json(r.filter_json),layout:tko_json(r.layout_json)});
+  private tko_customField=(r:Row):WorkCustomFieldDefinition=>({id:String(r.id),tenantId:String(r.tenant_id),type:"custom_field",projectId:String(r.scope_id),name:String(r.name),fieldType:r.field_type as WorkCustomFieldType,config:tko_json(r.config_json),createdAt:new Date(String(r.created_at))});
+  private tko_historyRow=(r:Row):WorkHistoryEntry=>({id:String(r.id),tenantId:String(r.tenant_id),type:"work_history",workItemId:String(r.work_item_id),actorMemberId:String(r.actor_member_id),field:String(r.field_name),before:r.before_json,after:r.after_json,createdAt:new Date(String(r.created_at))});
+}
+
+function tko_slug(value:string){return value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"")||"space";}
+function tko_keyOf(value:string){const key=value.toUpperCase().replace(/[^A-Z0-9]/g,"");if(key.length<2||key.length>10)throw new Error("WORK_PROJECT_KEY_INVALID");return key;}

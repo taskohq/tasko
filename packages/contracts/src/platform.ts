@@ -15,7 +15,21 @@ export type Capability =
   | "attachment.download"
   | "realtime.connect"
   | "job.enqueue"
-  | "job.process";
+  | "job.process"
+  | "work.space.read"
+  | "work.space.manage"
+  | "work.project.read"
+  | "work.project.manage"
+  | "work.item.read"
+  | "work.item.create"
+  | "work.item.update"
+  | "work.item.transition"
+  | "work.item.archive"
+  | "work.comment.create"
+  | "work.comment.moderate"
+  | "work.sprint.manage"
+  | "work.view.manage"
+  | "work.custom_field.manage";
 
 export interface Tenant {
   id: string;

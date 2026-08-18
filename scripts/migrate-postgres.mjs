@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import pg from "pg";
 
@@ -8,10 +9,16 @@ if (!tko_connectionString) {
 }
 
 const tko_pool = new pg.Pool({ connectionString: tko_connectionString });
-const tko_sql = await readFile(resolve("packages/database/migrations/0001_platform_skeleton.sql"), "utf8");
+const tko_migrationsDir = resolve("packages/database/migrations");
+const tko_migrationFiles = (await readdir(tko_migrationsDir))
+  .filter(tko_file => /^\d+_.+\.sql$/.test(tko_file))
+  .sort();
 try {
-  await tko_pool.query(tko_sql);
-  console.log("Tasko PostgreSQL platform migration applied.");
+  for (const tko_file of tko_migrationFiles) {
+    const tko_sql = await readFile(resolve(tko_migrationsDir, tko_file), "utf8");
+    await tko_pool.query(tko_sql);
+    console.log(`Tasko migration applied: ${tko_file}`);
+  }
 } finally {
   await tko_pool.end();
 }

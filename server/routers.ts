@@ -8,6 +8,8 @@ import { can } from "../modules/permissions/src/authorization";
 import { enqueueDurableEvent } from "../modules/events/src/outbox-service";
 import { recordAuthenticationEvent } from "../modules/audit/src/audit-service";
 import { changeMemberRole } from "../modules/tenancy/src/membership-service";
+import * as workService from "../modules/work/src/work-service";
+import { getWorkStore } from "../packages/database/src/work-store";
 import { z } from "zod";
 
 export const appRouter = router({
@@ -128,6 +130,29 @@ export const appRouter = router({
       }
       return getPlatformStore().seedDemoWorkspace({ ownerAuthSubject: ctx.user.openId });
     }),
+  }),
+
+  work: router({
+    spaces: tenantProcedure.query(({ ctx }) => getWorkStore().listSpaces(ctx.platform.actor.tenantId)),
+    projects: tenantProcedure.query(({ ctx }) => getWorkStore().listProjects(ctx.platform.actor.tenantId)),
+    board: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.board(ctx.platform.actor, input.projectId)),
+    item: tenantProcedure.input(z.object({ workItemId: z.string().uuid() })).query(async ({ ctx, input }) => {
+      return workService.itemDetails(ctx.platform.actor, input.workItemId);
+    }),
+    customFields: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.customFields(ctx.platform.actor, input.projectId)),
+    createSpace: tenantProcedure.input(z.object({ name: z.string().trim().min(2).max(120), slug: z.string().trim().min(2).max(80), visibility: z.enum(["internal", "private", "guest_shared"]).default("internal") })).mutation(({ ctx, input }) => workService.createSpace(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    createProject: tenantProcedure.input(z.object({ spaceId: z.string().uuid(), name: z.string().trim().min(2).max(160), key: z.string().trim().min(2).max(10), description: z.string().max(10_000).optional(), methodology: z.enum(["kanban", "scrum", "simple"]).default("kanban"), visibility: z.enum(["internal", "private", "guest_shared"]).default("internal") })).mutation(({ ctx, input }) => workService.createProject({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
+    createItem: tenantProcedure.input(z.object({ projectId: z.string().uuid(), workTypeId: z.string().uuid().optional(), parentId: z.string().uuid().nullable().optional(), title: z.string().trim().min(1).max(500), description: z.string().max(50_000).optional(), priority: z.enum(["none", "low", "medium", "high", "urgent"]).default("none"), assigneeMemberIds: z.array(z.string().uuid()).max(50).default([]), startAt: z.date().nullable().optional(), dueAt: z.date().nullable().optional(), estimateMinutes: z.number().int().min(0).max(1_000_000).nullable().optional(), rank: z.string().min(1).max(80).optional() })).mutation(({ ctx, input }) => workService.createWorkItem({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
+    transitionItem: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), targetStatusId: z.string().uuid(), expectedVersion: z.number().int().positive() })).mutation(({ ctx, input }) => workService.transitionWorkItem({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
+    createComment: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), body: z.string().trim().min(1).max(20_000) })).mutation(({ ctx, input }) => workService.createComment({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
+    addDependency: tenantProcedure.input(z.object({ sourceWorkItemId: z.string().uuid(), targetWorkItemId: z.string().uuid(), relationType: z.enum(["blocks", "blocked_by", "relates_to", "duplicates", "duplicated_by"]) })).mutation(({ ctx, input }) => workService.addDependency(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    createSprint: tenantProcedure.input(z.object({ projectId: z.string().uuid(), name: z.string().trim().min(1).max(120), goal: z.string().max(5_000).optional(), startAt: z.date().nullable().optional(), endAt: z.date().nullable().optional() })).mutation(({ ctx, input }) => workService.createSprint({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
+    addItemsToSprint: tenantProcedure.input(z.object({ sprintId: z.string().uuid(), workItemIds: z.array(z.string().uuid()).min(1).max(500) })).mutation(({ ctx, input }) => workService.addItemsToSprint(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    completeSprint: tenantProcedure.input(z.object({ sprintId: z.string().uuid(), incompleteDisposition: z.enum(["backlog", "next_sprint"]).default("backlog") })).mutation(({ ctx, input }) => workService.completeSprint(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    createCustomField: tenantProcedure.input(z.object({ projectId: z.string().uuid(), name: z.string().trim().min(1).max(120), fieldType: z.enum(["text", "long_text", "number", "boolean", "date", "datetime", "single_select", "multi_select", "user", "url", "email"]), config: z.record(z.string(), z.unknown()).optional() })).mutation(({ ctx, input }) => workService.createCustomField(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    setCustomFieldValue: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), fieldId: z.string().uuid(), value: z.unknown() })).mutation(({ ctx, input }) => workService.setCustomFieldValue(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    saveView: tenantProcedure.input(z.object({ projectId: z.string().uuid(), name: z.string().trim().min(1).max(120), renderer: z.enum(["list", "board", "calendar", "timeline"]), visibility: z.enum(["private", "workspace"]).default("private"), filter: z.record(z.string(), z.unknown()).default({}), layout: z.record(z.string(), z.unknown()).default({}) })).mutation(({ ctx, input }) => workService.saveView(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    seedDemo: tenantProcedure.mutation(({ ctx }) => workService.seedWorkDemo(ctx.platform.actor)),
   }),
 
   // TODO: add feature routers here, e.g.
