@@ -15,10 +15,11 @@
 - [x] Xây dựng giao diện skeleton Tasko để kiểm tra session, profile và platform status.
 - [x] Viết automated tests cho tenant isolation, authorization negative cases và outbox flow.
 - [x] Viết hướng dẫn local development, migrations, seed, worker và deployment profiles.
-- [ ] Chạy typecheck, test, build và kiểm tra trực quan trước bàn giao.
-- [ ] Áp dụng authorization tập trung cho service identity và background job, kèm negative tests.
-- [ ] Ghi audit events thực tế cho authentication, membership và thay đổi role.
-- [ ] Mở rộng Redis abstraction cho cache, rate limiting, distributed lock và queue coordination.
-- [ ] Mở rộng seed để tạo owner, admin, member, guest và dữ liệu tenant mẫu.
-- [ ] Bổ sung tests xác minh các hạng mục nền tảng còn thiếu và isolation của seed data.
-- [ ] Khởi tạo/xác minh repository Git cục bộ và commit mốc nền tảng M0 theo tính năng.
+- [x] Chạy typecheck, test, build và kiểm tra trực quan trước bàn giao.
+- [x] Áp dụng authorization tập trung cho service identity và background job, kèm negative tests.
+- [x] Ghi audit events thực tế cho authentication, membership và thay đổi role.
+- [x] Mở rộng Redis abstraction cho cache, rate limiting, distributed lock và queue coordination.
+- [x] Mở rộng seed để tạo owner, admin, member, guest và dữ liệu tenant mẫu.
+- [x] Bổ sung tests xác minh các hạng mục nền tảng còn thiếu và isolation của seed data.
+- [x] Khởi tạo/xác minh repository Git cục bộ và commit mốc nền tảng M0 theo tính năng.
+- [x] Tạo và xác nhận các commit Git riêng cho các hạng mục M0 còn lại (audit/membership, Redis utilities, seed, tests và verification).
