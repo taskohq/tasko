@@ -25,7 +25,7 @@
 - [x] Tạo và xác nhận các commit Git riêng cho các hạng mục M0 còn lại (audit/membership, Redis utilities, seed, tests và verification).
 - [x] Đọc roadmap/source of truth M1 và xác định acceptance criteria trước khi triển khai.
 - [x] Triển khai M1 theo phạm vi đã được roadmap xác nhận, kèm tests, build, checkpoint và commit Git theo tính năng.
-- [ ] Tiếp tục các milestone sau M1 theo roadmap chỉ sau khi M1 đạt acceptance criteria.
+- [x] Tiếp tục các milestone sau M1 theo roadmap chỉ sau khi M1 đạt acceptance criteria.
 - [x] M1: thêm migration tenant-aware cho Spaces, Projects, workflows/statuses, WorkItems, comments, dependencies, sprints, custom fields và saved views.
 - [x] M1: xây dựng Work store/service với project template, sequence key ổn định, workflow transition, history, audit và transactional outbox nguyên tử.
 - [x] M1: áp dụng authorization và tenant isolation cho mọi truy vấn/mutation Work, gồm project-scoped authorization và negative tests.
@@ -38,3 +38,31 @@
 - [x] M1: thêm seed executable cho product team, scrum project, sprint và work items mẫu.
 - [x] M1: tạo commit Git theo hạng mục và checkpoint sau verification cuối cùng.
 - [x] M1: lưu checkpoint sau verification cuối và ghi nhận version bàn giao (`e64c581c`).
+- [x] M2: thêm schema tenant-aware cho channels, channel memberships, messages, threads, reactions, attachments, read cursors, notifications và saved messages.
+- [x] M2: xây dựng Chat store/service với deterministic channel sequence, idempotent send, thread projection, edit/delete tombstone, reactions và outbox/audit nguyên tử.
+- [x] M2: áp dụng authorization cho private channel, DMs, search và tenant-scoped realtime delivery, gồm negative tests cho leak prevention.
+- [x] M2: triển khai unread/read cursor, mention projection, notification preference và Redis presence/typing có TTL/rate limit.
+- [x] M2: mở rộng API typed cho channels, messages, threads, reactions, search và message-to-WorkItem relation.
+- [x] M2: tạo UI Chat desktop với channel rail, timeline, composer, thread inspector, notification override và Saved/Later cá nhân.
+- [x] M2: tạo seed controlled-pilot chat, chạy acceptance tests M2, build/visual verification, commit theo tính năng và checkpoint.
+- [x] M2: triển khai PostgreSQL Chat store khi cấu hình database có mặt, giữ idempotency, membership visibility, audit và outbox trong cùng transaction.
+- [x] M2: kiểm tra trực quan Chat Alpha ở desktop/mobile và sửa mọi lỗi runtime trước checkpoint.
+- [x] M2 gap: bổ sung attachment metadata tenant-aware cho message và tái sử dụng object-storage abstraction M0.
+- [x] M2 gap: triển khai mention projection/unread mention counter thật sự trong send/read flows và acceptance tests.
+- [x] M2 gap: hiển thị unread state và live presence trong Chat UI, không chỉ persistence/API.
+- [x] M2 gap: tạo các Git commits M2 theo nhóm và checkpoint sau verification cuối.
+- [ ] M2 checkpoint: lưu snapshot Collaboration Alpha sau verification cuối và ghi lại version bàn giao.
+- [x] M2 production gap: sửa migration/seed scripts nếu có lỗi import hoặc cú pháp, rồi chạy migration và seed PostgreSQL cho attachment metadata.
+- [x] M2 production gap: xác minh end-to-end attachment persistence trên PostgreSQL sau khi migration runner hoạt động.
+- [x] Dev environment: thêm Docker Compose cho PostgreSQL và Redis với volumes, health checks, network nội bộ và credentials phát triển an toàn.
+- [x] Dev environment: thêm hướng dẫn khởi động Docker, migrations, seed và cấu hình `TASKO_POSTGRES_URL`/`TASKO_REDIS_URL` cục bộ.
+- [x] Dev environment: chạy migration, seed và kiểm chứng M2 trên PostgreSQL/Redis Docker trước checkpoint.
+- [x] Dev environment gap: ghi rõ host-network là workaround riêng cho giới hạn iptables sandbox, đồng thời giữ cấu hình bridge-network mặc định cho môi trường Docker thông thường.
+- [x] M2 Docker gap: cô lập database test hoặc dọn outbox/audit seeded data để `pnpm test` chạy sạch khi cấu hình PostgreSQL/Redis Docker đang bật.
+- [x] Storage: bổ sung dịch vụ MinIO S3-compatible vào Docker Compose cho phát triển, gồm volume, health check, bucket bootstrap và endpoint cục bộ.
+- [x] Storage: cấu hình attachment storage dùng hợp đồng S3-compatible thống nhất, hỗ trợ Wasabi ở môi trường dùng và MinIO ở phát triển, không lưu bytes trong database.
+- [x] Storage: cập nhật runbook và sample environment cho MinIO/Wasabi; yêu cầu secret Wasabi chỉ khi triển khai môi trường dùng.
+- [x] Storage: kiểm chứng upload, metadata, presigned download và tenant isolation qua MinIO Docker trong acceptance tests M2.
+- [x] Storage fallback: quy định và kiểm chứng lựa chọn MinIO Docker khi Wasabi health check hoặc S3 operation thất bại, không làm rơi dữ liệu metadata hay bỏ qua authorization.
+- [x] Storage fallback gap: xác nhận runbook nêu quy trình chuyển MinIO Docker thủ công, tuyệt đối không tự động failover giữa Wasabi và MinIO sau một write thất bại.
+- [x] Storage fallback gap: chạy kiểm chứng lặp lại adapter bằng MinIO khi Wasabi không dùng được và xác nhận tenant isolation giữ nguyên.
