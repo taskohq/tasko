@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 import pg from "pg";
+import { randomUUID } from "node:crypto";
 
 const tko_connectionString = process.env.TASKO_POSTGRES_URL;
 const tko_ownerAuthSubject = process.env.OWNER_OPEN_ID;
@@ -69,6 +69,40 @@ try {
     await tko_client.query(`insert into sprints (id, tenant_id, project_id, name, goal, state) values ($1,$2,$3,'Sprint 1','Establish the Work Alpha operating loop','active')`, [tko_sprintId, tko_tenantId, tko_projectId]);
     for (const tko_itemId of tko_itemIds) await tko_client.query(`insert into sprint_items (tenant_id, sprint_id, work_item_id) values ($1,$2,$3)`, [tko_tenantId, tko_sprintId, tko_itemId]);
     await tko_client.query(`update work_items set sprint_id = $1 where tenant_id = $2 and id = any($3::uuid[])`, [tko_sprintId, tko_tenantId, tko_itemIds]);
+  }
+  const tko_pilotMembers = await tko_client.query(
+    `select tm.id, u.auth_subject from tenant_members tm join users u on u.id = tm.user_id
+     where tm.tenant_id = $1 and u.auth_subject = any($2::text[]) and tm.status = 'active'`,
+    [tko_tenantId, [tko_ownerAuthSubject, `demo-admin:${tko_tenantSlug}`, `demo-member:${tko_tenantSlug}`]],
+  );
+  const tko_productChannel = await tko_client.query(
+    `insert into channels (id, tenant_id, kind, name, topic, visibility, last_sequence)
+     values ($1, $2, 'public', 'product', 'Tasko Collaboration Alpha controlled pilot', 'internal', 2)
+     on conflict (tenant_id, name) do update set topic = excluded.topic
+     returning id`,
+    [randomUUID(), tko_tenantId],
+  );
+  const tko_channelId = tko_productChannel.rows[0].id;
+  for (const tko_member of tko_pilotMembers.rows) {
+    await tko_client.query(
+      `insert into channel_members (tenant_id, channel_id, member_id, last_read_seq)
+       values ($1, $2, $3, case when $4 = $5 then 2 else 0 end)
+       on conflict (channel_id, member_id) do nothing`,
+      [tko_tenantId, tko_channelId, tko_member.id, tko_member.auth_subject, tko_ownerAuthSubject],
+    );
+  }
+  const tko_ownerMemberId = tko_ownerMember.rows[0].id;
+  const tko_chatMessages = [
+    ["00000000-0000-4000-8000-000000000001", 1, "Welcome to the Tasko product channel. This pilot connects daily discussion to Work Alpha."],
+    ["00000000-0000-4000-8000-000000000002", 2, "Please use replies for focused decisions and link the resulting message to the matching work item."],
+  ];
+  for (const [tko_clientMessageId, tko_sequence, tko_text] of tko_chatMessages) {
+    await tko_client.query(
+      `insert into messages (id, tenant_id, channel_id, sequence, client_message_id, author_member_id, body, plain_text)
+       values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+       on conflict (channel_id, client_message_id) do nothing`,
+      [randomUUID(), tko_tenantId, tko_channelId, tko_sequence, tko_clientMessageId, tko_ownerMemberId, JSON.stringify({ type: "text", text: tko_text }), tko_text],
+    );
   }
   await tko_client.query("commit");
   console.log(`Tasko seed workspace is ready: ${tko_tenantSlug}`);

@@ -9,6 +9,7 @@ import { enqueueDurableEvent } from "../modules/events/src/outbox-service";
 import { recordAuthenticationEvent } from "../modules/audit/src/audit-service";
 import { changeMemberRole } from "../modules/tenancy/src/membership-service";
 import * as workService from "../modules/work/src/work-service";
+import * as chatService from "../modules/chat/src/chat-service";
 import { getWorkStore } from "../packages/database/src/work-store";
 import { z } from "zod";
 
@@ -153,6 +154,29 @@ export const appRouter = router({
     setCustomFieldValue: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), fieldId: z.string().uuid(), value: z.unknown() })).mutation(({ ctx, input }) => workService.setCustomFieldValue(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     saveView: tenantProcedure.input(z.object({ projectId: z.string().uuid(), name: z.string().trim().min(1).max(120), renderer: z.enum(["list", "board", "calendar", "timeline"]), visibility: z.enum(["private", "workspace"]).default("private"), filter: z.record(z.string(), z.unknown()).default({}), layout: z.record(z.string(), z.unknown()).default({}) })).mutation(({ ctx, input }) => workService.saveView(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     seedDemo: tenantProcedure.mutation(({ ctx }) => workService.seedWorkDemo(ctx.platform.actor)),
+  }),
+
+  chat: router({
+    channels: tenantProcedure.query(({ ctx }) => chatService.listChannels(ctx.platform.actor)),
+    readStates: tenantProcedure.query(({ ctx }) => chatService.readStates(ctx.platform.actor)),
+    messages: tenantProcedure.input(z.object({ channelId: z.string().uuid(), afterSequence: z.number().int().min(0).optional() })).query(({ ctx, input }) => chatService.messages(ctx.platform.actor, input.channelId, input.afterSequence)),
+    createChannel: tenantProcedure.input(z.object({ kind: z.enum(["public", "private", "dm", "group_dm"]), name: z.string().trim().min(1).max(120).optional(), topic: z.string().trim().max(2_000).optional(), memberIds: z.array(z.string().uuid()).max(100).default([]), visibility: z.enum(["internal", "private"]).optional() })).mutation(({ ctx, input }) => chatService.createChannel(ctx.platform.actor, input)),
+    sendMessage: tenantProcedure.input(z.object({ channelId: z.string().uuid(), clientMessageId: z.string().uuid(), body: z.object({ type: z.literal("text"), text: z.string().max(40_000), mentions: z.array(z.string().uuid()).max(100).optional() }), attachments: z.array(z.object({ filename: z.string().trim().min(1).max(180), contentType: z.string().trim().min(3).max(160), dataBase64: z.string().min(4).max(6_700_000) })).max(5).default([]), parentMessageId: z.string().uuid().nullable().optional() }).refine(tko_input => Boolean(tko_input.body.text.trim()) || tko_input.attachments.length > 0, { message: "A message needs text or an attachment." })).mutation(({ ctx, input }) => chatService.sendMessage(ctx.platform.actor, input, ctx.correlationId)),
+    editMessage: tenantProcedure.input(z.object({ messageId: z.string().uuid(), text: z.string().trim().min(1).max(40_000) })).mutation(({ ctx, input }) => chatService.editMessage(ctx.platform.actor, input.messageId, input.text, ctx.correlationId)),
+    deleteMessage: tenantProcedure.input(z.object({ messageId: z.string().uuid() })).mutation(({ ctx, input }) => chatService.deleteMessage(ctx.platform.actor, input.messageId, ctx.correlationId)),
+    toggleReaction: tenantProcedure.input(z.object({ messageId: z.string().uuid(), emoji: z.string().trim().min(1).max(64) })).mutation(({ ctx, input }) => chatService.toggleReaction(ctx.platform.actor, input.messageId, input.emoji, ctx.correlationId)),
+    markRead: tenantProcedure.input(z.object({ channelId: z.string().uuid(), lastReadSeq: z.number().int().min(0) })).mutation(({ ctx, input }) => chatService.markRead(ctx.platform.actor, input.channelId, input.lastReadSeq)),
+    setNotificationPreference: tenantProcedure.input(z.object({ channelId: z.string().uuid(), notificationLevel: z.enum(["all", "mentions", "none"]) })).mutation(({ ctx, input }) => chatService.setNotificationPreference(ctx.platform.actor, input.channelId, input.notificationLevel, ctx.correlationId)),
+    savedMessages: tenantProcedure.query(({ ctx }) => chatService.savedMessages(ctx.platform.actor)),
+    saveMessage: tenantProcedure.input(z.object({ messageId: z.string().uuid(), status: z.enum(["open", "done"]).optional(), note: z.string().trim().max(4_000).nullable().optional(), reminderAt: z.date().nullable().optional() })).mutation(({ ctx, input }) => chatService.saveMessage(ctx.platform.actor, input.messageId, { status: input.status, note: input.note, reminderAt: input.reminderAt }, ctx.correlationId)),
+    search: tenantProcedure.input(z.object({ query: z.string().trim().min(2).max(250) })).query(({ ctx, input }) => chatService.search(ctx.platform.actor, input.query)),
+    linkWorkItem: tenantProcedure.input(z.object({ messageId: z.string().uuid(), workItemId: z.string().uuid() })).mutation(({ ctx, input }) => chatService.linkWorkItem(ctx.platform.actor, input.messageId, input.workItemId, ctx.correlationId)),
+    attachmentUrl: tenantProcedure.input(z.object({ messageId: z.string().uuid(), attachmentId: z.string().uuid() })).query(({ ctx, input }) => chatService.attachmentUrl(ctx.platform.actor, input.messageId, input.attachmentId)),
+    setPresence: tenantProcedure.input(z.object({ status: z.enum(["online", "away", "offline"]) })).mutation(({ ctx, input }) => chatService.setPresence(ctx.platform.actor, input.status)),
+    presence: tenantProcedure.input(z.object({ channelId: z.string().uuid() })).query(({ ctx, input }) => chatService.presence(ctx.platform.actor, input.channelId)),
+    setTyping: tenantProcedure.input(z.object({ channelId: z.string().uuid(), isTyping: z.boolean() })).mutation(({ ctx, input }) => chatService.setTyping(ctx.platform.actor, input.channelId, input.isTyping)),
+    typing: tenantProcedure.input(z.object({ channelId: z.string().uuid() })).query(({ ctx, input }) => chatService.typing(ctx.platform.actor, input.channelId)),
+    seedDemo: tenantProcedure.mutation(({ ctx }) => chatService.seedDemo(ctx.platform.actor)),
   }),
 
   // TODO: add feature routers here, e.g.

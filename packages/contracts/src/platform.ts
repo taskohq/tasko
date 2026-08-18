@@ -29,7 +29,19 @@ export type Capability =
   | "work.comment.moderate"
   | "work.sprint.manage"
   | "work.view.manage"
-  | "work.custom_field.manage";
+  | "work.custom_field.manage"
+  | "chat.channel.read"
+  | "chat.channel.manage"
+  | "chat.message.read"
+  | "chat.message.send"
+  | "chat.message.edit_own"
+  | "chat.message.delete_own"
+  | "chat.message.moderate"
+  | "chat.reaction.toggle"
+  | "chat.read_cursor.update"
+  | "chat.notification.manage"
+  | "chat.saved_message.manage"
+  | "chat.search";
 
 export interface Tenant {
   id: string;

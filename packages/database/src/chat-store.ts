@@ -1,0 +1,89 @@
+import type { PlatformActor } from "../../contracts/src/platform";
+import type { Channel, ChannelKind, ChannelNotificationLevel, ChannelReadState, ChatMessage, ChatSearchResult, CreateChannelInput, MessageReaction, SaveMessageInput, SavedMessage, SendMessageInput } from "../../contracts/src/chat";
+import { getPlatformStore } from "./platform-store";
+import { tko_config } from "../../config/src/tasko-config";
+import { PostgresChatStore } from "./postgres-chat-store";
+
+export interface ChatStore {
+  readonly mode: "memory" | "postgres";
+  listChannels(tenantId: string, memberId: string): Promise<Channel[]>;
+  getChannel(tenantId: string, channelId: string): Promise<Channel | null>;
+  listMessages(tenantId: string, channelId: string, afterSequence?: number): Promise<ChatMessage[]>;
+  getMessage(tenantId: string, messageId: string): Promise<ChatMessage | null>;
+  createChannel(actor: PlatformActor, input: CreateChannelInput): Promise<Channel>;
+  sendMessage(actor: PlatformActor, input: SendMessageInput, correlationId: string): Promise<ChatMessage>;
+  editMessage(actor: PlatformActor, messageId: string, text: string, correlationId: string): Promise<ChatMessage>;
+  deleteMessage(actor: PlatformActor, messageId: string, correlationId: string): Promise<ChatMessage>;
+  toggleReaction(actor: PlatformActor, messageId: string, emoji: string, correlationId: string): Promise<{ added: boolean }>;
+  listReadStates(tenantId: string, memberId: string): Promise<ChannelReadState[]>;
+  updateReadState(actor: PlatformActor, channelId: string, lastReadSeq: number): Promise<ChannelReadState>;
+  setNotificationPreference(actor: PlatformActor, channelId: string, notificationLevel: ChannelNotificationLevel, correlationId: string): Promise<ChannelReadState>;
+  listSavedMessages(tenantId: string, memberId: string): Promise<SavedMessage[]>;
+  saveMessage(actor: PlatformActor, messageId: string, input: SaveMessageInput, correlationId: string): Promise<SavedMessage>;
+  search(tenantId: string, memberId: string, query: string): Promise<ChatSearchResult[]>;
+  linkWorkItem(actor: PlatformActor, messageId: string, workItemId: string, correlationId: string): Promise<ChatMessage>;
+  seedDemo(actor: PlatformActor): Promise<Channel>;
+}
+
+function cloneChannel(tko_value: Channel): Channel { return { ...tko_value, memberIds: [...tko_value.memberIds], createdAt: new Date(tko_value.createdAt) }; }
+function cloneMessage(tko_value: ChatMessage): ChatMessage { return { ...tko_value, body: { ...tko_value.body, mentions: [...(tko_value.body.mentions ?? [])] }, attachments: tko_value.attachments.map(tko_attachment => ({ ...tko_attachment })), createdAt: new Date(tko_value.createdAt), editedAt: tko_value.editedAt && new Date(tko_value.editedAt), deletedAt: tko_value.deletedAt && new Date(tko_value.deletedAt), latestReplyAt: tko_value.latestReplyAt && new Date(tko_value.latestReplyAt) }; }
+function emptyReadState(tko_channelId: string, tko_memberId: string): ChannelReadState { return { channelId: tko_channelId, memberId: tko_memberId, lastReadSeq: 0, lastNotifiedSeq: 0, unreadMentions: 0, notificationLevel: "mentions" }; }
+
+export class MemoryChatStore implements ChatStore {
+  readonly mode = "memory" as const;
+  private readonly tko_channels = new Map<string, Channel>();
+  private readonly tko_messages = new Map<string, ChatMessage>();
+  private readonly tko_clientMessageIndex = new Map<string, string>();
+  private readonly tko_reactions = new Map<string, MessageReaction>();
+  private readonly tko_reads = new Map<string, ChannelReadState>();
+  private readonly tko_savedMessages = new Map<string, SavedMessage>();
+
+  async listChannels(tko_tenantId: string, tko_memberId: string): Promise<Channel[]> {
+    return Array.from(this.tko_channels.values()).filter(tko_channel => tko_channel.tenantId === tko_tenantId && (tko_channel.kind === "public" || tko_channel.memberIds.includes(tko_memberId))).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).map(cloneChannel);
+  }
+  async getChannel(tko_tenantId: string, tko_channelId: string): Promise<Channel | null> { const tko_value = this.tko_channels.get(tko_channelId); return tko_value?.tenantId === tko_tenantId ? cloneChannel(tko_value) : null; }
+  async listMessages(tko_tenantId: string, tko_channelId: string, tko_after = 0): Promise<ChatMessage[]> { return Array.from(this.tko_messages.values()).filter(tko_message => tko_message.tenantId === tko_tenantId && tko_message.channelId === tko_channelId && tko_message.sequence > tko_after).sort((a,b) => a.sequence - b.sequence).map(cloneMessage); }
+  async getMessage(tko_tenantId: string, tko_messageId: string): Promise<ChatMessage | null> { const tko_value = this.tko_messages.get(tko_messageId); return tko_value?.tenantId === tko_tenantId ? cloneMessage(tko_value) : null; }
+  async createChannel(tko_actor: PlatformActor, tko_input: CreateChannelInput): Promise<Channel> {
+    const tko_channel: Channel = { id: crypto.randomUUID(), tenantId: tko_input.tenantId, kind: tko_input.kind, name: tko_input.kind === "public" || tko_input.kind === "private" ? (tko_input.name ?? null) : null, topic: tko_input.topic ?? null, visibility: tko_input.visibility ?? (tko_input.kind === "private" || tko_input.kind === "dm" || tko_input.kind === "group_dm" ? "private" : "internal"), memberIds: Array.from(new Set([tko_actor.memberId, ...tko_input.memberIds])), lastSequence: 0, createdAt: new Date(), type: "channel", explicitMemberIds: [] };
+    tko_channel.explicitMemberIds = tko_channel.memberIds;
+    this.tko_channels.set(tko_channel.id, tko_channel);
+    for (const tko_memberId of tko_channel.memberIds) this.tko_reads.set(`${tko_channel.id}:${tko_memberId}`, emptyReadState(tko_channel.id, tko_memberId));
+    await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.channel_created.v1", topic: "chat.channel", payload: { channelId: tko_channel.id, kind: tko_channel.kind }, auditAction: "chat.channel.created", resourceType: "channel", resourceId: tko_channel.id, correlationId: tko_actor.correlationId });
+    return cloneChannel(tko_channel);
+  }
+  async sendMessage(tko_actor: PlatformActor, tko_input: SendMessageInput, tko_correlationId: string): Promise<ChatMessage> {
+    const tko_idempotencyKey = `${tko_input.channelId}:${tko_input.clientMessageId}`;
+    const tko_existingId = this.tko_clientMessageIndex.get(tko_idempotencyKey);
+    if (tko_existingId) return cloneMessage(this.tko_messages.get(tko_existingId)!);
+    const tko_channel = this.tko_channels.get(tko_input.channelId);
+    if (!tko_channel || tko_channel.tenantId !== tko_input.tenantId) throw new Error("CHAT_CHANNEL_NOT_FOUND");
+    tko_channel.lastSequence += 1;
+    const tko_message: ChatMessage = { id: crypto.randomUUID(), tenantId: tko_input.tenantId, channelId: tko_input.channelId, sequence: tko_channel.lastSequence, clientMessageId: tko_input.clientMessageId, authorMemberId: tko_input.authorMemberId, body: { ...tko_input.body, mentions: [...(tko_input.body.mentions ?? [])] }, plainText: tko_input.body.text, attachments: (tko_input.attachments ?? []).map(tko_attachment => ({ ...tko_attachment })), parentMessageId: tko_input.parentMessageId ?? null, replyCount: 0, latestReplyAt: null, linkedWorkItemId: null, editedAt: null, deletedAt: null, createdAt: new Date() };
+    this.tko_messages.set(tko_message.id, tko_message); this.tko_clientMessageIndex.set(tko_idempotencyKey, tko_message.id);
+    if (tko_message.parentMessageId) { const tko_root = this.tko_messages.get(tko_message.parentMessageId); if (tko_root) { tko_root.replyCount += 1; tko_root.latestReplyAt = tko_message.createdAt; } }
+    for (const tko_memberId of Array.from(new Set(tko_message.body.mentions ?? []))) {
+      if (tko_memberId === tko_actor.memberId || !tko_channel.memberIds.includes(tko_memberId)) continue;
+      const tko_key = `${tko_channel.id}:${tko_memberId}`;
+      const tko_previous = this.tko_reads.get(tko_key) ?? emptyReadState(tko_channel.id, tko_memberId);
+      this.tko_reads.set(tko_key, { ...tko_previous, unreadMentions: tko_previous.unreadMentions + 1, lastNotifiedSeq: tko_message.sequence });
+    }
+    await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.message_created.v1", topic: "chat.message", payload: { channelId: tko_message.channelId, messageId: tko_message.id, sequence: tko_message.sequence, parentMessageId: tko_message.parentMessageId, attachmentCount: tko_message.attachments.length, mentionCount: tko_message.body.mentions?.length ?? 0 }, auditAction: "chat.message.created", resourceType: "message", resourceId: tko_message.id, correlationId: tko_correlationId });
+    return cloneMessage(tko_message);
+  }
+  async editMessage(tko_actor: PlatformActor, tko_messageId: string, tko_text: string, tko_correlationId: string): Promise<ChatMessage> { const tko_message = this.tko_messages.get(tko_messageId); if (!tko_message || tko_message.tenantId !== tko_actor.tenantId) throw new Error("CHAT_MESSAGE_NOT_FOUND"); tko_message.body = { ...tko_message.body, text: tko_text }; tko_message.plainText = tko_text; tko_message.editedAt = new Date(); await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.message_updated.v1", topic: "chat.message", payload: { channelId: tko_message.channelId, messageId: tko_message.id }, auditAction: "chat.message.edited", resourceType: "message", resourceId: tko_message.id, correlationId: tko_correlationId }); return cloneMessage(tko_message); }
+  async deleteMessage(tko_actor: PlatformActor, tko_messageId: string, tko_correlationId: string): Promise<ChatMessage> { const tko_message = this.tko_messages.get(tko_messageId); if (!tko_message || tko_message.tenantId !== tko_actor.tenantId) throw new Error("CHAT_MESSAGE_NOT_FOUND"); tko_message.deletedAt = new Date(); tko_message.body = { type: "text", text: "This message was deleted." }; tko_message.plainText = ""; await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.message_deleted.v1", topic: "chat.message", payload: { channelId: tko_message.channelId, messageId: tko_message.id }, auditAction: "chat.message.deleted", resourceType: "message", resourceId: tko_message.id, correlationId: tko_correlationId }); return cloneMessage(tko_message); }
+  async toggleReaction(tko_actor: PlatformActor, tko_messageId: string, tko_emoji: string, tko_correlationId: string): Promise<{ added: boolean }> { const tko_key = `${tko_messageId}:${tko_actor.memberId}:${tko_emoji}`; const tko_added = !this.tko_reactions.has(tko_key); if (tko_added) this.tko_reactions.set(tko_key, { messageId: tko_messageId, memberId: tko_actor.memberId, emoji: tko_emoji, createdAt: new Date() }); else this.tko_reactions.delete(tko_key); await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.reaction_toggled.v1", topic: "chat.message", payload: { messageId: tko_messageId, emoji: tko_emoji, added: tko_added }, auditAction: "chat.reaction.toggled", resourceType: "message", resourceId: tko_messageId, correlationId: tko_correlationId }); return { added: tko_added }; }
+  async listReadStates(tko_tenantId: string, tko_memberId: string): Promise<ChannelReadState[]> { const tko_channels = await this.listChannels(tko_tenantId, tko_memberId); return tko_channels.map(tko_channel => ({ ...(this.tko_reads.get(`${tko_channel.id}:${tko_memberId}`) ?? emptyReadState(tko_channel.id, tko_memberId)) })); }
+  async updateReadState(tko_actor: PlatformActor, tko_channelId: string, tko_lastReadSeq: number): Promise<ChannelReadState> { const tko_key = `${tko_channelId}:${tko_actor.memberId}`; const tko_previous = this.tko_reads.get(tko_key) ?? emptyReadState(tko_channelId, tko_actor.memberId); const tko_nextReadSeq = Math.max(tko_previous.lastReadSeq, tko_lastReadSeq); const tko_unreadMentions = Array.from(this.tko_messages.values()).filter(tko_message => tko_message.tenantId === tko_actor.tenantId && tko_message.channelId === tko_channelId && tko_message.sequence > tko_nextReadSeq && tko_message.body.mentions?.includes(tko_actor.memberId)).length; const tko_state = { ...tko_previous, lastReadSeq: tko_nextReadSeq, unreadMentions: tko_unreadMentions }; this.tko_reads.set(tko_key, tko_state); await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.read_cursor_updated.v1", topic: "chat.read", payload: { channelId: tko_channelId, lastReadSeq: tko_state.lastReadSeq }, auditAction: "chat.read_cursor.updated", resourceType: "channel", resourceId: tko_channelId, correlationId: tko_actor.correlationId }); return { ...tko_state }; }
+  async setNotificationPreference(tko_actor: PlatformActor, tko_channelId: string, tko_notificationLevel: ChannelNotificationLevel, tko_correlationId: string): Promise<ChannelReadState> { const tko_key = `${tko_channelId}:${tko_actor.memberId}`; const tko_previous = this.tko_reads.get(tko_key) ?? emptyReadState(tko_channelId, tko_actor.memberId); const tko_state = { ...tko_previous, notificationLevel: tko_notificationLevel }; this.tko_reads.set(tko_key, tko_state); await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.notification_preference_updated.v1", topic: "chat.notification", payload: { channelId: tko_channelId, notificationLevel: tko_notificationLevel }, auditAction: "chat.notification.preference_updated", resourceType: "channel", resourceId: tko_channelId, correlationId: tko_correlationId }); return { ...tko_state }; }
+  async listSavedMessages(tko_tenantId: string, tko_memberId: string): Promise<SavedMessage[]> { return Array.from(this.tko_savedMessages.values()).filter(tko_saved => tko_saved.tenantId === tko_tenantId && tko_saved.memberId === tko_memberId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).map(tko_saved => ({ ...tko_saved, reminderAt: tko_saved.reminderAt && new Date(tko_saved.reminderAt), createdAt: new Date(tko_saved.createdAt) })); }
+  async saveMessage(tko_actor: PlatformActor, tko_messageId: string, tko_input: SaveMessageInput, tko_correlationId: string): Promise<SavedMessage> { const tko_message = this.tko_messages.get(tko_messageId); if (!tko_message || tko_message.tenantId !== tko_actor.tenantId) throw new Error("CHAT_MESSAGE_NOT_FOUND"); const tko_key = `${tko_messageId}:${tko_actor.memberId}`; const tko_saved: SavedMessage = { tenantId: tko_actor.tenantId, messageId: tko_messageId, memberId: tko_actor.memberId, status: tko_input.status ?? "open", note: tko_input.note ?? null, reminderAt: tko_input.reminderAt ?? null, createdAt: this.tko_savedMessages.get(tko_key)?.createdAt ?? new Date() }; this.tko_savedMessages.set(tko_key, tko_saved); await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.message_saved.v1", topic: "chat.saved", payload: { messageId: tko_messageId, status: tko_saved.status }, auditAction: "chat.message.saved", resourceType: "message", resourceId: tko_messageId, correlationId: tko_correlationId }); return { ...tko_saved, reminderAt: tko_saved.reminderAt && new Date(tko_saved.reminderAt), createdAt: new Date(tko_saved.createdAt) }; }
+  async search(tko_tenantId: string, tko_memberId: string, tko_query: string): Promise<ChatSearchResult[]> { const tko_needle = tko_query.toLocaleLowerCase(); const tko_accessible = new Set((await this.listChannels(tko_tenantId, tko_memberId)).map(tko_channel => tko_channel.id)); return Array.from(this.tko_messages.values()).filter(tko_message => tko_message.tenantId === tko_tenantId && tko_accessible.has(tko_message.channelId) && !tko_message.deletedAt && tko_message.plainText.toLocaleLowerCase().includes(tko_needle)).map(tko_message => ({ message: cloneMessage(tko_message), channel: this.tko_channels.get(tko_message.channelId)!, snippet: tko_message.plainText.slice(0, 220) })); }
+  async linkWorkItem(tko_actor: PlatformActor, tko_messageId: string, tko_workItemId: string, tko_correlationId: string): Promise<ChatMessage> { const tko_message = this.tko_messages.get(tko_messageId); if (!tko_message || tko_message.tenantId !== tko_actor.tenantId) throw new Error("CHAT_MESSAGE_NOT_FOUND"); tko_message.linkedWorkItemId = tko_workItemId; await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.message_linked_work_item.v1", topic: "chat.message", payload: { messageId: tko_messageId, workItemId: tko_workItemId }, auditAction: "chat.message.work_item_linked", resourceType: "message", resourceId: tko_messageId, correlationId: tko_correlationId }); return cloneMessage(tko_message); }
+  async seedDemo(tko_actor: PlatformActor): Promise<Channel> { const tko_existing = Array.from(this.tko_channels.values()).find(tko_channel => tko_channel.tenantId === tko_actor.tenantId && tko_channel.name === "product"); if (tko_existing) return cloneChannel(tko_existing); const tko_channel = await this.createChannel(tko_actor, { tenantId: tko_actor.tenantId, kind: "public", name: "product", topic: "Product team pilot", memberIds: [tko_actor.memberId] }); await this.sendMessage(tko_actor, { tenantId: tko_actor.tenantId, channelId: tko_channel.id, authorMemberId: tko_actor.memberId, clientMessageId: crypto.randomUUID(), body: { type: "text", text: "Welcome to the Tasko product channel." } }, tko_actor.correlationId); return tko_channel; }
+}
+
+let tko_store: ChatStore = tko_config.postgresUrl ? new PostgresChatStore(tko_config.postgresUrl) : new MemoryChatStore();
+export function getChatStore(): ChatStore { return tko_store; }
+export function setChatStoreForTests(tko_next: ChatStore | null): void { tko_store = tko_next ?? new MemoryChatStore(); }
