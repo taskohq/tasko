@@ -104,6 +104,135 @@ try {
       [randomUUID(), tko_tenantId, tko_channelId, tko_sequence, tko_clientMessageId, tko_ownerMemberId, JSON.stringify({ type: "text", text: tko_text }), tko_text],
     );
   }
+  const tko_crmPipeline = await tko_client.query(
+    `insert into crm_pipelines (id, tenant_id, name)
+     values ($1, $2, 'Revenue pilot')
+     on conflict (tenant_id, name) do update set active = true
+     returning id`,
+    [randomUUID(), tko_tenantId],
+  );
+  const tko_crmPipelineId = tko_crmPipeline.rows[0].id;
+  const tko_seedStages = [
+    ['Discovery', 100, 20, 'open'],
+    ['Proposal', 200, 60, 'open'],
+    ['Closed won', 300, 100, 'won'],
+  ];
+  const tko_stageIds = new Map();
+  for (const [tko_stageName, tko_sortOrder, tko_probability, tko_category] of tko_seedStages) {
+    const tko_stage = await tko_client.query(
+      `insert into crm_pipeline_stages (id, tenant_id, pipeline_id, name, sort_order, probability_default, category)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       on conflict (pipeline_id, name) do update set sort_order = excluded.sort_order, probability_default = excluded.probability_default, category = excluded.category
+       returning id`,
+      [randomUUID(), tko_tenantId, tko_crmPipelineId, tko_stageName, tko_sortOrder, tko_probability, tko_category],
+    );
+    tko_stageIds.set(tko_stageName, tko_stage.rows[0].id);
+  }
+  const tko_crmCompany = await tko_client.query(
+    `insert into crm_companies (id, tenant_id, name, domain, industry, owner_member_id, tags_json)
+     values ($1,$2,'Northstar Labs','northstar.example','Software',$3,$4::jsonb)
+     on conflict (tenant_id, name) do update set domain = excluded.domain, industry = excluded.industry
+     returning id`,
+    [randomUUID(), tko_tenantId, tko_ownerMemberId, JSON.stringify(['controlled-pilot'])],
+  );
+  const tko_crmCompanyId = tko_crmCompany.rows[0].id;
+  const tko_existingContact = await tko_client.query(
+    `select id from crm_contacts where tenant_id = $1 and company_id = $2 and first_name = 'Avery' and last_name = 'Nguyen' limit 1`,
+    [tko_tenantId, tko_crmCompanyId],
+  );
+  const tko_crmContactId = tko_existingContact.rows[0]?.id ?? (await tko_client.query(
+    `insert into crm_contacts (id, tenant_id, company_id, first_name, last_name, title, emails_json, owner_member_id)
+     values ($1,$2,$3,'Avery','Nguyen','Operations lead',$4::jsonb,$5) returning id`,
+    [randomUUID(), tko_tenantId, tko_crmCompanyId, JSON.stringify(['avery@northstar.example']), tko_ownerMemberId],
+  )).rows[0].id;
+  await tko_client.query(
+    `insert into crm_leads (id, tenant_id, owner_member_id, first_name, last_name, company_name, email, source, status, score, notes, next_follow_up_at, conversion_key)
+     values ($1,$2,$3,'Avery','Nguyen','Northstar Labs','avery@northstar.example','controlled_pilot','qualified',82,'Pilot lead for revenue-to-delivery walkthrough',now() + interval '2 days','seed:crm:avery-nguyen')
+     on conflict (tenant_id, conversion_key) do update set status = excluded.status, score = excluded.score, notes = excluded.notes`,
+    [randomUUID(), tko_tenantId, tko_ownerMemberId],
+  );
+  const tko_existingDeal = await tko_client.query(
+    `select id from crm_deals where tenant_id = $1 and pipeline_id = $2 and name = 'Northstar delivery pilot' limit 1`,
+    [tko_tenantId, tko_crmPipelineId],
+  );
+  const tko_crmDealId = tko_existingDeal.rows[0]?.id ?? (await tko_client.query(
+    `insert into crm_deals (id, tenant_id, company_id, pipeline_id, stage_id, name, amount_cents, currency, probability, owner_member_id, source, next_step)
+     values ($1,$2,$3,$4,$5,'Northstar delivery pilot',2400000,'USD',60,$6,'controlled_pilot','Confirm implementation scope') returning id`,
+    [randomUUID(), tko_tenantId, tko_crmCompanyId, tko_crmPipelineId, tko_stageIds.get('Proposal'), tko_ownerMemberId],
+  )).rows[0].id;
+  const tko_existingActivity = await tko_client.query(
+    `select id from crm_activities where tenant_id = $1 and entity_type = 'deal' and entity_id = $2 and subject = 'Controlled pilot context' limit 1`,
+    [tko_tenantId, tko_crmDealId],
+  );
+  if (!tko_existingActivity.rowCount) {
+    await tko_client.query(
+      `insert into crm_activities (id, tenant_id, entity_type, entity_id, activity_type, subject, body, created_by_member_id)
+       values ($1,$2,'deal',$3,'note','Controlled pilot context','Use this pilot record to validate sales and delivery context.',$4)`,
+      [randomUUID(), tko_tenantId, tko_crmDealId, tko_ownerMemberId],
+    );
+  }
+  const tko_seedProject = await tko_client.query(`select id from projects where tenant_id = $1 and key = 'TASKO'`, [tko_tenantId]);
+  if (tko_seedProject.rowCount) {
+    await tko_client.query(
+      `insert into crm_entity_links (id, tenant_id, source_type, source_id, target_type, target_id, relation_type)
+       values ($1,$2,'deal',$3,'project',$4,'context') on conflict do nothing`,
+      [randomUUID(), tko_tenantId, tko_crmDealId, tko_seedProject.rows[0].id],
+    );
+  }
+  const tko_deliveryPrerequisites = await tko_client.query(
+    `select s.id as space_id, w.id as workflow_id
+       from spaces s
+       join workflows w on w.tenant_id = s.tenant_id
+      where s.tenant_id = $1
+      order by s.created_at, w.created_at
+      limit 1`,
+    [tko_tenantId],
+  );
+  if (!tko_deliveryPrerequisites.rowCount) throw new Error("Work seed prerequisites are required before CRM delivery handoff seed.");
+  const tko_deliveryProject = await tko_client.query(
+    `insert into projects (id, tenant_id, space_id, key, name, description, owner_member_id, visibility, methodology, workflow_id, sequence_counter)
+     values ($1,$2,$3,'NORTHSTAR','Northstar Delivery','Controlled-pilot delivery project created from CRM handoff.',$4,'internal','kanban',$5,0)
+     on conflict (tenant_id, key) do update set description = excluded.description
+     returning id`,
+    [randomUUID(), tko_tenantId, tko_deliveryPrerequisites.rows[0].space_id, tko_ownerMemberId, tko_deliveryPrerequisites.rows[0].workflow_id],
+  );
+  const tko_deliveryProjectId = tko_deliveryProject.rows[0].id;
+  const tko_deliveryChannel = await tko_client.query(
+    `insert into channels (id, tenant_id, kind, name, topic, visibility, last_sequence)
+     values ($1,$2,'public','northstar-delivery','Delivery conversation created from the Northstar CRM handoff.','internal',0)
+     on conflict (tenant_id, name) do update set topic = excluded.topic
+     returning id`,
+    [randomUUID(), tko_tenantId],
+  );
+  const tko_deliveryChannelId = tko_deliveryChannel.rows[0].id;
+  for (const tko_member of tko_pilotMembers.rows) {
+    await tko_client.query(
+      `insert into channel_members (tenant_id, channel_id, member_id, last_read_seq)
+       values ($1,$2,$3,0) on conflict (channel_id, member_id) do nothing`,
+      [tko_tenantId, tko_deliveryChannelId, tko_member.id],
+    );
+  }
+  await tko_client.query(
+    `insert into crm_deal_handoffs (deal_id, tenant_id, delivery_project_id, delivery_channel_id, status, completed_at)
+     values ($1,$2,$3,$4,'completed',now())
+     on conflict (deal_id) do update set delivery_project_id = excluded.delivery_project_id, delivery_channel_id = excluded.delivery_channel_id, status = 'completed', completed_at = coalesce(crm_deal_handoffs.completed_at, excluded.completed_at)`,
+    [tko_crmDealId, tko_tenantId, tko_deliveryProjectId, tko_deliveryChannelId],
+  );
+  await tko_client.query(
+    `insert into crm_entity_links (id, tenant_id, source_type, source_id, target_type, target_id, relation_type)
+     values ($1,$2,'deal',$3,'channel',$4,'context') on conflict do nothing`,
+    [randomUUID(), tko_tenantId, tko_crmDealId, tko_channelId],
+  );
+  await tko_client.query(
+    `insert into crm_entity_links (id, tenant_id, source_type, source_id, target_type, target_id, relation_type)
+     values ($1,$2,'deal',$3,'project',$4,'delivery_project') on conflict do nothing`,
+    [randomUUID(), tko_tenantId, tko_crmDealId, tko_deliveryProjectId],
+  );
+  await tko_client.query(
+    `insert into crm_entity_links (id, tenant_id, source_type, source_id, target_type, target_id, relation_type)
+     values ($1,$2,'deal',$3,'channel',$4,'delivery_channel') on conflict do nothing`,
+    [randomUUID(), tko_tenantId, tko_crmDealId, tko_deliveryChannelId],
+  );
   await tko_client.query("commit");
   console.log(`Tasko seed workspace is ready: ${tko_tenantSlug}`);
 } catch (tko_error) {

@@ -5,7 +5,7 @@ import { PostgresChatStore } from "../../packages/database/src/postgres-chat-sto
 import type { PlatformActor } from "../../packages/contracts/src/platform";
 
 const tko_postgresUrl = process.env.TASKO_POSTGRES_URL;
-const tko_describe = tko_postgresUrl ? describe : describe.skip;
+const tko_describe = tko_postgresUrl && process.env.TASKO_RUN_POSTGRES_INTEGRATION_TESTS === "1" ? describe : describe.skip;
 
 async function tko_cleanupTenant(tko_pool: Pool, tko_tenantId: string, tko_userId: string): Promise<void> {
   for (const tko_table of ["message_attachments", "message_reactions", "saved_messages", "messages", "channel_members", "channels", "outbox", "audit_logs", "tenant_members"]) {
