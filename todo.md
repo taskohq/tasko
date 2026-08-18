@@ -71,7 +71,7 @@
 - [x] M3: tạo follow-up WorkItem liên kết CRM, deal stage transition và handoff won-deal sang delivery project/channel theo outbox consumer idempotent.
 - [x] M3: mở rộng tRPC typed CRM API cho lead/company/contact/pipeline/deal/activity, board và connected-view links.
 - [x] M3: tạo UI CRM desktop gồm lead list, deal pipeline board, quick create và detail inspector có related Work/Chat context.
-- [ ] M3: bổ sung seed controlled-pilot, negative authorization tests, acceptance scenarios H/I, typecheck/build/visual verification, commits và checkpoint.
+- [x] M3: bổ sung seed controlled-pilot, negative authorization tests, acceptance scenarios H/I, typecheck/build/visual verification, commits và checkpoint.
 - [x] M3 verification: chạy migration/seed PostgreSQL Docker và thêm acceptance persistence CRM cho conversion/handoff/outbox tenant-scoped.
 - [x] M3 verification: kiểm tra trực quan route CRM trên desktop/mobile và ghi lại bằng chứng trước checkpoint.
 - [x] M3 UI gap: giới hạn pipeline board di động trong viewport với scroll ngang có chủ đích hoặc chế độ stage list dễ thao tác, không để canvas tràn ngoài bố cục.
