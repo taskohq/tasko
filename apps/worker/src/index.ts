@@ -1,6 +1,8 @@
 import { startWorker } from "../../../modules/worker/src/worker-service";
+import { registerCRMHandoffWorker } from "../../../modules/crm/src/crm-handoff-worker";
 import { tko_logger } from "../../../packages/observability/src/logger";
 
+registerCRMHandoffWorker();
 const tko_stop = startWorker();
 tko_logger.info("Tasko worker started");
 

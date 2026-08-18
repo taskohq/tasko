@@ -41,7 +41,17 @@ export type Capability =
   | "chat.read_cursor.update"
   | "chat.notification.manage"
   | "chat.saved_message.manage"
-  | "chat.search";
+  | "chat.search"
+  | "crm.read"
+  | "crm.lead.manage"
+  | "crm.lead.convert"
+  | "crm.company.manage"
+  | "crm.contact.manage"
+  | "crm.pipeline.manage"
+  | "crm.deal.manage"
+  | "crm.activity.manage"
+  | "crm.follow_up.create"
+  | "crm.deal.handoff";
 
 export interface Tenant {
   id: string;
