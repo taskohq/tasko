@@ -1,92 +1,84 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { startLogin } from "@/const";
 import { Button } from "@/components/ui/button";
+import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
 import {
-  Bell,
-  Blocks,
   CalendarDays,
+  CheckCircle2,
   ChevronDown,
   CircleDot,
   Columns3,
-  Command,
   Flag,
   FolderKanban,
   LayoutList,
   ListFilter,
-  Menu,
+  MessageCircle,
   MoreHorizontal,
   Plus,
-  Search,
   Send,
-  Settings2,
+  SlidersHorizontal,
   Sparkles,
-  Users,
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
-type PreviewItem = { id: string; key: string; title: string; priority: "urgent" | "high" | "medium" | "low" | "none"; status: "todo" | "in_progress" | "done"; detail: string; assignee: string };
+type TkoPreviewItem = {
+  id: string;
+  key: string;
+  title: string;
+  priority: "urgent" | "high" | "medium" | "low" | "none";
+  status: "todo" | "in_progress" | "done";
+  detail: string;
+  assignee: string;
+  dueLabel: string;
+};
 
-const tko_previewItems: PreviewItem[] = [
-  { id: "preview-1", key: "TASKO-12", title: "Confirm workspace hierarchy", priority: "urgent", status: "todo", detail: "M1 · Architecture", assignee: "TL" },
-  { id: "preview-2", key: "TASKO-18", title: "Ship project board", priority: "high", status: "in_progress", detail: "M1 · Product", assignee: "AN" },
-  { id: "preview-3", key: "TASKO-22", title: "Verify tenant-scoped events", priority: "high", status: "in_progress", detail: "M1 · Platform", assignee: "MT" },
-  { id: "preview-4", key: "TASKO-27", title: "Define sprint review ritual", priority: "medium", status: "done", detail: "M1 · Planning", assignee: "TL" },
+const tko_previewItems: TkoPreviewItem[] = [
+  { id: "preview-1", key: "TASKO-12", title: "Confirm workspace hierarchy", priority: "urgent", status: "todo", detail: "Architecture", assignee: "TL", dueLabel: "May 23" },
+  { id: "preview-2", key: "TASKO-18", title: "Ship project board", priority: "high", status: "in_progress", detail: "Product", assignee: "AN", dueLabel: "May 15" },
+  { id: "preview-3", key: "TASKO-22", title: "Verify tenant-scoped events", priority: "high", status: "in_progress", detail: "Platform", assignee: "MT", dueLabel: "May 16" },
+  { id: "preview-4", key: "TASKO-27", title: "Define sprint review ritual", priority: "medium", status: "done", detail: "Planning", assignee: "TL", dueLabel: "May 12" },
 ];
 
 const tko_columns = [
-  { id: "todo", label: "To do", accent: "bg-[#b38a3d]" },
-  { id: "in_progress", label: "In progress", accent: "bg-[#4f78c4]" },
-  { id: "done", label: "Done", accent: "bg-[#398a68]" },
+  { id: "todo", label: "To do", accent: "bg-[#ef9b3a]" },
+  { id: "in_progress", label: "In progress", accent: "bg-[#5b51e8]" },
+  { id: "done", label: "Done", accent: "bg-[#12b76a]" },
 ] as const;
 
-function tko_statusFor(tko_category: string): "todo" | "in_progress" | "done" {
+function tko_statusFor(tko_category: string): TkoPreviewItem["status"] {
   return tko_category === "in_progress" ? "in_progress" : tko_category === "done" ? "done" : "todo";
 }
 
-function PriorityMark({ priority }: { priority: PreviewItem["priority"] }) {
-  if (priority === "none") return <span className="h-2 w-2 rounded-full bg-[#d7d7d2]" />;
-  const tko_color = priority === "urgent" ? "bg-[#d84c4c]" : priority === "high" ? "bg-[#e58d36]" : "bg-[#d8b145]";
-  return <span className={`h-2 w-2 rounded-full ${tko_color}`} />;
+function tko_dueLabel(tko_dueAt: Date | null | undefined) {
+  if (!tko_dueAt) return "No date";
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(tko_dueAt));
+}
+
+function TkoPriority({ priority, compact = false }: { priority: TkoPreviewItem["priority"]; compact?: boolean }) {
+  if (priority === "none") return null;
+  const tko_color = priority === "urgent" ? "border-[#fecdca] bg-[#fef3f2] text-[#d92d20]" : priority === "high" ? "border-[#fedf89] bg-[#fffaeb] text-[#b54708]" : priority === "medium" ? "border-[#d9d6fe] bg-[#f4f3ff] text-[#5b51e8]" : "border-[#abefc6] bg-[#ecfdf3] text-[#067647]";
+  return <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tko_color}`}><Flag className="h-2.5 w-2.5" />{compact ? priority.slice(0, 1) : priority}</span>;
 }
 
 export default function Work() {
   const { isAuthenticated, loading: tko_authLoading } = useAuth();
   const [tko_view, setTkoView] = useState<"board" | "list">("board");
-  const [tko_filterOpen, setTkoFilterOpen] = useState(false);
-  const [tko_selectedItem, setTkoSelectedItem] = useState<PreviewItem | null>(null);
+  const [tko_selectedItem, setTkoSelectedItem] = useState<TkoPreviewItem | null>(null);
   const [tko_commentDraft, setTkoCommentDraft] = useState("");
+  const [tko_filterOpen, setTkoFilterOpen] = useState(false);
   const tko_utils = trpc.useUtils();
   const tko_projects = trpc.work.projects.useQuery(undefined, { enabled: isAuthenticated });
   const tko_selectedProject = tko_projects.data?.[0];
   const tko_board = trpc.work.board.useQuery({ projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(tko_selectedProject) });
-  const tko_seed = trpc.work.seedDemo.useMutation({
-    onSuccess: async () => {
-      await tko_utils.work.projects.invalidate();
-    },
-  });
-  const tko_itemDetails = trpc.work.item.useQuery(
-    { workItemId: tko_selectedItem?.id ?? "00000000-0000-0000-0000-000000000000" },
-    { enabled: Boolean(tko_selectedItem && isAuthenticated && tko_selectedProject) },
-  );
-  const tko_transition = trpc.work.transitionItem.useMutation({
-    onSuccess: async () => {
-      await Promise.all([tko_utils.work.board.invalidate(), tko_utils.work.item.invalidate()]);
-      toast.success("Workflow đã được cập nhật.");
-    },
-  });
-  const tko_comment = trpc.work.createComment.useMutation({
-    onSuccess: async () => {
-      setTkoCommentDraft("");
-      await tko_utils.work.item.invalidate();
-      toast.success("Đã thêm bình luận.");
-    },
-  });
+  const tko_seed = trpc.work.seedDemo.useMutation({ onSuccess: async () => { await tko_utils.work.projects.invalidate(); } });
+  const tko_itemDetails = trpc.work.item.useQuery({ workItemId: tko_selectedItem?.id ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(tko_selectedItem && isAuthenticated && tko_selectedProject) });
+  const tko_transition = trpc.work.transitionItem.useMutation({ onSuccess: async () => { await Promise.all([tko_utils.work.board.invalidate(), tko_utils.work.item.invalidate()]); toast.success("Workflow đã được cập nhật."); } });
+  const tko_comment = trpc.work.createComment.useMutation({ onSuccess: async () => { setTkoCommentDraft(""); await tko_utils.work.item.invalidate(); toast.success("Đã thêm bình luận."); } });
 
-  const tko_items = useMemo<PreviewItem[]>(() => {
+  const tko_items = useMemo<TkoPreviewItem[]>(() => {
     if (!tko_board.data) return tko_previewItems;
     const tko_statusById = new Map(tko_board.data.statuses.map(tko_status => [tko_status.id, tko_status.category]));
     return tko_board.data.items.map(tko_item => ({
@@ -95,12 +87,13 @@ export default function Work() {
       title: tko_item.title,
       priority: tko_item.priority,
       status: tko_statusFor(tko_statusById.get(tko_item.statusId) ?? "todo"),
-      detail: tko_item.estimateMinutes ? `${Math.round(tko_item.estimateMinutes / 60)}h estimate` : "No estimate",
+      detail: tko_item.estimateMinutes ? `${Math.round(tko_item.estimateMinutes / 60)}h estimate` : "Work item",
       assignee: tko_item.assigneeMemberIds.length ? "ME" : "—",
+      dueLabel: tko_dueLabel(tko_item.dueAt),
     }));
   }, [tko_board.data]);
 
-  const tko_projectName = tko_selectedProject?.name ?? "Tasko Work Alpha";
+  const tko_projectName = tko_selectedProject?.name ?? "Q2 Renewal Implementation";
   const tko_isPreview = !isAuthenticated || !tko_selectedProject;
   const tko_selectedDetail = tko_itemDetails.data;
   const tko_nextStatus = useMemo(() => {
@@ -109,65 +102,26 @@ export default function Work() {
     return tko_board.data.statuses[tko_currentIndex + 1] ?? null;
   }, [tko_board.data, tko_selectedDetail]);
 
-  function tko_openItem(tko_item: PreviewItem) {
+  function tko_openItem(tko_item: TkoPreviewItem) {
     setTkoSelectedItem(tko_item);
     setTkoCommentDraft("");
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f5f1] text-[#252625]">
-      <div className="flex min-h-screen">
-        <aside className="hidden w-[58px] flex-col items-center border-r border-[#deded8] bg-[#242a28] py-4 text-[#bfc5bf] md:flex">
-          <div className="mb-8 grid h-8 w-8 place-items-center bg-[#e2c179] font-serif text-lg font-bold text-[#292c26]">T</div>
-          <div className="flex flex-col gap-2">
-            {[{ icon: FolderKanban, active: true }, { icon: Bell }, { icon: Users }, { icon: CalendarDays }].map((tko_entry, tko_index) => (
-              <button key={tko_index} className={`grid h-9 w-9 place-items-center transition-colors ${tko_entry.active ? "bg-[#3b4d46] text-white" : "hover:bg-[#39413e] hover:text-white"}`} aria-label="Workspace section">
-                <tko_entry.icon className="h-4 w-4" />
-              </button>
-            ))}
-          </div>
-          <div className="mt-auto flex flex-col gap-2"><button className="grid h-9 w-9 place-items-center hover:bg-[#39413e] hover:text-white" aria-label="Settings"><Settings2 className="h-4 w-4" /></button><span className="grid h-8 w-8 place-items-center rounded-full bg-[#d8e5df] text-[10px] font-bold text-[#274239]">TL</span></div>
-        </aside>
-
-        <aside className="hidden w-[244px] shrink-0 border-r border-[#deded8] bg-[#fafaf7] lg:block">
-          <div className="flex h-[57px] items-center justify-between border-b border-[#deded8] px-4"><button className="flex items-center gap-2 text-sm font-semibold"><span className="grid h-6 w-6 place-items-center rounded bg-[#355d4d] text-[10px] text-white">T</span> Tasko <ChevronDown className="h-3.5 w-3.5 text-[#777c76]" /></button><button aria-label="Search"><Search className="h-4 w-4 text-[#686e69]" /></button></div>
-          <nav className="p-3 text-sm">
-            <p className="mb-2 px-2 pt-2 text-[10px] font-bold uppercase tracking-[0.13em] text-[#929890]">Workspace</p>
-            <a href="#inbox" className="flex items-center gap-2 rounded px-2 py-2 text-[#5c625e] hover:bg-[#ededE8]"><Menu className="h-3.5 w-3.5" /> My work</a>
-            <a href="#projects" className="flex items-center gap-2 rounded bg-[#e8eee9] px-2 py-2 font-medium text-[#284738]"><FolderKanban className="h-3.5 w-3.5" /> Projects</a>
-            <p className="mb-2 mt-7 flex items-center justify-between px-2 text-[10px] font-bold uppercase tracking-[0.13em] text-[#929890]">Spaces <Plus className="h-3.5 w-3.5" /></p>
-            <div className="rounded border border-[#dfdfd9] bg-white p-2"><div className="flex items-center gap-2 px-1 py-1.5 font-medium"><span className="h-2 w-2 rounded-full bg-[#d8a54a]" /> Product</div><a className="ml-4 flex items-center gap-2 rounded bg-[#f2f4f0] px-2 py-1.5 text-[#355d4d]" href="#board"><Columns3 className="h-3.5 w-3.5" /> {tko_projectName}</a></div>
-          </nav>
-        </aside>
-
-        <main className="min-w-0 flex-1">
-          <header className="flex h-[57px] items-center justify-between border-b border-[#deded8] bg-[#fbfbf8] px-4 md:px-6"><div className="flex items-center gap-3"><button className="lg:hidden" aria-label="Open navigation"><Menu className="h-5 w-5" /></button><div><div className="flex items-center gap-2 text-sm font-semibold"><span className="text-[#7a817b]">Product</span><span className="text-[#b0b4ad]">/</span>{tko_projectName}</div><p className="mt-0.5 text-[11px] text-[#8a908a]">{tko_isPreview ? "Preview · sign in to load workspace" : `${tko_board.data?.items.length ?? 0} work items`}</p></div></div><div className="flex items-center gap-2"><button onClick={() => toast("Tìm kiếm toàn cục sẽ mở rộng ở milestone kế tiếp.")} className="hidden items-center gap-1.5 border border-[#deded8] px-2.5 py-1.5 text-xs text-[#626862] sm:flex"><Command className="h-3.5 w-3.5" /> Search</button><Link href="/platform" className="hidden text-xs text-[#53665d] hover:underline md:block">Platform</Link>{isAuthenticated ? <Button onClick={() => tko_selectedProject ? toast("Chọn một cột rồi thêm work item trong workflow tiếp theo.") : tko_seed.mutate()} disabled={tko_seed.isPending} className="h-8 rounded bg-[#315c4a] px-3 text-xs text-white hover:bg-[#274c3d]"><Plus className="mr-1 h-3.5 w-3.5" /> {tko_selectedProject ? "New item" : "Set up demo"}</Button> : <Button onClick={() => startLogin()} className="h-8 rounded bg-[#315c4a] px-3 text-xs text-white hover:bg-[#274c3d]">Sign in</Button>}</div></header>
-
-          <section className="p-4 md:p-6">
-            {tko_isPreview && !tko_authLoading ? <div className="mb-5 flex items-center justify-between gap-4 border border-[#dfd5b9] bg-[#fffbef] px-4 py-3 text-xs text-[#735f2c]"><span className="flex items-center gap-2"><Sparkles className="h-4 w-4" /> Work Alpha preview. Sign in, then initialize the product-team demo workspace.</span><button onClick={() => startLogin()} className="font-semibold underline">Sign in</button></div> : null}
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-1 border-b border-[#deded8]"><button onClick={() => setTkoView("board")} className={`flex items-center gap-2 px-3 py-2 text-xs font-medium ${tko_view === "board" ? "border-b-2 border-[#315c4a] text-[#315c4a]" : "text-[#777c76]"}`}><Columns3 className="h-3.5 w-3.5" /> Board</button><button onClick={() => setTkoView("list")} className={`flex items-center gap-2 px-3 py-2 text-xs font-medium ${tko_view === "list" ? "border-b-2 border-[#315c4a] text-[#315c4a]" : "text-[#777c76]"}`}><LayoutList className="h-3.5 w-3.5" /> List</button><button className="flex items-center gap-2 px-3 py-2 text-xs text-[#777c76]"><CalendarDays className="h-3.5 w-3.5" /> Calendar</button></div><div className="relative"><button onClick={() => setTkoFilterOpen(!tko_filterOpen)} className="flex items-center gap-2 border border-[#deded8] bg-white px-2.5 py-1.5 text-xs text-[#5e655f]"><ListFilter className="h-3.5 w-3.5" /> Filters <ChevronDown className="h-3 w-3" /></button>{tko_filterOpen ? <div className="absolute right-0 z-10 mt-1 w-48 border border-[#deded8] bg-white p-2 text-xs shadow-lg"><p className="px-2 py-1 font-semibold">Quick filters</p><button className="block w-full px-2 py-1.5 text-left hover:bg-[#f2f4f0]">Assigned to me</button><button className="block w-full px-2 py-1.5 text-left hover:bg-[#f2f4f0]">Due this sprint</button></div> : null}</div></div>
-
-            {tko_view === "board" ? <div id="board" className="grid min-w-[760px] grid-cols-3 gap-4 overflow-x-auto pb-5">{tko_columns.map(tko_column => { const tko_columnItems = tko_items.filter(tko_item => tko_item.status === tko_column.id); return <section key={tko_column.id} className="min-w-0"><div className="mb-3 flex items-center justify-between px-1"><div className="flex items-center gap-2 text-xs font-semibold"><span className={`h-2 w-2 rounded-full ${tko_column.accent}`} /> {tko_column.label}<span className="text-[#9a9f99]">{tko_columnItems.length}</span></div><button aria-label={`More ${tko_column.label}`}><MoreHorizontal className="h-4 w-4 text-[#919791]" /></button></div><div className="min-h-[420px] space-y-2 rounded border border-dashed border-[#d9ddd6] bg-[#f0f1ed] p-2">{tko_columnItems.map(tko_item => <button onClick={() => tko_openItem(tko_item)} key={tko_item.id} className="group block w-full cursor-pointer border border-[#deded8] bg-white p-3 text-left shadow-[0_1px_1px_rgba(36,42,40,.04)] transition hover:-translate-y-0.5 hover:shadow-[0_5px_14px_rgba(36,42,40,.1)]"><div className="flex items-start justify-between gap-3"><span className="font-mono text-[10px] text-[#8d938d]">{tko_item.key}</span><PriorityMark priority={tko_item.priority} /></div><p className="mt-2 text-sm font-medium leading-5 text-[#303531]">{tko_item.title}</p><div className="mt-4 flex items-center justify-between text-[10px] text-[#858b85]"><span>{tko_item.detail}</span><span className="grid h-5 w-5 place-items-center rounded-full bg-[#dbe8e1] text-[8px] font-bold text-[#355d4d]">{tko_item.assignee}</span></div></button>)}<button onClick={() => toast("Tạo work item qua quick add được lên kế hoạch cho slice tiếp theo.")} className="flex w-full items-center gap-2 px-2 py-2 text-xs text-[#7c827c] hover:text-[#315c4a]"><Plus className="h-3.5 w-3.5" /> Add work item</button></div></section>; })}</div> : <div className="overflow-hidden border border-[#deded8] bg-white"><div className="grid grid-cols-[72px_minmax(260px,1fr)_120px_110px] border-b border-[#deded8] bg-[#f7f8f5] px-4 py-2 text-[10px] font-bold uppercase tracking-[.09em] text-[#818780]"><span>Key</span><span>Work item</span><span>Priority</span><span>Status</span></div>{tko_items.map(tko_item => <button onClick={() => tko_openItem(tko_item)} key={tko_item.id} className="grid w-full grid-cols-[72px_minmax(260px,1fr)_120px_110px] items-center border-b border-[#eeeeea] px-4 py-3 text-left text-xs last:border-b-0 hover:bg-[#fafbf8]"><span className="font-mono text-[#808780]">{tko_item.key}</span><span className="font-medium">{tko_item.title}</span><span className="flex items-center gap-2 capitalize"><PriorityMark priority={tko_item.priority} />{tko_item.priority}</span><span className="capitalize text-[#65746c]">{tko_item.status.replace("_", " ")}</span></button>)}</div>}
-          </section>
-        </main>
+    <div className="min-w-0 bg-[#fbfbfe]">
+      <div className="border-b border-[#eaecf0] bg-white px-5 py-5 lg:px-7">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div><div className="flex items-center gap-2"><h1 className="text-[21px] font-semibold tracking-[-.035em] text-[#182230]">{tko_projectName}</h1><span className="inline-flex items-center gap-1 rounded-full bg-[#ecfdf3] px-2 py-0.5 text-[11px] font-medium text-[#067647]"><CheckCircle2 className="h-3 w-3" />On track</span><button aria-label="More project actions" className="grid h-7 w-7 place-items-center rounded-md text-[#98a2b3] hover:bg-[#f9fafb]"><MoreHorizontal className="h-4 w-4" /></button></div><p className="mt-1 text-[13px] text-[#667085]">Plan delivery, coordinate work and turn conversations into outcomes.</p></div>
+          <div className="flex items-center gap-2"><div className="hidden -space-x-2 sm:flex">{["AM", "PS", "RK"].map(tko_member => <span key={tko_member} className="grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-[#e7e5ff] text-[9px] font-bold text-[#5146d9]">{tko_member}</span>)}</div>{isAuthenticated ? <Button onClick={() => tko_selectedProject ? toast("Chọn một cột để thêm work item trong workflow tiếp theo.") : tko_seed.mutate()} disabled={tko_seed.isPending} className="h-9 rounded-lg bg-[#5b51e8] px-3.5 text-xs font-semibold hover:bg-[#4d43da]"><Plus className="mr-1.5 h-4 w-4" />{tko_selectedProject ? "Create task" : "Set up demo"}</Button> : <Button onClick={startLogin} className="h-9 rounded-lg bg-[#5b51e8] px-3.5 text-xs font-semibold hover:bg-[#4d43da]">Sign in</Button>}</div>
+        </div>
+        <div className="mt-5 flex items-center gap-5 overflow-x-auto border-t border-[#f2f4f7] pt-3 text-[13px] whitespace-nowrap"><button className="text-[#667085]">Overview</button><button onClick={() => setTkoView("board")} className={`border-b-2 pb-2 ${tko_view === "board" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Board</button><button onClick={() => setTkoView("list")} className={`border-b-2 pb-2 ${tko_view === "list" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Backlog</button><button className="text-[#667085]">Timeline</button><button className="text-[#667085]">Files</button></div>
       </div>
-      {tko_selectedItem ? <div className="fixed inset-0 z-50 flex justify-end bg-[#1d2421]/25" role="dialog" aria-modal="true" aria-label="Work item details">
-        <aside className="flex h-full w-full max-w-[470px] flex-col overflow-y-auto border-l border-[#deded8] bg-[#fbfbf8] shadow-[-16px_0_42px_rgba(32,42,37,.16)]">
-          <div className="relative border-b border-[#deded8] px-5 pb-5 pt-5 pr-12">
-            <button onClick={() => setTkoSelectedItem(null)} className="absolute right-4 top-4 grid h-8 w-8 place-items-center text-[#66716a] hover:bg-[#edf0eb]" aria-label="Close inspector"><X className="h-4 w-4" /></button>
-            <div className="flex items-center gap-2"><span className="font-mono text-xs text-[#718078]">{tko_selectedItem?.key}</span><PriorityMark priority={tko_selectedItem?.priority ?? "none"} /></div>
-            <h2 className="mt-2 text-lg font-semibold leading-6 text-[#252625]">{tko_selectedDetail?.item.title ?? tko_selectedItem?.title}</h2>
-            <p className="mt-1.5 text-sm text-[#6c756e]">{tko_selectedDetail?.item.description || tko_selectedItem?.detail || "No description yet."}</p>
-          </div>
-          <div className="space-y-6 p-5 text-sm">
-            <section className="grid grid-cols-2 gap-px border border-[#deded8] bg-[#deded8] text-xs"><div className="bg-white p-3"><p className="text-[#858b85]">Status</p><p className="mt-1 font-medium capitalize">{tko_selectedItem?.status.replace("_", " ")}</p></div><div className="bg-white p-3"><p className="text-[#858b85]">Priority</p><p className="mt-1 flex items-center gap-1.5 font-medium capitalize"><PriorityMark priority={tko_selectedItem?.priority ?? "none"} />{tko_selectedItem?.priority}</p></div></section>
-            {tko_nextStatus ? <Button disabled={tko_transition.isPending} onClick={() => tko_transition.mutate({ workItemId: tko_selectedDetail!.item.id, targetStatusId: tko_nextStatus.id, expectedVersion: tko_selectedDetail!.item.version })} className="w-full rounded bg-[#315c4a] text-white hover:bg-[#274c3d]">Move to {tko_nextStatus.name}</Button> : null}
-            <section><p className="mb-2 text-xs font-semibold uppercase tracking-[.1em] text-[#7a817b]">Custom fields</p>{tko_selectedDetail?.customValues.length ? <div className="space-y-2">{tko_selectedDetail.customValues.map(tko_value => <div key={tko_value.id} className="flex justify-between border-b border-[#e7e8e3] py-2 text-xs"><span className="font-mono text-[#758078]">{tko_value.fieldId.slice(0, 8)}</span><span>{String(tko_value.value)}</span></div>)}</div> : <p className="text-xs text-[#858b85]">No custom values assigned.</p>}</section>
-            <section><p className="mb-2 text-xs font-semibold uppercase tracking-[.1em] text-[#7a817b]">Activity</p><div className="space-y-3">{tko_selectedDetail?.history.slice().reverse().map(tko_entry => <div key={tko_entry.id} className="border-l-2 border-[#d8e5df] pl-3 text-xs"><p className="font-medium">{tko_entry.field.replace("_", " ")}</p><p className="mt-0.5 text-[#858b85]">Updated in tenant-scoped history</p></div>) ?? <p className="text-xs text-[#858b85]">Open a live item to inspect history.</p>}</div></section>
-            {!tko_isPreview ? <section><p className="mb-2 text-xs font-semibold uppercase tracking-[.1em] text-[#7a817b]">Comment</p><textarea value={tko_commentDraft} onChange={tko_event => setTkoCommentDraft(tko_event.target.value)} className="min-h-20 w-full border border-[#deded8] bg-white p-3 text-xs outline-none focus:border-[#315c4a]" placeholder="Add a decision, context or handoff…" /><Button disabled={!tko_commentDraft.trim() || tko_comment.isPending} onClick={() => tko_comment.mutate({ workItemId: tko_selectedDetail!.item.id, body: tko_commentDraft.trim() })} className="mt-2 h-8 rounded bg-[#315c4a] px-3 text-xs text-white hover:bg-[#274c3d]"><Send className="mr-1.5 h-3.5 w-3.5" /> Add comment</Button></section> : null}
-          </div>
-        </aside>
-      </div> : null}
+      <section className="px-5 py-5 lg:px-7">
+        {tko_isPreview && !tko_authLoading ? <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#fedf89] bg-[#fffaeb] px-3 py-2.5 text-xs text-[#93370d]"><Sparkles className="h-4 w-4" /><span>Work Alpha preview. Sign in to load your tenant-scoped project and create work.</span><button onClick={startLogin} className="ml-auto font-semibold underline">Sign in</button></div> : null}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap gap-2"><button className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467]"><CalendarDays className="h-3.5 w-3.5" />Sprint 2: May 6 – May 19 <ChevronDown className="h-3.5 w-3.5" /></button><div className="relative"><button onClick={() => setTkoFilterOpen(!tko_filterOpen)} className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467]"><ListFilter className="h-3.5 w-3.5" />Filters <ChevronDown className="h-3.5 w-3.5" /></button>{tko_filterOpen ? <div className="absolute z-20 mt-1 w-48 rounded-lg border border-[#eaecf0] bg-white p-1.5 text-xs shadow-lg"><button className="block w-full rounded px-2 py-2 text-left hover:bg-[#f4f3ff]">Assigned to me</button><button className="block w-full rounded px-2 py-2 text-left hover:bg-[#f4f3ff]">Due this sprint</button></div> : null}</div><button className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467]"><SlidersHorizontal className="h-3.5 w-3.5" />Group: None <ChevronDown className="h-3.5 w-3.5" /></button></div><div className="flex items-center gap-1 rounded-lg border border-[#eaecf0] bg-white p-1"><button onClick={() => setTkoView("board")} aria-label="Board view" className={`grid h-7 w-7 place-items-center rounded ${tko_view === "board" ? "bg-[#f0efff] text-[#5b51e8]" : "text-[#667085]"}`}><Columns3 className="h-4 w-4" /></button><button onClick={() => setTkoView("list")} aria-label="List view" className={`grid h-7 w-7 place-items-center rounded ${tko_view === "list" ? "bg-[#f0efff] text-[#5b51e8]" : "text-[#667085]"}`}><LayoutList className="h-4 w-4" /></button></div></div>
+        {tko_view === "board" ? <div className="overflow-x-auto pb-4"><div className="grid min-w-[900px] grid-cols-3 gap-3">{tko_columns.map(tko_column => { const tko_columnItems = tko_items.filter(tko_item => tko_item.status === tko_column.id); return <section key={tko_column.id} className="rounded-xl bg-[#f8f8fc] p-2.5"><div className="mb-2.5 flex items-center justify-between px-1"><div className="flex items-center gap-2 text-xs font-semibold text-[#344054]"><span className={`h-2 w-2 rounded-full ${tko_column.accent}`} />{tko_column.label}<span className="grid h-5 min-w-5 place-items-center rounded bg-white px-1 text-[10px] text-[#667085]">{tko_columnItems.length}</span></div><button aria-label={`Add to ${tko_column.label}`} className="text-[#98a2b3] hover:text-[#5b51e8]"><Plus className="h-4 w-4" /></button></div><div className="space-y-2">{tko_columnItems.map(tko_item => <button type="button" key={tko_item.id} onClick={() => tko_openItem(tko_item)} className="block w-full rounded-lg border border-[#eaecf0] bg-white p-3 text-left shadow-[0_1px_2px_rgba(16,24,40,.04)] transition hover:-translate-y-px hover:border-[#c7c3ff] hover:shadow-[0_7px_18px_rgba(91,81,232,.09)]"><div className="flex items-start justify-between gap-2"><span className="font-mono text-[10px] text-[#98a2b3]">{tko_item.key}</span><TkoPriority priority={tko_item.priority} compact /></div><p className="mt-2 text-[13px] font-semibold leading-5 text-[#344054]">{tko_item.title}</p><div className="mt-3 flex items-center justify-between text-[11px] text-[#667085]"><span className="flex items-center gap-1"><CalendarDays className="h-3 w-3 text-[#98a2b3]" />{tko_item.dueLabel}</span><span className="flex items-center gap-2"><span className="grid h-5 w-5 place-items-center rounded-full bg-[#e7e5ff] text-[8px] font-bold text-[#5146d9]">{tko_item.assignee}</span><span className="flex items-center gap-0.5"><MessageCircle className="h-3 w-3" />0</span></span></div><p className="mt-2 flex items-center gap-1 text-[10px] text-[#5b51e8]"><FolderKanban className="h-3 w-3" />{tko_item.detail}</p></button>)}<button type="button" onClick={() => toast("Quick add will be available in the next Work slice.")} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs text-[#667085] hover:bg-white hover:text-[#5b51e8]"><Plus className="h-3.5 w-3.5" />Add task</button></div></section>; })}</div></div> : <div className="overflow-hidden rounded-xl border border-[#eaecf0] bg-white"><div className="grid grid-cols-[90px_minmax(260px,1fr)_130px_130px] border-b border-[#eaecf0] bg-[#fcfcfd] px-4 py-2.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#98a2b3]"><span>Key</span><span>Work item</span><span>Priority</span><span>Status</span></div>{tko_items.map(tko_item => <button type="button" key={tko_item.id} onClick={() => tko_openItem(tko_item)} className="grid w-full grid-cols-[90px_minmax(260px,1fr)_130px_130px] items-center border-b border-[#f2f4f7] px-4 py-3 text-left text-xs last:border-b-0 hover:bg-[#fcfcff]"><span className="font-mono text-[#98a2b3]">{tko_item.key}</span><span className="font-semibold text-[#344054]">{tko_item.title}</span><span><TkoPriority priority={tko_item.priority} /></span><span className="capitalize text-[#667085]">{tko_item.status.replace("_", " ")}</span></button>)}</div>}
+      </section>
+      {tko_selectedItem ? <div className="fixed inset-0 z-[60] flex justify-end bg-[#101828]/20" role="dialog" aria-modal="true" aria-label="Work item details"><aside className="h-full w-full max-w-[420px] overflow-y-auto border-l border-[#eaecf0] bg-white shadow-[-16px_0_38px_rgba(16,24,40,.15)]"><div className="border-b border-[#eaecf0] px-5 py-5"><div className="flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-[.11em] text-[#98a2b3]">Task</span><button onClick={() => setTkoSelectedItem(null)} aria-label="Close inspector" className="grid h-8 w-8 place-items-center rounded-md text-[#667085] hover:bg-[#f9fafb]"><X className="h-4 w-4" /></button></div><div className="mt-4 flex items-center gap-2"><TkoPriority priority={tko_selectedItem.priority} /><button className="flex items-center gap-1 rounded-md border border-[#d0d5dd] px-2 py-1 text-[11px] font-medium text-[#5b51e8]"><CircleDot className="h-3 w-3" />{tko_selectedItem.status.replace("_", " ")}</button></div><h2 className="mt-3 text-xl font-semibold tracking-[-.03em] text-[#182230]">{tko_selectedDetail?.item.title ?? tko_selectedItem.title}</h2><p className="mt-2 text-[13px] leading-5 text-[#667085]">{tko_selectedDetail?.item.description || "Keep the context, decisions and delivery notes attached to this work item."}</p></div><div className="space-y-6 p-5"><section className="space-y-3 text-xs"><div className="flex items-center justify-between"><span className="text-[#667085]">Assignee</span><span className="flex items-center gap-2 font-medium text-[#344054]"><span className="grid h-6 w-6 place-items-center rounded-full bg-[#e7e5ff] text-[9px] font-bold text-[#5146d9]">{tko_selectedItem.assignee}</span>Tasko member</span></div><div className="flex items-center justify-between"><span className="text-[#667085]">Due date</span><span className="flex items-center gap-1.5 font-medium text-[#344054]"><CalendarDays className="h-3.5 w-3.5 text-[#98a2b3]" />{tko_selectedItem.dueLabel}</span></div><div className="flex items-center justify-between"><span className="text-[#667085]">Project</span><span className="flex items-center gap-1.5 font-medium text-[#5b51e8]"><FolderKanban className="h-3.5 w-3.5" />{tko_projectName}</span></div></section>{tko_nextStatus ? <Button disabled={tko_transition.isPending} onClick={() => tko_transition.mutate({ workItemId: tko_selectedDetail!.item.id, targetStatusId: tko_nextStatus.id, expectedVersion: tko_selectedDetail!.item.version })} className="h-9 w-full rounded-lg bg-[#5b51e8] text-xs font-semibold hover:bg-[#4d43da]">Move to {tko_nextStatus.name}</Button> : null}<section className="border-t border-[#f2f4f7] pt-5"><div className="mb-3 flex items-center justify-between"><p className="text-[10px] font-bold uppercase tracking-[.11em] text-[#98a2b3]">Linked</p><button className="text-[11px] font-medium text-[#5b51e8]">Configure</button></div><Link href="/crm" className="flex items-center justify-between rounded-lg border border-[#eaecf0] p-3 text-xs hover:border-[#c7c3ff]"><span className="flex items-center gap-2 font-medium text-[#344054]"><span className="grid h-6 w-6 place-items-center rounded bg-[#ecfdf3] text-[#067647]">$</span>Deal context</span><ChevronDown className="h-3.5 w-3.5 -rotate-90 text-[#98a2b3]" /></Link><Link href="/chat" className="mt-2 flex items-center justify-between rounded-lg border border-[#eaecf0] p-3 text-xs hover:border-[#c7c3ff]"><span className="flex items-center gap-2 font-medium text-[#344054]"><span className="grid h-6 w-6 place-items-center rounded bg-[#f4f3ff] text-[#5b51e8]">#</span>Conversation</span><ChevronDown className="h-3.5 w-3.5 -rotate-90 text-[#98a2b3]" /></Link></section><section className="border-t border-[#f2f4f7] pt-5"><p className="mb-3 text-[10px] font-bold uppercase tracking-[.11em] text-[#98a2b3]">Activity</p>{tko_selectedDetail?.history.length ? <div className="space-y-3">{tko_selectedDetail.history.slice().reverse().map(tko_entry => <div key={tko_entry.id} className="border-l-2 border-[#d9d6fe] pl-3 text-xs"><p className="font-medium text-[#344054]">{tko_entry.field.replace("_", " ")} updated</p><p className="mt-0.5 text-[#98a2b3]">Tenant-scoped activity</p></div>)}</div> : <p className="text-xs text-[#98a2b3]">Open a live item to inspect history.</p>}</section>{!tko_isPreview ? <section className="border-t border-[#f2f4f7] pt-5"><label className="text-[10px] font-bold uppercase tracking-[.11em] text-[#98a2b3]">Add comment</label><textarea value={tko_commentDraft} onChange={tko_event => setTkoCommentDraft(tko_event.target.value)} className="mt-2 min-h-20 w-full rounded-lg border border-[#d0d5dd] p-3 text-xs outline-none focus:border-[#5b51e8] focus:ring-2 focus:ring-[#e7e5ff]" placeholder="Add a decision, context or handoff…" /><Button disabled={!tko_commentDraft.trim() || tko_comment.isPending} onClick={() => tko_comment.mutate({ workItemId: tko_selectedDetail!.item.id, body: tko_commentDraft.trim() })} className="mt-2 h-8 rounded-lg bg-[#5b51e8] px-3 text-xs hover:bg-[#4d43da]"><Send className="mr-1.5 h-3.5 w-3.5" />Add comment</Button></section> : null}</div></aside></div> : null}
     </div>
   );
 }

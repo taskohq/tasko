@@ -3,23 +3,26 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
+import TaskoShell from "./components/TaskoShell";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Work from "./pages/Work";
 import Chat from "./pages/Chat";
+import CRM from "./pages/CRM";
 
 function Router() {
-  // make sure to consider if you need authentication for certain routes
   return (
-    <Switch>
-      <Route path={"/"} component={Work} />
-      <Route path={"/platform"} component={Home} />
-      <Route path={"/work"} component={Work} />
-      <Route path={"/chat"} component={Chat} />
-      <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
-      <Route component={NotFound} />
-    </Switch>
+    <TaskoShell>
+      <Switch>
+        <Route path={"/"} component={Work} />
+        <Route path={"/platform"} component={Home} />
+        <Route path={"/work"} component={Work} />
+        <Route path={"/chat"} component={Chat} />
+        <Route path={"/crm"} component={CRM} />
+        <Route path={"/404"} component={NotFound} />
+        <Route component={NotFound} />
+      </Switch>
+    </TaskoShell>
   );
 }
 

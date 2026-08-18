@@ -66,3 +66,29 @@
 - [x] Storage fallback: quy định và kiểm chứng lựa chọn MinIO Docker khi Wasabi health check hoặc S3 operation thất bại, không làm rơi dữ liệu metadata hay bỏ qua authorization.
 - [x] Storage fallback gap: xác nhận runbook nêu quy trình chuyển MinIO Docker thủ công, tuyệt đối không tự động failover giữa Wasabi và MinIO sau một write thất bại.
 - [x] Storage fallback gap: chạy kiểm chứng lặp lại adapter bằng MinIO khi Wasabi không dùng được và xác nhận tenant isolation giữ nguyên.
+- [x] M3: thêm schema tenant-aware cho leads, companies, contacts, pipelines/stages, deals, activities và các liên kết CRM–Work–Chat.
+- [x] M3: xây dựng CRM store/service với lead conversion idempotent, audit/outbox nguyên tử và policy authorization tập trung.
+- [x] M3: tạo follow-up WorkItem liên kết CRM, deal stage transition và handoff won-deal sang delivery project/channel theo outbox consumer idempotent.
+- [x] M3: mở rộng tRPC typed CRM API cho lead/company/contact/pipeline/deal/activity, board và connected-view links.
+- [x] M3: tạo UI CRM desktop gồm lead list, deal pipeline board, quick create và detail inspector có related Work/Chat context.
+- [ ] M3: bổ sung seed controlled-pilot, negative authorization tests, acceptance scenarios H/I, typecheck/build/visual verification, commits và checkpoint.
+- [x] M3 verification: chạy migration/seed PostgreSQL Docker và thêm acceptance persistence CRM cho conversion/handoff/outbox tenant-scoped.
+- [x] M3 verification: kiểm tra trực quan route CRM trên desktop/mobile và ghi lại bằng chứng trước checkpoint.
+- [x] M3 UI gap: giới hạn pipeline board di động trong viewport với scroll ngang có chủ đích hoặc chế độ stage list dễ thao tác, không để canvas tràn ngoài bố cục.
+- [x] Migration reliability: thêm migration ledger giao dịch để migration PostgreSQL đã áp dụng không chạy lặp lại sau restart hoặc lỗi từng phần.
+- [x] M3 PostgreSQL gap: thêm acceptance Won Deal handoff tenant-scoped, xác minh durable handoff record, outbox event và liên kết delivery Work/Chat trên database Docker thực.
+- [x] M3 PostgreSQL gap: chạy lại suite Docker sau khi có handoff persistence test và chỉ đóng exit gate khi conversion lẫn handoff đều pass.
+- [x] M3 final regression: chạy các acceptance PostgreSQL M2 và M3 opt-in cùng typecheck, full tests và production build với cấu hình Docker sau thay đổi cuối.
+- [x] M3 seed gap: bổ sung pipeline, leads, company/contact, deals, activity và liên kết delivery CRM idempotent vào controlled-pilot seed PostgreSQL.
+- [x] M3 seed delivery gap: seed delivery handoff thật sự với `crm_deal_handoffs` và delivery project/channel links tenant-scoped, rồi chạy seed hai lần.
+- [x] M3 seed delivery verification: thêm assertion PostgreSQL xác nhận controlled-pilot CRM seed có handoff completed và `delivery_project`/`delivery_channel` links đúng tenant.
+- [x] M3 follow-up gap: triển khai hoặc surface rõ flow tạo WorkItem từ CRM qua service/API, ghi CRM↔Work link durable và tenant-scoped.
+- [x] M3 follow-up verification: thêm acceptance cho tạo follow-up WorkItem gồm audit/outbox và negative authorization trước khi đóng hạng mục tổng hợp.
+- [x] Design system: chuẩn hóa app shell hai lớp theo thiết kế tham chiếu gồm global header, command search, workspace switcher, primary rail và module navigation.
+- [x] Design system: nâng cấp màn hình Chat theo tham chiếu với metadata account/deal/project, tab context, message cards, linked items và thread inspector rõ ràng.
+- [x] Design system: nâng cấp Work và CRM theo tham chiếu với board mật độ cao, filters/metrics, right-side inspector, trạng thái priority và liên kết cross-module.
+- [ ] Design system: tạo Operations Overview M4 theo tham chiếu, hiển thị work graph và linked-object context bằng dữ liệu tenant-scoped thực.
+- [x] M3 follow-up hardening: xác minh source CRM entity tồn tại và cùng tenant trước khi tạo follow-up hoặc durable CRM entity link.
+- [x] M3 follow-up hardening verification: thêm acceptance từ chối entity CRM không tồn tại trước mọi write Work/CRM durable.
+- [x] Design system verification: thêm unit test bảo vệ module routing và navigation contracts của app shell hai lớp.
+- [x] M3 design source verification: ghi bằng chứng từ code, tests và screenshots cho shell, Work và Chat trước checkpoint.
