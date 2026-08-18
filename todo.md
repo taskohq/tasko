@@ -1,0 +1,24 @@
+# Project TODO
+
+- [x] Đọc và đối chiếu các tài liệu M0 bắt buộc cùng code mẫu ClickUp.
+- [x] Tổ chức cấu trúc modular monolith cho web, API, worker và packages dùng chung.
+- [x] Tạo tenant-aware schema, migration PostgreSQL và deployment profiles `single_tenant`/`saas`.
+- [x] Hoàn thiện xác thực, session/JWT và server-side tenant membership resolution.
+- [x] Xây dựng RBAC cùng lớp authorization tập trung có thể dùng cho HTTP, WebSocket và jobs.
+- [x] Bổ sung audit logging cho xác thực, tenant và thay đổi quyền.
+- [x] Triển khai transactional outbox, worker, retry và dead-letter skeleton.
+- [x] Thêm Redis adapters cho cache, pub/sub, rate limit, locks và queue abstraction.
+- [x] Thiết lập WebSocket gateway skeleton yêu cầu authentication và tenant-scoped pub/sub.
+- [x] Thêm attachment/object-storage abstraction dùng S3.
+- [x] Thêm health/readiness endpoints kiểm tra DB, Redis và worker.
+- [x] Tạo demo/seed workspace với tenant, thành viên và role mẫu.
+- [x] Xây dựng giao diện skeleton Tasko để kiểm tra session, profile và platform status.
+- [x] Viết automated tests cho tenant isolation, authorization negative cases và outbox flow.
+- [x] Viết hướng dẫn local development, migrations, seed, worker và deployment profiles.
+- [ ] Chạy typecheck, test, build và kiểm tra trực quan trước bàn giao.
+- [ ] Áp dụng authorization tập trung cho service identity và background job, kèm negative tests.
+- [ ] Ghi audit events thực tế cho authentication, membership và thay đổi role.
+- [ ] Mở rộng Redis abstraction cho cache, rate limiting, distributed lock và queue coordination.
+- [ ] Mở rộng seed để tạo owner, admin, member, guest và dữ liệu tenant mẫu.
+- [ ] Bổ sung tests xác minh các hạng mục nền tảng còn thiếu và isolation của seed data.
+- [ ] Khởi tạo/xác minh repository Git cục bộ và commit mốc nền tảng M0 theo tính năng.
