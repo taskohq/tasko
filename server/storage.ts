@@ -1,8 +1,24 @@
 // Preconfigured storage helpers for Manus WebDev templates
-// Uploads via Forge Server presigned URL to S3 (PUT direct).
-// Downloads return /manus-storage/{key} paths served via 307 redirect.
+// Durable file bytes use S3-compatible storage (Wasabi in use, MinIO in local dev).
+// Downloads are always exposed as app-relative URLs and resolved to a short-lived signed URL server-side.
 
 import { ENV } from "./_core/env";
+import { tkoGetSignedObjectUrl, tkoPutObject, type TkoS3StorageConfig } from "./storage.s3";
+
+function getTkoS3Config(): TkoS3StorageConfig {
+  return {
+    endpoint: ENV.s3Endpoint,
+    region: ENV.s3Region,
+    bucket: ENV.s3Bucket,
+    accessKeyId: ENV.s3AccessKeyId,
+    secretAccessKey: ENV.s3SecretAccessKey,
+    forcePathStyle: ENV.s3ForcePathStyle,
+  };
+}
+
+function useTkoS3Storage(): boolean {
+  return ENV.storageBackend === "s3" || Boolean(ENV.s3Endpoint && ENV.s3Bucket);
+}
 
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
@@ -33,8 +49,12 @@ export async function storagePut(
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
 ): Promise<{ key: string; url: string }> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
   const key = appendHashSuffix(normalizeKey(relKey));
+  if (useTkoS3Storage()) {
+    await tkoPutObject(getTkoS3Config(), key, data, contentType);
+    return { key, url: `/manus-storage/${key}` };
+  }
+  const { forgeUrl, forgeKey } = getForgeConfig();
 
   // 1. Get presigned PUT URL from Forge
   const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
@@ -77,8 +97,9 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
 }
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
   const key = normalizeKey(relKey);
+  if (useTkoS3Storage()) return tkoGetSignedObjectUrl(getTkoS3Config(), key);
+  const { forgeUrl, forgeKey } = getForgeConfig();
 
   const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
   getUrl.searchParams.set("path", key);
