@@ -41,6 +41,35 @@ try {
       [randomUUID(), tko_tenantResult.rows[0].id, tko_userResult.rows[0].id, tko_role, tko_displayName],
     );
   }
+  const tko_tenantId = tko_tenantResult.rows[0].id;
+  const tko_ownerMember = await tko_client.query(
+    `select tm.id from tenant_members tm join users u on u.id = tm.user_id where tm.tenant_id = $1 and u.auth_subject = $2`,
+    [tko_tenantId, tko_ownerAuthSubject],
+  );
+  const tko_existingProject = await tko_client.query(`select id from projects where tenant_id = $1 and key = 'TASKO'`, [tko_tenantId]);
+  if (!tko_existingProject.rowCount) {
+    const tko_spaceId = randomUUID();
+    const tko_workflowId = randomUUID();
+    const tko_projectId = randomUUID();
+    await tko_client.query(`insert into spaces (id, tenant_id, name, slug, visibility) values ($1, $2, 'Product', 'product', 'internal')`, [tko_spaceId, tko_tenantId]);
+    await tko_client.query(`insert into workflows (id, tenant_id, name) values ($1, $2, 'Tasko Work Alpha workflow')`, [tko_workflowId, tko_tenantId]);
+    const tko_statusIds = [randomUUID(), randomUUID(), randomUUID()];
+    for (const [tko_index, tko_status] of [["To do", "todo", "status.todo"], ["In progress", "in_progress", "status.progress"], ["Done", "done", "status.done"]].entries()) {
+      await tko_client.query(`insert into workflow_statuses (id, tenant_id, workflow_id, name, category, color_token, sort_order) values ($1,$2,$3,$4,$5,$6,$7)`, [tko_statusIds[tko_index], tko_tenantId, tko_workflowId, ...tko_status, (tko_index + 1) * 100]);
+    }
+    const tko_taskTypeId = randomUUID();
+    await tko_client.query(`insert into projects (id, tenant_id, space_id, key, name, description, owner_member_id, visibility, methodology, workflow_id, sequence_counter) values ($1,$2,$3,'TASKO','Tasko Work Alpha','M1 demo workspace',$4,'internal','scrum',$5,3)`, [tko_projectId, tko_tenantId, tko_spaceId, tko_ownerMember.rows[0].id, tko_workflowId]);
+    await tko_client.query(`insert into work_types (id, tenant_id, project_id, name, category, icon) values ($1,$2,$3,'Task','task','check-square')`, [tko_taskTypeId, tko_tenantId, tko_projectId]);
+    const tko_itemIds = [randomUUID(), randomUUID(), randomUUID()];
+    const tko_items = [["Define sprint objective", "high", tko_statusIds[0]], ["Ship project board", "urgent", tko_statusIds[1]], ["Confirm tenant isolation tests", "high", tko_statusIds[2]]];
+    for (const [tko_index, [tko_title, tko_priority, tko_statusId]] of tko_items.entries()) {
+      await tko_client.query(`insert into work_items (id, tenant_id, project_id, sequence_no, work_type_id, workflow_id, status_id, title, priority, reporter_member_id, rank, completed_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,case when $12 = 'done' then now() else null end)`, [tko_itemIds[tko_index], tko_tenantId, tko_projectId, tko_index + 1, tko_taskTypeId, tko_workflowId, tko_statusId, tko_title, tko_priority, tko_ownerMember.rows[0].id, `m${tko_index}`, tko_index === 2 ? "done" : ""]);
+    }
+    const tko_sprintId = randomUUID();
+    await tko_client.query(`insert into sprints (id, tenant_id, project_id, name, goal, state) values ($1,$2,$3,'Sprint 1','Establish the Work Alpha operating loop','active')`, [tko_sprintId, tko_tenantId, tko_projectId]);
+    for (const tko_itemId of tko_itemIds) await tko_client.query(`insert into sprint_items (tenant_id, sprint_id, work_item_id) values ($1,$2,$3)`, [tko_tenantId, tko_sprintId, tko_itemId]);
+    await tko_client.query(`update work_items set sprint_id = $1 where tenant_id = $2 and id = any($3::uuid[])`, [tko_sprintId, tko_tenantId, tko_itemIds]);
+  }
   await tko_client.query("commit");
   console.log(`Tasko seed workspace is ready: ${tko_tenantSlug}`);
 } catch (tko_error) {
