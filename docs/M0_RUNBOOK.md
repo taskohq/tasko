@@ -10,19 +10,21 @@ The same source tree supports `DEPLOYMENT_PROFILE=single_tenant` and `DEPLOYMENT
 | Redis | `TASKO_REDIS_URL` | In-process pub/sub adapter | Required for multi-instance realtime fan-out |
 | Deployment profile | `DEPLOYMENT_PROFILE` | `single_tenant` | `single_tenant` or `saas` |
 | Primary workspace | `TASKO_SINGLE_TENANT_SLUG` | `tasko-demo` | Required for OSS profile |
-| Worker | `TASKO_WORKER_POLL_MS`, `TASKO_WORKER_MAX_ATTEMPTS` | 1s / 8 attempts | Dedicated worker process |
+| Worker | `TASKO_WORKER_POLL_MS`, `TASKO_WORKER_MAX_ATTEMPTS`, `TASKO_WORKER_SERVICE_SUBJECT` | 1s / 8 attempts / `service:tasko-worker` | Dedicated worker process with tenant membership |
 
 ## PostgreSQL bootstrap
 
 Install PostgreSQL with `pgcrypto` available, provide `TASKO_POSTGRES_URL`, then run `pnpm db:platform:migrate`. The migration creates `tenants`, `users`, `tenant_members`, tenant-owned operational tables, transactional outbox, audit logs, and PostgreSQL RLS policies based on `app.tenant_id`.
 
-Set `OWNER_OPEN_ID` and run `pnpm db:platform:seed` to create the demo owner and the `tasko-demo` workspace. The seed is idempotent and can be safely re-run.
+Set `OWNER_OPEN_ID` and run `pnpm db:platform:seed` to create `tasko-demo`, an owner, admin, member, guest, and the worker service account. The seed is idempotent and can be safely re-run.
 
 ## Runtime model
 
 The HTTP process exposes `/health` for liveness and `/ready` for readiness. Health evaluates the database, Redis and worker state; readiness returns HTTP 503 if a configured dependency is not healthy. The WebSocket gateway accepts `/api/realtime` upgrades only after verifying the session and resolving an active membership. Subscriptions are tenant-scoped and reject a mismatched tenant ID.
 
-Run `pnpm worker` in a dedicated process to poll the PostgreSQL outbox. Each durable mutation must be created through the outbox service, which writes its audit entry and event in the same transaction. The consumer retries with bounded exponential backoff and moves events to `dead_letter` after `TASKO_WORKER_MAX_ATTEMPTS`.
+Run `pnpm worker` in a dedicated process to poll the PostgreSQL outbox. Each durable mutation must be created through the outbox service, which writes its audit entry and event in the same transaction. Each consumer re-resolves the tenant-scoped worker service account and uses the same capability check as HTTP before processing. The consumer retries with bounded exponential backoff and moves events to `dead_letter` after `TASKO_WORKER_MAX_ATTEMPTS`.
+
+The Redis adapter supplies namespaced tenant pub/sub plus cache, fixed-window rate limiting, distributed locks and queue coordination. PostgreSQL outbox remains the durable event source; Redis queues are not a replacement for durable business mutations.
 
 > For continuous WebSocket fan-out and worker polling in production, use a persistent process. Under managed hosting this corresponds to Reserved hosting; Autoscale remains suitable for request-only use when a separate worker is deployed.
 
