@@ -51,7 +51,7 @@
 - [x] M2 gap: triển khai mention projection/unread mention counter thật sự trong send/read flows và acceptance tests.
 - [x] M2 gap: hiển thị unread state và live presence trong Chat UI, không chỉ persistence/API.
 - [x] M2 gap: tạo các Git commits M2 theo nhóm và checkpoint sau verification cuối.
-- [ ] M2 checkpoint: lưu snapshot Collaboration Alpha sau verification cuối và ghi lại version bàn giao.
+- [x] M2 checkpoint: lưu snapshot Collaboration Alpha sau verification cuối và ghi lại version bàn giao (`40bc1cd7`).
 - [x] M2 production gap: sửa migration/seed scripts nếu có lỗi import hoặc cú pháp, rồi chạy migration và seed PostgreSQL cho attachment metadata.
 - [x] M2 production gap: xác minh end-to-end attachment persistence trên PostgreSQL sau khi migration runner hoạt động.
 - [x] Dev environment: thêm Docker Compose cho PostgreSQL và Redis với volumes, health checks, network nội bộ và credentials phát triển an toàn.
