@@ -9,6 +9,7 @@ import { can } from "./permissions/src/authorization";
 import { resolveTenantRequestContext } from "./tenancy/src/tenant-context";
 import { enqueueDurableEvent } from "./events/src/outbox-service";
 import { processOutboxOnce, registerOutboxConsumer } from "./worker/src/worker-service";
+import { changeMemberRole } from "./tenancy/src/membership-service";
 
 const tko_ownerSubject = "owner-a";
 const tko_otherSubject = "owner-b";
@@ -18,7 +19,7 @@ function createActor(tko_overrides: Partial<PlatformActor> = {}): PlatformActor 
     authSubject: tko_ownerSubject,
     tenantId: "tko-tenant-tasko-demo",
     tenantSlug: "tasko-demo",
-    memberId: "tko-member-demo-owner",
+    memberId: "tko-member-tasko-demo-owner",
     role: "owner",
     membershipStatus: "active",
     correlationId: "correlation-test",
@@ -55,9 +56,7 @@ describe("Tasko M0 platform boundaries", () => {
   });
 
   it("prevents direct cross-tenant resource access", () => {
-    const tko_decision = can(createActor(), {
-      "workspace.read": "workspace.read",
-    }["workspace.read"], {
+    const tko_decision = can(createActor(), "workspace.read", {
       tenantId: "tko-tenant-other-tenant",
       type: "project",
       id: "project-b",
@@ -85,6 +84,93 @@ describe("Tasko M0 platform boundaries", () => {
 
     expect(tko_adminDecision).toEqual({ allowed: false, reason: "capability_missing" });
     expect(tko_privateDecision).toEqual({ allowed: false, reason: "private_resource" });
+  });
+
+  it("seeds owner, admin, member, guest and worker identities per tenant", async () => {
+    const tko_subjects = [
+      tko_ownerSubject,
+      "demo-admin:tasko-demo",
+      "demo-member:tasko-demo",
+      "demo-guest:tasko-demo",
+      "service:tasko-worker",
+    ];
+    const tko_roles = await Promise.all(tko_subjects.map(async tko_subject => (await tko_store.listMemberships(tko_subject))[0]?.role));
+
+    expect(tko_roles).toEqual(["owner", "admin", "member", "guest", "service_account"]);
+  });
+
+  it("denies unprivileged role changes and writes audit plus outbox atomically for an owner", async () => {
+    const tko_target = (await tko_store.listMemberships("demo-member:tasko-demo"))[0];
+    expect(tko_target).toBeDefined();
+    await expect(
+      changeMemberRole({
+        actor: createActor({ role: "guest", memberId: "tko-member-tasko-demo-guest" }),
+        memberId: tko_target!.id,
+        newRole: "admin",
+        correlationId: "guest-denied",
+      }),
+    ).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+
+    await changeMemberRole({
+      actor: createActor(),
+      memberId: tko_target!.id,
+      newRole: "admin",
+      correlationId: "owner-role-change",
+    });
+
+    expect((await tko_store.listMemberships("demo-member:tasko-demo"))[0]?.role).toBe("admin");
+    expect((await tko_store.listAuditLogs())[0]).toMatchObject({
+      action: "tenant.membership.role_changed",
+      resourceId: tko_target!.id,
+    });
+    expect(await tko_store.reserveOutbox(5)).toHaveLength(1);
+  });
+
+  it("uses the central policy for service-account jobs and denies privilege escalation", async () => {
+    let tko_processed = false;
+    registerOutboxConsumer(
+      "platform.worker_denied.v1",
+      async () => {
+        tko_processed = true;
+      },
+      "workspace.members.manage",
+    );
+    await enqueueDurableEvent({
+      actor: createActor(),
+      tenantId: "tko-tenant-tasko-demo",
+      eventType: "platform.worker_denied.v1",
+      topic: "platform.events",
+      payload: {},
+      action: "platform.worker_denied.queued",
+      resourceType: "outbox",
+      resourceId: "worker-denied",
+      correlationId: "worker-denied",
+    });
+
+    expect(await processOutboxOnce()).toBe(1);
+    expect(tko_processed).toBe(false);
+    expect(
+      can(createActor({ role: "service_account", memberId: "tko-member-tasko-demo-service_account" }), "workspace.members.manage", {
+        tenantId: "tko-tenant-tasko-demo",
+        type: "outbox_job",
+        id: "worker-denied",
+      }),
+    ).toEqual({ allowed: false, reason: "capability_missing" });
+  });
+
+  it("provides cache, rate-limit, lock and queue coordination through the Redis boundary", async () => {
+    const tko_redis = getRedisAdapter();
+    await tko_redis.setCache("tenant-a:summary", "cached", 1_000);
+    expect(await tko_redis.getCache("tenant-a:summary")).toBe("cached");
+    expect((await tko_redis.takeRateLimit("tenant-a:mutation", 1, 1_000)).allowed).toBe(true);
+    expect((await tko_redis.takeRateLimit("tenant-a:mutation", 1, 1_000)).allowed).toBe(false);
+    const tko_lock = await tko_redis.acquireLock("tenant-a:outbox", 1_000);
+    expect(tko_lock).not.toBeNull();
+    expect(await tko_redis.acquireLock("tenant-a:outbox", 1_000)).toBeNull();
+    await tko_lock?.release();
+    expect(await tko_redis.acquireLock("tenant-a:outbox", 1_000)).not.toBeNull();
+    await tko_redis.enqueue("tenant-a:work", "job-1");
+    expect(await tko_redis.dequeue("tenant-a:work")).toBe("job-1");
   });
 
   it("writes audit and outbox records together, then publishes only to the matching tenant", async () => {
