@@ -18,6 +18,7 @@ export interface WorkerStatus {
 }
 
 const tko_consumers = new Map<string, RegisteredConsumer>();
+const tko_observers = new Set<OutboxConsumer>();
 let tko_workerStatus: WorkerStatus = {
   name: "worker",
   status: "standby",
@@ -34,6 +35,10 @@ export function registerOutboxConsumer(
   tko_consumers.set(tko_eventType, { consumer: tko_consumer, requiredCapability: tko_requiredCapability });
 }
 
+export function registerOutboxObserver(tko_observer: OutboxConsumer): void {
+  tko_observers.add(tko_observer);
+}
+
 export function getWorkerStatus(): WorkerStatus {
   return { ...tko_workerStatus, lastPollAt: tko_workerStatus.lastPollAt && new Date(tko_workerStatus.lastPollAt) };
 }
@@ -45,6 +50,7 @@ export async function processOutboxOnce(tko_limit = 25): Promise<number> {
 
   for (const tko_record of tko_records) {
     try {
+      for (const tko_observer of Array.from(tko_observers)) await tko_observer(tko_record);
       const tko_registeredConsumer = tko_consumers.get(tko_record.eventType);
       if (tko_registeredConsumer) {
         const tko_serviceActor = await resolveWorkerServiceActor({
