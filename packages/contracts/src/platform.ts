@@ -67,7 +67,12 @@ export type Capability =
   | "saas.billing.manage"
   | "saas.backup.manage"
   | "saas.restore.manage"
-  | "saas.metrics.read";
+  | "saas.metrics.read"
+  | "ecosystem.import.read"
+  | "ecosystem.import.manage"
+  | "ecosystem.api_token.manage"
+  | "ecosystem.webhook.manage"
+  | "ecosystem.integration.manage";
 
 export interface Tenant {
   id: string;
