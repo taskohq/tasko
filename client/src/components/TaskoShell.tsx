@@ -98,7 +98,7 @@ function TkoRailLink({ item, active }: { item: TkoNavItem; active: boolean }) {
   return (
     <Link
       href={item.path}
-      className={`group flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition-colors ${active ? "bg-[#eef0ff] font-semibold text-[#4f46e5]" : "text-[#667085] hover:bg-[#f7f7ff] hover:text-[#344054]"}`}
+      className={`group flex items-center gap-2 px-2 py-1.5 text-[13px] transition-colors ${active ? "border-l-2 border-[#0c66e4] bg-[#deebff] font-semibold text-[#0052cc]" : "border-l-2 border-transparent text-[#5e6c84] hover:bg-[#ebecf0] hover:text-[#172b4d]"}`}
     >
       <Icon className="h-4 w-4" />
       <span>{item.label}</span>
@@ -127,68 +127,68 @@ export default function TaskoShell({ children }: { children: ReactNode }) {
   const tko_initial = user?.name?.trim().slice(0, 1).toUpperCase() || "T";
 
   return (
-    <div className="min-h-screen bg-[#f8f8fc] text-[#182230]">
-      <header className="sticky top-0 z-50 flex h-16 items-center gap-4 border-b border-[#eaecf0] bg-white px-4 shadow-[0_1px_2px_rgba(16,24,40,.02)] lg:px-5">
-        <Link href="/platform" className="flex shrink-0 items-center gap-2.5 pr-2" aria-label="Tasko operations overview">
+    <div className="min-h-screen bg-[#f7f8f9] text-[#172b4d]">
+      <header className="sticky top-0 z-50 flex h-14 items-center gap-3 border-b border-[#dfe1e6] bg-white px-3 lg:px-4">
+        <Link href="/platform" className="flex shrink-0 items-center gap-2 pr-2" aria-label="Tasko operations overview">
           <img
             src={tko_brandAssets.favicon}
             alt=""
             aria-hidden="true"
-            className="h-8 w-8 object-contain sm:hidden"
+            className="h-7 w-7 object-contain sm:hidden"
           />
           <img
             src={tko_brandAssets.logo}
             alt="Tasko"
-            className="hidden h-8 w-auto object-contain sm:block"
+            className="hidden h-7 w-auto object-contain sm:block"
           />
         </Link>
-        <Link href="/platform#search" className="hidden max-w-[525px] flex-1 items-center gap-3 rounded-lg border border-[#eaecf0] bg-[#fcfcfd] px-3.5 py-2 text-left text-[13px] text-[#98a2b3] shadow-sm md:flex">
+        <Link href="/platform#search" className="hidden max-w-[525px] flex-1 items-center gap-3 border border-[#dfe1e6] bg-[#f4f5f7] px-3 py-1.5 text-left text-[13px] text-[#5e6c84] md:flex">
           <Search className="h-4 w-4" />
           <span className="flex-1">Search Tasko or type / command</span>
-          <kbd className="rounded border border-[#eaecf0] bg-white px-1.5 py-0.5 text-[10px] font-medium text-[#667085]">⌘ K</kbd>
+          <kbd className="border border-[#dfe1e6] bg-white px-1.5 py-0.5 text-[10px] font-medium text-[#5e6c84]">⌘ K</kbd>
         </Link>
         <div className="ml-auto flex items-center gap-2">
-          <button type="button" className="hidden items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 py-2 text-[13px] font-medium text-[#344054] shadow-sm lg:flex" onClick={() => toast("Workspace switcher sẽ hỗ trợ nhiều workspace trong M4.") }>
-            <Grid2X2 className="h-4 w-4 text-[#667085]" />
+          <button type="button" className="hidden items-center gap-2 border border-[#dfe1e6] bg-white px-2.5 py-1.5 text-[13px] font-medium text-[#172b4d] lg:flex" onClick={() => toast("Workspace switcher sẽ hỗ trợ nhiều workspace trong M4.") }>
+            <Grid2X2 className="h-4 w-4 text-[#5e6c84]" />
             <span>Acme Operations</span>
             <ChevronDown className="h-3.5 w-3.5 text-[#98a2b3]" />
           </button>
-          <button type="button" className="hidden h-9 items-center gap-1.5 rounded-lg bg-[#5b51e8] px-3.5 text-[13px] font-semibold text-white shadow-sm transition hover:bg-[#4d43da] active:scale-[.97] sm:flex" onClick={() => toast("Quick create sẽ tập hợp các flow Work, Chat và CRM trong M4.") }>
+          <button type="button" className="hidden h-8 items-center gap-1.5 bg-[#0c66e4] px-3 text-[13px] font-semibold text-white transition hover:bg-[#0055cc] active:scale-[.97] sm:flex" onClick={() => toast("Quick create sẽ tập hợp các flow Work, Chat và CRM trong M4.") }>
             <Plus className="h-4 w-4" /> Create
           </button>
-          <Link href="/inbox" aria-label="Notifications" className="relative grid h-9 w-9 place-items-center rounded-lg text-[#667085] hover:bg-[#f4f3ff] hover:text-[#5b51e8]">
+          <Link href="/inbox" aria-label="Notifications" className="relative grid h-8 w-8 place-items-center text-[#5e6c84] hover:bg-[#deebff] hover:text-[#0052cc]">
             <Bell className="h-[18px] w-[18px]" />
             <span className="absolute right-1 top-1 h-2 w-2 rounded-full border-2 border-white bg-[#f04438]" />
           </Link>
-          <button type="button" aria-label="Help" className="hidden grid h-9 w-9 place-items-center rounded-lg text-[#667085] hover:bg-[#f4f3ff] hover:text-[#5b51e8] sm:grid"><CircleHelp className="h-[18px] w-[18px]" /></button>
-          <button type="button" className="hidden items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-[#f9fafb] md:flex" onClick={() => toast("User profile controls are provided by Manus authentication.") }>
-            <span className="grid h-7 w-7 place-items-center rounded-full bg-[#e7e5ff] text-[11px] font-bold text-[#5146d9]">{tko_initial}</span>
-            <span className="hidden text-left lg:block"><span className="block text-xs font-semibold text-[#344054]">{user?.name || "Tasko member"}</span><span className="block text-[10px] text-[#98a2b3]">Operations</span></span>
-            <ChevronDown className="h-3.5 w-3.5 text-[#98a2b3]" />
+          <button type="button" aria-label="Help" className="hidden grid h-8 w-8 place-items-center text-[#5e6c84] hover:bg-[#deebff] hover:text-[#0052cc] sm:grid"><CircleHelp className="h-[18px] w-[18px]" /></button>
+          <button type="button" className="hidden items-center gap-2 px-1 py-1 hover:bg-[#f4f5f7] md:flex" onClick={() => toast("User profile controls are provided by Manus authentication.") }>
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-[#deebff] text-[11px] font-bold text-[#0052cc]">{tko_initial}</span>
+            <span className="hidden text-left lg:block"><span className="block text-xs font-semibold text-[#172b4d]">{user?.name || "Tasko member"}</span><span className="block text-[10px] text-[#5e6c84]">Operations</span></span>
+            <ChevronDown className="h-3.5 w-3.5 text-[#5e6c84]" />
           </button>
-          <button type="button" aria-label="Open navigation" className="grid h-9 w-9 place-items-center rounded-lg text-[#667085] hover:bg-[#f4f3ff] sm:hidden"><Menu className="h-5 w-5" /></button>
+          <button type="button" aria-label="Open navigation" className="grid h-8 w-8 place-items-center text-[#5e6c84] hover:bg-[#deebff] sm:hidden"><Menu className="h-5 w-5" /></button>
         </div>
       </header>
-      <div className="flex min-h-[calc(100vh-64px)]">
-        <nav aria-label="Primary navigation" className="sticky top-16 hidden h-[calc(100vh-64px)] w-[68px] shrink-0 border-r border-[#eaecf0] bg-white py-3 sm:flex sm:flex-col sm:items-center">
-          <div className="flex flex-col gap-1.5">
+      <div className="flex min-h-[calc(100vh-56px)]">
+        <nav aria-label="Primary navigation" className="sticky top-14 hidden h-[calc(100vh-56px)] w-[56px] shrink-0 border-r border-[#dfe1e6] bg-[#f4f5f7] py-2 sm:flex sm:flex-col sm:items-center">
+          <div className="flex flex-col gap-1">
             {tko_primaryItems.map(tko_item => {
               const Icon = tko_item.icon;
               const tko_active = tko_module === "overview" ? tko_item.path === "/platform" : tko_item.path === `/${tko_module}`;
-              return <Link key={tko_item.label} href={tko_item.path} aria-label={tko_item.label} className={`relative grid h-10 w-10 place-items-center rounded-lg transition-colors ${tko_active ? "bg-[#f0efff] text-[#5b51e8]" : "text-[#667085] hover:bg-[#f7f7ff] hover:text-[#5b51e8]"}`}><Icon className="h-[18px] w-[18px]" />{tko_item.badge ? <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#f04438] px-1 text-[9px] font-bold text-white">{tko_item.badge}</span> : null}</Link>;
+              return <Link key={tko_item.label} href={tko_item.path} aria-label={tko_item.label} className={`relative grid h-9 w-9 place-items-center transition-colors ${tko_active ? "bg-[#deebff] text-[#0052cc]" : "text-[#5e6c84] hover:bg-[#ebecf0] hover:text-[#172b4d]"}`}><Icon className="h-[17px] w-[17px]" />{tko_item.badge ? <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#f04438] px-1 text-[9px] font-bold text-white">{tko_item.badge}</span> : null}</Link>;
             })}
           </div>
-          <div className="mt-auto flex flex-col gap-2"><Link href="/settings" aria-label="Settings" className={`grid h-10 w-10 place-items-center rounded-lg transition-colors ${tko_location === "/settings" ? "bg-[#f0efff] text-[#5b51e8]" : "text-[#667085] hover:bg-[#f7f7ff] hover:text-[#5b51e8]"}`}><Settings className="h-[18px] w-[18px]" /></Link><span className="grid h-8 w-8 place-items-center self-center rounded-full bg-[#e7e5ff] text-[10px] font-bold text-[#5146d9]">{tko_initial}</span></div>
+          <div className="mt-auto flex flex-col gap-2"><Link href="/settings" aria-label="Settings" className={`grid h-9 w-9 place-items-center transition-colors ${tko_location === "/settings" ? "bg-[#deebff] text-[#0052cc]" : "text-[#5e6c84] hover:bg-[#ebecf0] hover:text-[#172b4d]"}`}><Settings className="h-[17px] w-[17px]" /></Link><span className="grid h-7 w-7 place-items-center self-center rounded-full bg-[#deebff] text-[10px] font-bold text-[#0052cc]">{tko_initial}</span></div>
         </nav>
-        <aside className="sticky top-16 hidden h-[calc(100vh-64px)] w-[232px] shrink-0 border-r border-[#eaecf0] bg-white px-3 py-5 lg:block">
-          <p className="px-2.5 text-[10px] font-bold uppercase tracking-[.11em] text-[#98a2b3]">{tko_context.eyebrow}</p>
-          <h2 className="px-2.5 pt-1 text-[17px] font-semibold tracking-[-.03em] text-[#182230]">{tko_context.label}</h2>
-          <nav className="mt-4 space-y-1" aria-label={`${tko_context.label} navigation`}>
+        <aside className="sticky top-14 hidden h-[calc(100vh-56px)] w-[220px] shrink-0 border-r border-[#dfe1e6] bg-[#f4f5f7] px-2 py-4 lg:block">
+          <p className="px-2 text-[10px] font-bold uppercase tracking-[.11em] text-[#5e6c84]">{tko_context.eyebrow}</p>
+          <h2 className="px-2 pt-1 text-[16px] font-semibold tracking-[-.02em] text-[#172b4d]">{tko_context.label}</h2>
+          <nav className="mt-3 space-y-0.5" aria-label={`${tko_context.label} navigation`}>
             {tko_context.nav.map(tko_item => <TkoRailLink key={`${tko_item.label}-${tko_item.path}`} item={tko_item} active={tko_item.path.split("#")[0] === tko_location && (!tko_item.path.includes("#") || tko_item.label === "Projects" || tko_item.label === "Deals" || tko_item.label === "Overview")} />)}
           </nav>
-          <div className="mt-8 border-t border-[#f2f4f7] pt-5">
-            <p className="px-2.5 text-[10px] font-bold uppercase tracking-[.11em] text-[#98a2b3]">Pinned</p>
-            <button type="button" onClick={() => toast("Pinned lists will be configurable in M4.") } className="mt-2 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] text-[#667085] hover:bg-[#f7f7ff]"><Sparkles className="h-4 w-4 text-[#665cf0]" />Ops updates</button>
+          <div className="mt-6 border-t border-[#dfe1e6] pt-4">
+            <p className="px-2 text-[10px] font-bold uppercase tracking-[.11em] text-[#5e6c84]">Pinned</p>
+            <button type="button" onClick={() => toast("Pinned lists will be configurable in M4.") } className="mt-2 flex w-full items-center gap-2 px-2 py-1.5 text-left text-[13px] text-[#5e6c84] hover:bg-[#ebecf0]"><Sparkles className="h-4 w-4 text-[#0052cc]" />Ops updates</button>
           </div>
         </aside>
         <div className="min-w-0 flex-1">{children}</div>

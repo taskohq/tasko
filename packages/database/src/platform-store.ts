@@ -28,6 +28,7 @@ export interface PlatformStore {
   readonly mode: PlatformStoreMode;
   health(): Promise<PlatformStoreHealth>;
   listMemberships(tko_authSubject: string): Promise<TenantMembership[]>;
+  listTenantMembers(tko_tenantId: string): Promise<TenantMembership[]>;
   findMembershipBySlug(
     tko_authSubject: string,
     tko_tenantSlug: string,
@@ -107,6 +108,26 @@ export class MemoryPlatformStore implements PlatformStore {
       ...tko_membership,
       tenant: { ...tko_membership.tenant },
     }));
+  }
+
+  async listTenantMembers(tko_tenantId: string): Promise<TenantMembership[]> {
+    const tko_members = new Map<string, TenantMembership>();
+    for (const tko_memberships of Array.from(this.tko_memberships.values())) {
+      for (const tko_membership of tko_memberships) {
+        if (
+          tko_membership.tenant.id === tko_tenantId
+          && tko_membership.tenant.status === "active"
+          && tko_membership.status === "active"
+          && tko_membership.role !== "service_account"
+        ) {
+          tko_members.set(tko_membership.id, {
+            ...tko_membership,
+            tenant: { ...tko_membership.tenant },
+          });
+        }
+      }
+    }
+    return Array.from(tko_members.values()).sort((tko_left, tko_right) => tko_left.displayName.localeCompare(tko_right.displayName));
   }
 
   async findMembershipBySlug(
@@ -360,6 +381,24 @@ export class PostgresPlatformStore implements PlatformStore {
         where u.auth_subject = $1 and tm.status = 'active' and t.status = 'active'
         order by t.created_at asc`,
       [tko_authSubject],
+    );
+    return tko_result.rows.map(tko_row => this.mapMembership(tko_row));
+  }
+
+  async listTenantMembers(tko_tenantId: string): Promise<TenantMembership[]> {
+    const tko_result = await this.tko_pool.query(
+      `select tm.id as member_id, tm.role, tm.status as membership_status, tm.display_name,
+              u.auth_subject, t.id as tenant_id, t.slug, t.name, t.status as tenant_status,
+              t.deployment_profile, t.created_at
+         from tenant_members tm
+         join users u on u.id = tm.user_id
+         join tenants t on t.id = tm.tenant_id
+        where tm.tenant_id = $1
+          and tm.status = 'active'
+          and t.status = 'active'
+          and tm.role <> 'service_account'
+        order by tm.display_name asc, tm.id asc`,
+      [tko_tenantId],
     );
     return tko_result.rows.map(tko_row => this.mapMembership(tko_row));
   }

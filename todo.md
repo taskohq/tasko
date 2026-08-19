@@ -129,6 +129,14 @@
 - [x] M4 search Chat materialization: đăng ký outbox consumer cho channel/message events và kiểm chứng global search trả Chat theo exact authorization.
 - [x] M4 automation WorkItem trigger verification: thêm acceptance chứng minh event `work.work_item_created.v1` thực thi action CRM activity đúng một lần.
 - [x] Authentication email/password single-tenant fix: dùng tenant vừa provision khi ghi audit và phát hành session, không resolve sai sang `TASKO_SINGLE_TENANT_SLUG` trong signup mới.
+- [x] Work Kanban drag-and-drop: hỗ trợ kéo work item giữa các cột trạng thái và sắp xếp trong cùng cột, qua mutation tenant-safe có authorization/audit/outbox/idempotency.
+- [x] Work Kanban interaction: thêm optimistic feedback, keyboard-accessible status move fallback, empty/drop indicators và error recovery cho board.
+- [x] Work management completeness: rà soát và hoàn thiện thao tác task lõi theo phạm vi Jira/ClickUp thực dụng gồm create/edit, assignee, priority, due date, description, comments, dependencies và filters đang có.
+- [x] Work Kanban verification: thêm tests transition/reorder/negative authorization, typecheck, regression, build, desktop/mobile visual review, commit và checkpoint.
+- [x] Jira visual system: chuẩn hóa global tokens theo cạnh thẳng, radius nhỏ, border phân cấp, shadow tối giản, typography/mật độ thông tin kiểu Jira.
+- [x] Jira app shell: cập nhật sidebar, top bar, navigation state và shared controls đồng nhất với visual system mới.
+- [x] Jira canvas rollout: áp dụng visual system mới nhất quán cho Overview, Work, Inbox, CRM, AI, Imports, Ecosystem, Settings và Admin.
+- [x] Jira visual verification: kiểm tra contrast, focus, responsive desktop/mobile, typecheck, regression, build, commit và checkpoint.
 - [x] M4 search Chat auth verification: thêm acceptance private channel/message để chứng minh non-member/guest không thấy kết quả, count hoặc snippet sau materialization.
 - [x] M4 global search leak-prevention verification: thêm acceptance cross-tenant và cross-visibility cho Work/Chat/CRM/Docs sau materialization, assert exact authorization trước trả kết quả.
 - [x] M4 search same-tenant visibility verification: thêm acceptance Docs private và resource Work hoặc CRM restricted để non-owner cùng tenant không thấy result/count/snippet sau materialization.

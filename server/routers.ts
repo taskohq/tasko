@@ -172,6 +172,21 @@ export const appRouter = router({
   work: router({
     spaces: tenantProcedure.query(({ ctx }) => getWorkStore().listSpaces(ctx.platform.actor.tenantId)),
     projects: tenantProcedure.query(({ ctx }) => getWorkStore().listProjects(ctx.platform.actor.tenantId)),
+    assignees: tenantProcedure.query(async ({ ctx }) => {
+      const tko_decision = can(ctx.platform.actor, "work.item.read", {
+        tenantId: ctx.platform.actor.tenantId,
+        type: "tenant_member_directory",
+        id: "work-assignees",
+        visibility: "internal",
+      });
+      if (!tko_decision.allowed) throw new Error(`TASKO_AUTHORIZATION_DENIED:${tko_decision.reason}`);
+      const tko_members = await getPlatformStore().listTenantMembers(ctx.platform.actor.tenantId);
+      return tko_members.map(tko_member => ({
+        id: tko_member.id,
+        displayName: tko_member.displayName,
+        role: tko_member.role,
+      }));
+    }),
     board: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.board(ctx.platform.actor, input.projectId)),
     item: tenantProcedure.input(z.object({ workItemId: z.string().uuid() })).query(async ({ ctx, input }) => {
       return workService.itemDetails(ctx.platform.actor, input.workItemId);
@@ -181,6 +196,8 @@ export const appRouter = router({
     createProject: tenantProcedure.input(z.object({ spaceId: z.string().uuid(), name: z.string().trim().min(2).max(160), key: z.string().trim().min(2).max(10), description: z.string().max(10_000).optional(), methodology: z.enum(["kanban", "scrum", "simple"]).default("kanban"), visibility: z.enum(["internal", "private", "guest_shared"]).default("internal") })).mutation(({ ctx, input }) => workService.createProject({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
     createItem: tenantProcedure.input(z.object({ projectId: z.string().uuid(), workTypeId: z.string().uuid().optional(), parentId: z.string().uuid().nullable().optional(), title: z.string().trim().min(1).max(500), description: z.string().max(50_000).optional(), priority: z.enum(["none", "low", "medium", "high", "urgent"]).default("none"), assigneeMemberIds: z.array(z.string().uuid()).max(50).default([]), startAt: z.date().nullable().optional(), dueAt: z.date().nullable().optional(), estimateMinutes: z.number().int().min(0).max(1_000_000).nullable().optional(), rank: z.string().min(1).max(80).optional() })).mutation(({ ctx, input }) => workService.createWorkItem({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
     transitionItem: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), targetStatusId: z.string().uuid(), expectedVersion: z.number().int().positive() })).mutation(({ ctx, input }) => workService.transitionWorkItem({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
+    moveItem: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), targetStatusId: z.string().uuid(), beforeWorkItemId: z.string().uuid().nullable().optional(), expectedVersion: z.number().int().positive() })).mutation(({ ctx, input }) => workService.moveWorkItem({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
+    updateItem: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), expectedVersion: z.number().int().positive(), title: z.string().trim().min(1).max(500).optional(), description: z.string().max(50_000).optional(), priority: z.enum(["none", "low", "medium", "high", "urgent"]).optional(), assigneeMemberIds: z.array(z.string().uuid()).max(50).optional(), startAt: z.date().nullable().optional(), dueAt: z.date().nullable().optional(), estimateMinutes: z.number().int().min(0).max(1_000_000).nullable().optional() })).mutation(({ ctx, input }) => workService.updateWorkItem({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
     createComment: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), body: z.string().trim().min(1).max(20_000) })).mutation(({ ctx, input }) => workService.createComment({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
     addDependency: tenantProcedure.input(z.object({ sourceWorkItemId: z.string().uuid(), targetWorkItemId: z.string().uuid(), relationType: z.enum(["blocks", "blocked_by", "relates_to", "duplicates", "duplicated_by"]) })).mutation(({ ctx, input }) => workService.addDependency(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     createSprint: tenantProcedure.input(z.object({ projectId: z.string().uuid(), name: z.string().trim().min(1).max(120), goal: z.string().max(5_000).optional(), startAt: z.date().nullable().optional(), endAt: z.date().nullable().optional() })).mutation(({ ctx, input }) => workService.createSprint({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),

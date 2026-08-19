@@ -156,6 +156,25 @@ export interface TransitionWorkItemInput {
   correlationId: string;
 }
 
+export interface MoveWorkItemInput extends TransitionWorkItemInput {
+  /** Insert immediately before this item in the target column; null appends. */
+  beforeWorkItemId?: string | null;
+}
+
+export interface UpdateWorkItemInput {
+  actor: PlatformActor;
+  workItemId: string;
+  expectedVersion: number;
+  title?: string;
+  description?: string;
+  priority?: WorkPriority;
+  assigneeMemberIds?: string[];
+  startAt?: Date | null;
+  dueAt?: Date | null;
+  estimateMinutes?: number | null;
+  correlationId: string;
+}
+
 export interface CreateCommentInput {
   actor: PlatformActor;
   workItemId: string;

@@ -99,6 +99,17 @@ describe("Tasko M0 platform boundaries", () => {
     expect(tko_roles).toEqual(["owner", "admin", "member", "guest", "service_account"]);
   });
 
+  it("lists only active human assignees in the requested tenant", async () => {
+    const tko_demoMembers = await tko_store.listTenantMembers("tko-tenant-tasko-demo");
+    const tko_otherMembers = await tko_store.listTenantMembers("tko-tenant-other-tenant");
+
+    expect(tko_demoMembers.map(tko_member => tko_member.role)).toEqual(["admin", "guest", "member", "owner"]);
+    expect(tko_demoMembers.every(tko_member => tko_member.tenant.id === "tko-tenant-tasko-demo")).toBe(true);
+    expect(tko_demoMembers.some(tko_member => tko_member.authSubject === "service:tasko-worker")).toBe(false);
+    expect(tko_otherMembers.every(tko_member => tko_member.tenant.id === "tko-tenant-other-tenant")).toBe(true);
+    expect(tko_otherMembers.some(tko_member => tko_member.id === tko_demoMembers[0]?.id)).toBe(false);
+  });
+
   it("denies unprivileged role changes and writes audit plus outbox atomically for an owner", async () => {
     const tko_target = (await tko_store.listMemberships("demo-member:tasko-demo"))[0];
     expect(tko_target).toBeDefined();

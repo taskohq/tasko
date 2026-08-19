@@ -111,6 +111,31 @@ describe("Work Alpha acceptance boundaries", () => {
     await tko_unsubscribe();
   });
 
+  it("moves and reorders Kanban work atomically while preserving authorization, history and outbox", async () => {
+    const tko_owner = await tko_actor();
+    const tko_guest = { ...tko_owner, authSubject: "kanban-guest", memberId: "guest-member", role: "guest" as const };
+    const tko_space = await work.createSpace(tko_owner, { name: "Delivery", slug: "delivery", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Kanban delivery", key: "KBN", methodology: "kanban", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_first = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "First card", correlationId: tko_owner.correlationId });
+    const tko_second = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Second card", correlationId: tko_owner.correlationId });
+    const tko_third = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Third card", correlationId: tko_owner.correlationId });
+    const tko_board = await work.board(tko_owner, tko_project.id);
+    const tko_inProgress = tko_board.statuses.find(tko_status => tko_status.category === "in_progress");
+    if (!tko_inProgress) throw new Error("TEST_STATUS_MISSING");
+
+    const tko_reordered = await work.moveWorkItem({ actor: tko_owner, workItemId: tko_third.id, targetStatusId: tko_third.statusId, beforeWorkItemId: tko_first.id, expectedVersion: 1, correlationId: tko_owner.correlationId });
+    const tko_moved = await work.moveWorkItem({ actor: tko_owner, workItemId: tko_second.id, targetStatusId: tko_inProgress.id, expectedVersion: 1, correlationId: tko_owner.correlationId });
+    const tko_after = await work.board(tko_owner, tko_project.id);
+
+    expect(tko_reordered.version).toBe(2);
+    expect(tko_moved.statusId).toBe(tko_inProgress.id);
+    expect(tko_after.items.filter(tko_item => tko_item.statusId === tko_third.statusId).map(tko_item => tko_item.id)).toEqual([tko_third.id, tko_first.id]);
+    expect((await tko_workStore.listHistory(tko_owner.tenantId, tko_third.id)).at(-1)?.field).toBe("kanban_position");
+    expect((await tko_platformStore.listAuditLogs()).some(tko_event => tko_event.action === "work.work_item.moved")).toBe(true);
+    await expect(work.moveWorkItem({ actor: tko_guest, workItemId: tko_first.id, targetStatusId: tko_inProgress.id, expectedVersion: 1, correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+    await expect(work.moveWorkItem({ actor: tko_owner, workItemId: tko_second.id, targetStatusId: tko_inProgress.id, expectedVersion: 1, correlationId: tko_owner.correlationId })).rejects.toThrow("WORK_ITEM_VERSION_CONFLICT");
+  });
+
   it("keeps custom fields tenant and project scoped while rejecting guest administration", async () => {
     const tko_owner = await tko_actor();
     const tko_guest = { ...tko_owner, authSubject: "demo-guest:tasko-demo", memberId: "guest-member", role: "guest" as const };

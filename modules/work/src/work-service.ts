@@ -3,7 +3,9 @@ import type {
   CreateProjectInput,
   CreateSprintInput,
   CreateWorkItemInput,
+  MoveWorkItemInput,
   TransitionWorkItemInput,
+  UpdateWorkItemInput,
   WorkCustomFieldType,
   WorkItem,
   WorkProject,
@@ -97,6 +99,18 @@ export async function transitionWorkItem(tko_input: TransitionWorkItemInput) {
   const tko_item = await tko_itemFor(tko_input.actor, tko_input.workItemId);
   tko_require(tko_input.actor, "work.item.transition", tko_item);
   return getWorkStore().transitionWorkItem(tko_input);
+}
+
+export async function moveWorkItem(tko_input: MoveWorkItemInput) {
+  const tko_item = await tko_itemFor(tko_input.actor, tko_input.workItemId);
+  tko_require(tko_input.actor, "work.item.transition", tko_item);
+  return getWorkStore().moveWorkItem(tko_input);
+}
+
+export async function updateWorkItem(tko_input: UpdateWorkItemInput) {
+  const tko_item = await tko_itemFor(tko_input.actor, tko_input.workItemId);
+  tko_require(tko_input.actor, "work.item.update", tko_item);
+  return getWorkStore().updateWorkItem(tko_input);
 }
 
 export async function createComment(tko_input: CreateCommentInput) {
