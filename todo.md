@@ -87,8 +87,32 @@
 - [x] Design system: chuẩn hóa app shell hai lớp theo thiết kế tham chiếu gồm global header, command search, workspace switcher, primary rail và module navigation.
 - [x] Design system: nâng cấp màn hình Chat theo tham chiếu với metadata account/deal/project, tab context, message cards, linked items và thread inspector rõ ràng.
 - [x] Design system: nâng cấp Work và CRM theo tham chiếu với board mật độ cao, filters/metrics, right-side inspector, trạng thái priority và liên kết cross-module.
-- [ ] Design system: tạo Operations Overview M4 theo tham chiếu, hiển thị work graph và linked-object context bằng dữ liệu tenant-scoped thực.
+- [x] Design system: tạo Operations Overview M4 theo tham chiếu, hiển thị work graph và linked-object context bằng dữ liệu tenant-scoped thực.
 - [x] M3 follow-up hardening: xác minh source CRM entity tồn tại và cùng tenant trước khi tạo follow-up hoặc durable CRM entity link.
 - [x] M3 follow-up hardening verification: thêm acceptance từ chối entity CRM không tồn tại trước mọi write Work/CRM durable.
 - [x] Design system verification: thêm unit test bảo vệ module routing và navigation contracts của app shell hai lớp.
 - [x] M3 design source verification: ghi bằng chứng từ code, tests và screenshots cho shell, Work và Chat trước checkpoint.
+- [x] M4 foundation: thêm migration tenant-aware và RLS cho unified search projection, personal Inbox, shared entity relations, documents, forms/submissions, automation rules/executions và dashboard projections cần thiết.
+- [x] M4 foundation: xây dựng memory/PostgreSQL store và service/API typed cho Unified Workspace, áp dụng authorization tập trung, server-side membership resolution, audit và transactional outbox cho mọi mutation durable.
+- [x] M4 global search: index Work, Chat, CRM và Docs; query theo tenant → coarse visibility → exact authorization, không rò rỉ count/snippet của entity không truy cập được.
+- [x] M4 Inbox: materialize attention items từ durable events, hỗ trợ unread/read/archive và liên kết chính xác về Work, Chat hoặc CRM.
+- [x] M4 Docs: tạo document JSON/text projection với template, entity mentions/live links và quyền tenant-scoped; expose Docs UI trong shared shell.
+- [x] M4 Forms: form builder nội bộ với field validation và target mapping tạo WorkItem hoặc CRM Lead qua service authorization/audit/outbox.
+- [x] M4 Automation v1: event-driven rule engine deterministic với condition schema tối thiểu, idempotency/depth guard, execution log/audit và action create WorkItem hoặc CRM activity; không dùng polling/scheduled worker cho trigger v1.
+- [x] M4 Operations Overview: thay thế platform status canvas bằng overview theo reference gồm KPI strip, Inbox/today context, cross-module activity, linked objects và work graph dùng dữ liệu tenant-scoped thực.
+- [x] M4 calendar/timeline: thêm calendar/timeline renderer tenant-scoped cho Work item dates và liên kết từ module navigation.
+- [ ] M4 verification: thêm acceptance search isolation/grouping, Inbox state, Doc relation, Form target mapping và automation idempotency/guest denial; typecheck, full test, build, visual desktop/mobile, Git commits và checkpoint.
+- [x] M4 Overview verification: thêm acceptance cho `workspace.overview` với dữ liệu tenant-scoped thật, gồm KPI, linked objects, cross-module activity và work graph.
+- [x] M4 Overview authenticated visual verification: defer populated screenshot do preview proxy chặn POST seed HTTP 403; đã lưu bằng chứng phiên authenticated, empty state trung thực và service acceptance với dữ liệu thật.
+- [x] M4 Overview hardening: expose linked-object context và work graph thực từ service/API, rồi render chúng trong Operations Overview tenant-scoped.
+- [ ] OAuth callback regression: điều tra lỗi callback sau Google login, sửa nguyên nhân cấu hình/validation và thêm test cho success/failure contract trước khi tiếp tục visual verification M4.
+- [ ] Deferred OAuth/browser follow-up: quay lại sửa callback và tạo populated authenticated Overview screenshot sau khi hoàn tất M5–M7; không chặn checkpoint M4 theo yêu cầu người dùng.
+- [x] M4 search grouping verification: thêm acceptance chứng minh global search nhóm Work/Chat/CRM/Docs theo type dưới tenant scope, ngoài coverage deny/isolation hiện có.
+- [x] M4 search Chat materialization: đăng ký outbox consumer cho channel/message events và kiểm chứng global search trả Chat theo exact authorization.
+- [x] M4 automation WorkItem trigger verification: thêm acceptance chứng minh event `work.work_item_created.v1` thực thi action CRM activity đúng một lần.
+- [x] M4 search Chat auth verification: thêm acceptance private channel/message để chứng minh non-member/guest không thấy kết quả, count hoặc snippet sau materialization.
+- [x] M4 global search leak-prevention verification: thêm acceptance cross-tenant và cross-visibility cho Work/Chat/CRM/Docs sau materialization, assert exact authorization trước trả kết quả.
+- [x] M4 search same-tenant visibility verification: thêm acceptance Docs private và resource Work hoặc CRM restricted để non-owner cùng tenant không thấy result/count/snippet sau materialization.
+- [x] M4 Work search authorization hardening: resolve project visibility khi kiểm tra WorkItem search để item trong private project không bị lộ cho non-owner cùng tenant.
+- [x] M4 private search materialization hardening: cho phép worker index trusted outbox của resource private trong tenant, nhưng chỉ lọc exact authorization ở read path user.
+- [x] M4 search CRM authorization clarification: ghi rõ CRM Alpha chỉ có tenant-wide visibility; bổ sung acceptance cross-tenant CRM isolation và điều chỉnh checklist không hứa hẹn restricted visibility chưa có trong domain model.

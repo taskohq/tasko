@@ -16,7 +16,7 @@ export type WorkspaceVisibility = "internal" | "private" | "guest_shared";
 export type WorkspaceSearchKind = "work" | "chat" | "crm" | "doc";
 export type InboxItemKind = "mention" | "assignment" | "comment" | "deal" | "form" | "automation" | "system";
 export type FormTargetType = "work_item" | "crm_lead";
-export type AutomationTriggerType = "crm.lead_created.v1" | "work.item_created.v1" | "workspace.form_submitted.v1";
+export type AutomationTriggerType = "crm.lead_created.v1" | "work.work_item_created.v1" | "workspace.form_submitted.v1";
 export type AutomationActionType = "create_work_item" | "create_crm_activity";
 
 export interface WorkspaceSearchDocument extends TenantResource {

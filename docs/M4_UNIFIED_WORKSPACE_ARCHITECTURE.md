@@ -19,6 +19,10 @@ Migration `0007_unified_workspace_beta.sql` adds the following tenant-scoped res
 
 Calendar/timeline needs no duplicate event table: it is a tenant-filtered projection of existing WorkItem start/due dates. Overview metrics are query-time aggregates plus Inbox and activity/search projections; this keeps M4 free of a second source of truth.
 
+### Search visibility policy
+
+Search always applies tenant filtering before any result construction. Chat channels/messages apply channel membership; Documents apply their owner/visibility policy; WorkItems apply their parent project visibility; all are then re-checked by the entity read path before a title, count, or snippet is returned. **Slim CRM Alpha is tenant-wide by model**: its leads, companies, contacts and deals do not yet have a resource-level private visibility or share-list attribute. CRM search is therefore authorization-gated by `crm.lead.read` and isolated across tenants, rather than pretending to implement same-tenant private CRM records. A future CRM visibility model must add a migration, centralized read policy and matching search acceptance before this distinction can change.
+
 ## Service boundaries
 
 `packages/database/src/workspace-store.ts` is the persistence interface with matching memory and PostgreSQL implementations. `modules/workspace/src/workspace-service.ts` is the only caller used by tRPC/UI. It resolves no tenant identifiers from browser inputs: the actor comes from `tenantProcedure`, and all reads/mutations require centralized `can(actor, capability, resource)` checks.
@@ -34,11 +38,11 @@ The first rule templates deliberately support only local actions:
 | Trigger | Supported condition | Action |
 | --- | --- | --- |
 | `crm.lead_created.v1` | lead source/status equality | create a WorkItem in an explicitly configured project |
-| `work.item_created.v1` | project equality | create CRM activity |
+| `work.work_item_created.v1` | project equality | create CRM activity |
 | `workspace.form_submitted.v1` | form equality | create a WorkItem or CRM Lead via the declared form mapping |
 
 No outbound HTTP/webhook action is enabled in M4, avoiding external secrets, SSRF policy and webhook verification until M6.
 
 ## Verification contract
 
-M4 acceptance tests prove the search sequence **tenant filter → coarse metadata filter → exact authorization → snippet**; no inaccessible counts/snippets are returned. They also cover Inbox read/archive state, document relation tenant validation, Forms target mapping, automation idempotency and guest denial. PostgreSQL tests run against the Docker stack with RLS enabled.
+M4 acceptance tests prove the search sequence **tenant filter → coarse metadata filter → exact authorization → snippet**; no inaccessible counts/snippets are returned. They cover private Chat, private Work projects, private Docs, and cross-tenant CRM isolation in line with the policy above. They also cover Inbox read/archive state, document relation tenant validation, Forms target mapping, automation idempotency and guest denial. PostgreSQL tests run against the Docker stack with RLS enabled.

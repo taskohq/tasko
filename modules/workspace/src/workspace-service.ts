@@ -23,7 +23,7 @@ function tko_text(tko_value: unknown): string { return typeof tko_value === "str
 function tko_stringArray(tko_value: unknown): string[] { return Array.isArray(tko_value) ? tko_value.filter((tko_item): tko_item is string => typeof tko_item === "string") : []; }
 
 async function tko_requireEntityRead(tko_actor: PlatformActor, tko_entityType: WorkspaceEntityType, tko_entityId: string): Promise<void> {
-  if (tko_entityType === "work_item") { const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_entityId); if (!tko_item) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "work.item.read", tko_item); return; }
+  if (tko_entityType === "work_item") { const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_entityId); if (!tko_item) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_item.projectId); if (!tko_project) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "work.project.read", tko_project); requireCapability(tko_actor, "work.item.read", tko_item); return; }
   if (tko_entityType === "project") { const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_entityId); if (!tko_project) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "work.project.read", tko_project); return; }
   if (tko_entityType === "channel") { const tko_channel = await getChatStore().getChannel(tko_actor.tenantId, tko_entityId); if (!tko_channel) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "chat.channel.read", tko_channel); return; }
   if (tko_entityType === "message") { const tko_message = await getChatStore().getMessage(tko_actor.tenantId, tko_entityId); if (!tko_message) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); const tko_channel = await getChatStore().getChannel(tko_actor.tenantId, tko_message.channelId); if (!tko_channel) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "chat.message.read", tko_channel); return; }
@@ -53,6 +53,12 @@ export async function search(tko_actor: PlatformActor, tko_input: { query: strin
 export async function indexSearchDocument(tko_actor: PlatformActor, tko_input: Omit<WorkspaceSearchDocument, "id" | "type" | "tenantId" | "updatedAt"> & { correlationId: string }) {
   tko_require(tko_actor, "workspace.link.manage", "workspace_search_document", `${tko_input.entityType}:${tko_input.entityId}`);
   await tko_entityExists(tko_actor, tko_input.entityType, tko_input.entityId);
+  return getWorkspaceStore().upsertSearchDocument(tko_actor, tko_input);
+}
+
+/** Trusted worker-only path: source resource was loaded tenant-scoped from a durable outbox event. User reads remain exact-authorized in `search`. */
+export async function materializeSearchDocument(tko_actor: PlatformActor, tko_input: Omit<WorkspaceSearchDocument, "id" | "type" | "tenantId" | "updatedAt"> & { correlationId: string }) {
+  tko_require(tko_actor, "workspace.link.manage", "workspace_search_document", `${tko_input.entityType}:${tko_input.entityId}`);
   return getWorkspaceStore().upsertSearchDocument(tko_actor, tko_input);
 }
 
@@ -92,7 +98,7 @@ export async function automationExecutions(tko_actor: PlatformActor) {
   return (await Promise.all(tko_rules.map(tko_rule => getWorkspaceStore().listAutomationExecutions(tko_actor.tenantId, tko_rule.id)))).flat().sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime());
 }
 
-function tko_triggerFor(tko_eventType: string): AutomationTriggerType | null { return tko_eventType === "crm.lead_created.v1" || tko_eventType === "work.item_created.v1" || tko_eventType === "workspace.form_submitted.v1" ? tko_eventType : null; }
+function tko_triggerFor(tko_eventType: string): AutomationTriggerType | null { return tko_eventType === "crm.lead_created.v1" || tko_eventType === "work.work_item_created.v1" || tko_eventType === "workspace.form_submitted.v1" ? tko_eventType : null; }
 function tko_matchesCondition(tko_rule: WorkspaceAutomationRule, tko_record: OutboxRecord): boolean { const tko_field = tko_text(tko_rule.condition.field); if (!tko_field) return true; return tko_record.payload[tko_field] === tko_rule.condition.equals; }
 function tko_template(tko_templateValue: unknown, tko_record: OutboxRecord): string { return tko_text(tko_templateValue).replace(/\{\{([^}]+)\}\}/g, (_tko_match, tko_field) => tko_text(tko_record.payload[tko_field])); }
 

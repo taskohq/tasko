@@ -9,6 +9,7 @@ import { createInMemoryRedisAdapter, setRedisAdapterForTests } from "../../packa
 import { processOutboxOnce } from "../worker/src/worker-service";
 import { registerWorkspaceWorker } from "./src/workspace-worker";
 import * as crm from "../crm/src/crm-service";
+import * as chat from "../chat/src/chat-service";
 import * as work from "../work/src/work-service";
 import * as workspace from "./src/workspace-service";
 
@@ -44,6 +45,72 @@ describe("Unified Workspace Beta M4", () => {
     expect(tko_link).toEqual(expect.objectContaining({ tenantId: tko_owner.tenantId, documentId: tko_document.id, entityType: "work_item", entityId: tko_item.id }));
     expect(await getWorkspaceStore().listDocumentLinksForEntity(tko_owner.tenantId, "work_item", tko_item.id)).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_link.id, documentId: tko_document.id })]));
     expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["workspace.document.created", "workspace.document.linked"]));
+  });
+
+  it("materializes and filters grouped Work, Chat, CRM and Docs search results", async () => {
+    const tko_owner = tko_actor(); const tko_project = await tko_createProject(tko_owner);
+    const tko_token = "cross-module-search-marker";
+    const tko_work = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: `Work ${tko_token}`, correlationId: "m4-search-work" });
+    const tko_lead = await crm.createLead({ actor: tko_owner, firstName: "CRM", lastName: tko_token, status: "new", correlationId: "m4-search-crm" });
+    const tko_document = await workspace.createDocument(tko_owner, { title: `Doc ${tko_token}`, bodyText: "Search grouping evidence", correlationId: "m4-search-doc" });
+    const tko_channel = await chat.createChannel(tko_owner, { kind: "public", name: `chat-${tko_token}`, topic: "Search grouping evidence", memberIds: [tko_owner.memberId] });
+    const tko_message = await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "m4-search-message", body: { type: "text", text: `Chat ${tko_token}` } }, "m4-search-chat");
+
+    await processOutboxOnce(100);
+    const tko_all = await workspace.search(tko_owner, { query: tko_token });
+    expect(tko_all).toEqual(expect.arrayContaining([
+      expect.objectContaining({ entityId: tko_work.id, kind: "work" }),
+      expect.objectContaining({ entityId: tko_lead.id, kind: "crm" }),
+      expect.objectContaining({ entityId: tko_document.id, kind: "doc" }),
+      expect.objectContaining({ entityId: tko_channel.id, kind: "chat" }),
+      expect.objectContaining({ entityId: tko_message.id, kind: "chat" }),
+    ]));
+    await expect(workspace.search(tko_owner, { query: tko_token, kind: "work" })).resolves.toEqual([expect.objectContaining({ entityId: tko_work.id, kind: "work" })]);
+    await expect(workspace.search(tko_owner, { query: tko_token, kind: "crm" })).resolves.toEqual([expect.objectContaining({ entityId: tko_lead.id, kind: "crm" })]);
+    await expect(workspace.search(tko_owner, { query: tko_token, kind: "doc" })).resolves.toEqual([expect.objectContaining({ entityId: tko_document.id, kind: "doc" })]);
+    expect((await workspace.search(tko_owner, { query: tko_token, kind: "chat" })).map(tko_result => tko_result.entityId)).toEqual(expect.arrayContaining([tko_channel.id, tko_message.id]));
+  });
+
+  it("does not leak private Chat or any cross-tenant search result, count or snippet", async () => {
+    const tko_owner = tko_actor(); const tko_token = "private-chat-search-marker";
+    const tko_channel = await chat.createChannel(tko_owner, { kind: "private", name: `private-${tko_token}`, topic: `Topic ${tko_token}`, memberIds: [tko_owner.memberId] });
+    await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "m4-private-search-message", body: { type: "text", text: `Secret ${tko_token}` } }, "m4-private-search");
+    const tko_project = await tko_createProject(tko_owner);
+    await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: `Work ${tko_token}`, correlationId: "m4-private-search-work" });
+    await crm.createLead({ actor: tko_owner, firstName: "Private", lastName: tko_token, status: "new", correlationId: "m4-private-search-crm" });
+    await workspace.createDocument(tko_owner, { title: `Document ${tko_token}`, bodyText: `Body ${tko_token}`, correlationId: "m4-private-search-doc" });
+    await processOutboxOnce(100);
+
+    const tko_ownerCrm = await workspace.search(tko_owner, { query: tko_token, kind: "crm" });
+    expect(tko_ownerCrm).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "crm" })]));
+
+    const tko_nonMember = tko_actor({ authSubject: "workspace-admin", memberId: "tko-member-demo-admin", role: "admin" });
+    const tko_nonMemberChat = await workspace.search(tko_nonMember, { query: tko_token, kind: "chat" });
+    expect(tko_nonMemberChat).toEqual([]);
+    expect(JSON.stringify(tko_nonMemberChat)).not.toContain(tko_token);
+
+    const tko_otherTenant = tko_actor({ authSubject: "other-owner", tenantId: "tko-tenant-other", tenantSlug: "other", memberId: "tko-member-other", role: "owner" });
+    const tko_crossTenant = await workspace.search(tko_otherTenant, { query: tko_token });
+    expect(tko_crossTenant).toEqual([]);
+    expect(JSON.stringify(tko_crossTenant)).not.toContain(tko_token);
+    const tko_crossTenantCrm = await workspace.search(tko_otherTenant, { query: tko_token, kind: "crm" });
+    expect(tko_crossTenantCrm).toEqual([]);
+    expect(JSON.stringify(tko_crossTenantCrm)).not.toContain(tko_token);
+  });
+
+  it("does not leak same-tenant private Work or Docs search results, counts or snippets", async () => {
+    const tko_owner = tko_actor(); const tko_token = "same-tenant-private-search-marker";
+    const tko_space = await work.createSpace(tko_owner, { name: "Private search space", slug: "private-search-space", visibility: "internal", correlationId: "m4-private-work-space" });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Private search project", key: "PVT", methodology: "kanban", visibility: "private", correlationId: "m4-private-work-project" });
+    await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: `Private work ${tko_token}`, correlationId: "m4-private-work-item" });
+    await workspace.createDocument(tko_owner, { title: `Private doc ${tko_token}`, bodyText: `Private body ${tko_token}`, visibility: "private", correlationId: "m4-private-doc" });
+    await processOutboxOnce(100);
+
+    const tko_nonOwner = tko_actor({ authSubject: "workspace-admin", memberId: "tko-member-demo-admin", role: "admin" });
+    const tko_hidden = await workspace.search(tko_nonOwner, { query: tko_token });
+    expect(tko_hidden).toEqual([]);
+    expect(JSON.stringify(tko_hidden)).not.toContain(tko_token);
+    expect(await workspace.search(tko_owner, { query: tko_token })).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "work" }), expect.objectContaining({ kind: "doc" })]));
   });
 
   it("projects tenant-scoped KPIs, cross-module activity, linked context and a Work graph", async () => {
@@ -95,5 +162,17 @@ describe("Unified Workspace Beta M4", () => {
     expect((await getWorkStore().listWorkItems(tko_owner.tenantId, tko_project.id)).filter(tko_item => tko_item.title.includes(tko_lead.id))).toHaveLength(1);
     const tko_executions = await workspace.automationExecutions(tko_owner);
     expect(tko_executions).toEqual(expect.arrayContaining([expect.objectContaining({ ruleId: tko_rule.id, status: "completed" })]));
+  });
+
+  it("runs a WorkItem-triggered CRM activity automation exactly once using the durable event name", async () => {
+    const tko_owner = tko_actor(); const tko_project = await tko_createProject(tko_owner);
+    const tko_lead = await crm.createLead({ actor: tko_owner, firstName: "Work", lastName: "Trigger", status: "new", correlationId: "m4-work-trigger-lead" });
+    const tko_rule = await workspace.createAutomationRule(tko_owner, { name: "Log created work", triggerType: "work.work_item_created.v1", actions: [{ type: "create_crm_activity", config: { entityType: "lead", entityId: tko_lead.id, subject: "Created {{workItemId}}" } }], correlationId: "m4-work-trigger-rule" });
+    const tko_item = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Create CRM activity", correlationId: "m4-work-trigger-item" });
+    await processOutboxOnce(100);
+    await processOutboxOnce(100);
+    const tko_activities = await getCRMStore().listActivities(tko_owner.tenantId, "lead", tko_lead.id);
+    expect(tko_activities.filter(tko_activity => tko_activity.subject.includes(tko_item.id))).toHaveLength(1);
+    expect(await workspace.automationExecutions(tko_owner)).toEqual(expect.arrayContaining([expect.objectContaining({ ruleId: tko_rule.id, status: "completed" })]));
   });
 });

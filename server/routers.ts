@@ -193,7 +193,7 @@ export const appRouter = router({
     submitForm: tenantProcedure.input(z.object({ formId: z.string().uuid(), values: z.record(z.string(), z.unknown()), idempotencyKey: z.string().uuid() })).mutation(({ ctx, input }) => workspaceService.submitForm(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     automationRules: tenantProcedure.query(({ ctx }) => workspaceService.automationRules(ctx.platform.actor)),
     automationExecutions: tenantProcedure.query(({ ctx }) => workspaceService.automationExecutions(ctx.platform.actor)),
-    createAutomationRule: tenantProcedure.input(z.object({ name: z.string().trim().min(1).max(240), triggerType: z.enum(["crm.lead_created.v1", "work.item_created.v1", "workspace.form_submitted.v1"]), condition: z.record(z.string(), z.unknown()).optional(), actions: z.array(z.object({ type: z.enum(["create_work_item", "create_crm_activity"]), config: z.record(z.string(), z.unknown()) })).min(1).max(10) })).mutation(({ ctx, input }) => workspaceService.createAutomationRule(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    createAutomationRule: tenantProcedure.input(z.object({ name: z.string().trim().min(1).max(240), triggerType: z.enum(["crm.lead_created.v1", "work.work_item_created.v1", "workspace.form_submitted.v1"]), condition: z.record(z.string(), z.unknown()).optional(), actions: z.array(z.object({ type: z.enum(["create_work_item", "create_crm_activity"]), config: z.record(z.string(), z.unknown()) })).min(1).max(10) })).mutation(({ ctx, input }) => workspaceService.createAutomationRule(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
   }),
 
   chat: router({
