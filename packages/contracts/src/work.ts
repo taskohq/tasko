@@ -85,6 +85,15 @@ export interface WorkComment extends TenantResource {
   deletedAt: Date | null;
 }
 
+export interface WorkItemRelation extends TenantResource {
+  type: "work_item_relation";
+  sourceWorkItemId: string;
+  targetWorkItemId: string;
+  relationType: WorkItemRelationType;
+  createdByMemberId: string;
+  createdAt: Date;
+}
+
 export interface WorkSprint extends TenantResource {
   type: "sprint";
   projectId: string;
@@ -189,5 +198,13 @@ export interface CreateSprintInput {
   goal?: string;
   startAt?: Date | null;
   endAt?: Date | null;
+  correlationId: string;
+}
+
+export interface CompleteSprintInput {
+  sprintId: string;
+  incompleteDisposition: "backlog" | "next_sprint";
+  /** Required when incompleteDisposition is next_sprint; verified tenant- and project-side. */
+  nextSprintId?: string | null;
   correlationId: string;
 }

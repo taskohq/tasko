@@ -45,4 +45,32 @@ tko_describe("Collaboration Alpha M2 on PostgreSQL", () => {
       await tko_pool.end();
     }
   });
+
+  it("updates a read cursor with PostgreSQL JSONB mention counting and durable audit/outbox", async () => {
+    const tko_pool = new Pool({ connectionString: tko_postgresUrl });
+    const tko_store = new PostgresChatStore(tko_postgresUrl!);
+    const tko_tenantId = randomUUID();
+    const tko_userId = randomUUID();
+    const tko_memberId = randomUUID();
+    const tko_actor: PlatformActor = { authSubject: `postgres-read-test:${tko_tenantId}`, tenantId: tko_tenantId, tenantSlug: `postgres-read-${tko_tenantId.slice(0, 8)}`, memberId: tko_memberId, role: "owner", membershipStatus: "active", correlationId: `postgres-read-${tko_tenantId}` };
+
+    try {
+      await tko_pool.query(`insert into tenants (id,slug,name,status,deployment_profile) values ($1,$2,$3,'active','single_tenant')`, [tko_tenantId, tko_actor.tenantSlug, "PostgreSQL Read Cursor Acceptance"]);
+      await tko_pool.query(`insert into users (id,auth_subject,status) values ($1,$2,'active')`, [tko_userId, tko_actor.authSubject]);
+      await tko_pool.query(`insert into tenant_members (id,tenant_id,user_id,role,status,display_name) values ($1,$2,$3,'owner','active','PostgreSQL Read Owner')`, [tko_memberId, tko_tenantId, tko_userId]);
+
+      const tko_channel = await tko_store.createChannel(tko_actor, { tenantId: tko_tenantId, kind: "private", name: `m2-read-${tko_tenantId.slice(0, 8)}`, memberIds: [tko_memberId], visibility: "private" });
+      await tko_store.sendMessage(tko_actor, { tenantId: tko_tenantId, channelId: tko_channel.id, authorMemberId: tko_memberId, clientMessageId: randomUUID(), body: { type: "text", text: "Mention makes read cursor exercise JSONB.", mentions: [tko_memberId] } }, tko_actor.correlationId);
+
+      const tko_cursor = await tko_store.updateReadState(tko_actor, tko_channel.id, 1);
+      const tko_durableEffects = await tko_pool.query(`select (select count(*) from audit_logs where tenant_id=$1 and resource_id=$2 and action='chat.read_cursor.updated') as audits, (select count(*) from outbox where tenant_id=$1 and event_type='chat.read_cursor_updated.v1') as events`, [tko_tenantId, tko_channel.id]);
+
+      expect(tko_cursor).toMatchObject({ channelId: tko_channel.id, memberId: tko_memberId, lastReadSeq: 1, unreadMentions: 0 });
+      expect(tko_durableEffects.rows[0]).toMatchObject({ audits: "1", events: "1" });
+    } finally {
+      await tko_cleanupTenant(tko_pool, tko_tenantId, tko_userId);
+      await tko_store.close();
+      await tko_pool.end();
+    }
+  });
 });

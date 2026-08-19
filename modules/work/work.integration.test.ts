@@ -111,6 +111,27 @@ describe("Work Alpha acceptance boundaries", () => {
     await tko_unsubscribe();
   });
 
+  it("carries unfinished items into an explicit next sprint while retaining done work in the completed sprint", async () => {
+    const tko_owner = await tko_actor();
+    const tko_space = await work.createSpace(tko_owner, { name: "Planning", slug: "planning", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Carry-over", key: "CAR", methodology: "scrum", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_doneItem = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Completed", correlationId: tko_owner.correlationId });
+    const tko_openItem = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Carry over", correlationId: tko_owner.correlationId });
+    const tko_statuses = (await work.board(tko_owner, tko_project.id)).statuses;
+    const tko_done = tko_statuses.find(tko_status => tko_status.category === "done");
+    if (!tko_done) throw new Error("TEST_DONE_STATUS_MISSING");
+    await work.transitionWorkItem({ actor: tko_owner, workItemId: tko_doneItem.id, targetStatusId: tko_done.id, expectedVersion: 1, correlationId: tko_owner.correlationId });
+    const tko_current = await work.createSprint({ actor: tko_owner, projectId: tko_project.id, name: "Sprint current", correlationId: tko_owner.correlationId });
+    const tko_next = await work.createSprint({ actor: tko_owner, projectId: tko_project.id, name: "Sprint next", correlationId: tko_owner.correlationId });
+    await work.addItemsToSprint(tko_owner, { sprintId: tko_current.id, workItemIds: [tko_doneItem.id, tko_openItem.id], correlationId: tko_owner.correlationId });
+    await work.completeSprint(tko_owner, { sprintId: tko_current.id, incompleteDisposition: "next_sprint", nextSprintId: tko_next.id, correlationId: tko_owner.correlationId });
+    const tko_after = await work.board(tko_owner, tko_project.id);
+    expect(tko_after.items.find(tko_item => tko_item.id === tko_doneItem.id)?.sprintId).toBe(tko_current.id);
+    expect(tko_after.items.find(tko_item => tko_item.id === tko_openItem.id)?.sprintId).toBe(tko_next.id);
+    expect((await tko_platformStore.listAuditLogs()).some(tko_log => tko_log.action === "work.sprint.completed" && tko_log.metadata.nextSprintId === tko_next.id)).toBe(true);
+    await expect(work.completeSprint(tko_owner, { sprintId: tko_next.id, incompleteDisposition: "next_sprint", correlationId: tko_owner.correlationId })).rejects.toThrow("WORK_SPRINT_NEXT_REQUIRED");
+  });
+
   it("moves and reorders Kanban work atomically while preserving authorization, history and outbox", async () => {
     const tko_owner = await tko_actor();
     const tko_guest = { ...tko_owner, authSubject: "kanban-guest", memberId: "guest-member", role: "guest" as const };
@@ -177,5 +198,29 @@ describe("Work Alpha acceptance boundaries", () => {
     expect((await work.itemDetails(tko_owner, tko_item.id)).customValues).toMatchObject([{ fieldId: tko_field.id, value: 82 }]);
     await expect(work.createCustomField(tko_guest, { projectId: tko_project.id, name: "Nope", fieldType: "text", correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
     await expect(work.setCustomFieldValue(tko_owner, { workItemId: tko_item.id, fieldId: "00000000-0000-0000-0000-000000000001", value: 1, correlationId: tko_owner.correlationId })).rejects.toThrow("WORK_CUSTOM_FIELD_NOT_FOUND");
+  });
+
+  it("manages dependency lifecycle with cycle protection, authorization and durable evidence", async () => {
+    const tko_owner = await tko_actor();
+    const tko_guest = { ...tko_owner, authSubject: "dependency-guest", memberId: "guest-member", role: "guest" as const };
+    const tko_space = await work.createSpace(tko_owner, { name: "Dependencies", slug: "dependencies", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Dependency project", key: "DEP", methodology: "kanban", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_first = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Foundation", correlationId: tko_owner.correlationId });
+    const tko_second = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Delivery", correlationId: tko_owner.correlationId });
+    const tko_third = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Release", correlationId: tko_owner.correlationId });
+
+    await work.addDependency(tko_owner, { sourceWorkItemId: tko_first.id, targetWorkItemId: tko_second.id, relationType: "blocks", correlationId: tko_owner.correlationId });
+    await work.addDependency(tko_owner, { sourceWorkItemId: tko_second.id, targetWorkItemId: tko_third.id, relationType: "blocks", correlationId: tko_owner.correlationId });
+    const tko_beforeRemoval = await work.itemDetails(tko_owner, tko_first.id);
+
+    expect(tko_beforeRemoval.dependencies).toMatchObject([{ sourceWorkItemId: tko_first.id, targetWorkItemId: tko_second.id, relationType: "blocks" }]);
+    await expect(work.addDependency(tko_owner, { sourceWorkItemId: tko_third.id, targetWorkItemId: tko_first.id, relationType: "blocks", correlationId: tko_owner.correlationId })).rejects.toThrow("WORK_RELATION_CYCLE");
+    await expect(work.removeDependency(tko_guest, { workItemId: tko_first.id, relationId: tko_beforeRemoval.dependencies[0].id, correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+
+    await work.removeDependency(tko_owner, { workItemId: tko_first.id, relationId: tko_beforeRemoval.dependencies[0].id, correlationId: tko_owner.correlationId });
+    expect((await work.itemDetails(tko_owner, tko_first.id)).dependencies).toEqual([]);
+    const tko_actions = (await tko_platformStore.listAuditLogs()).map(tko_entry => tko_entry.action);
+    expect(tko_actions).toContain("work.work_item.relation_created");
+    expect(tko_actions).toContain("work.work_item.relation_removed");
   });
 });

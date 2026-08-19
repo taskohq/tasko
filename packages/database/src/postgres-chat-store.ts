@@ -113,7 +113,7 @@ export class PostgresChatStore implements ChatStore {
 
   async updateReadState(tko_actor: PlatformActor, tko_channelId: string, tko_lastReadSeq: number): Promise<ChannelReadState> {
     return this.tko_transaction(tko_actor.tenantId, async tko_client => {
-      const tko_result = await tko_client.query(`insert into channel_members (tenant_id,channel_id,member_id,last_read_seq) values ($1,$2,$3,$4) on conflict (channel_id,member_id) do update set last_read_seq=greatest(channel_members.last_read_seq,excluded.last_read_seq), unread_mentions=(select count(*) from messages m where m.tenant_id=$1 and m.channel_id=$2 and m.sequence>greatest(channel_members.last_read_seq,excluded.last_read_seq) and coalesce(m.body->'mentions','[]'::jsonb) ? $3) returning *`, [tko_actor.tenantId, tko_channelId, tko_actor.memberId, tko_lastReadSeq]);
+      const tko_result = await tko_client.query(`insert into channel_members (tenant_id,channel_id,member_id,last_read_seq) values ($1,$2,$3,$4) on conflict (channel_id,member_id) do update set last_read_seq=greatest(channel_members.last_read_seq,excluded.last_read_seq), unread_mentions=(select count(*) from messages m where m.tenant_id=$1 and m.channel_id=$2 and m.sequence>greatest(channel_members.last_read_seq,excluded.last_read_seq) and coalesce(m.body->'mentions','[]'::jsonb) ? $3::text) returning *`, [tko_actor.tenantId, tko_channelId, tko_actor.memberId, tko_lastReadSeq]);
       const tko_state = this.tko_readState(tko_result.rows[0]);
       await this.tko_emit(tko_client, tko_actor, "chat.read_cursor_updated.v1", "chat.read", { channelId: tko_channelId, lastReadSeq: tko_state.lastReadSeq }, "chat.read_cursor.updated", "channel", tko_channelId, tko_actor.correlationId);
       return tko_state;

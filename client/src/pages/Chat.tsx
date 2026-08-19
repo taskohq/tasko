@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
+import { tko_readCursorAttemptKey, tko_shouldSyncReadCursor } from "@/lib/chat-read-state";
 import { trpc } from "@/lib/trpc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -49,6 +50,7 @@ export default function Chat() {
   const { isAuthenticated, loading: tko_authLoading } = useAuth();
   const tko_utils = trpc.useUtils();
   const tko_fileInput = useRef<HTMLInputElement>(null);
+  const tko_lastReadAttempt = useRef<string | null>(null);
   const [tko_activeChannelId, tko_setActiveChannelId] = useState<string | null>(null);
   const [tko_draft, tko_setDraft] = useState("");
   const [tko_selectedMessageId, tko_setSelectedMessageId] = useState<string | null>(null);
@@ -95,7 +97,13 @@ export default function Chat() {
   const tko_activeReadState = tko_readStates.data?.find(tko_state => tko_state.channelId === tko_channelId);
   const tko_onlineCount = tko_presence.data?.filter(tko_member => tko_member.status === "online").length ?? 0;
 
-  useEffect(() => { if (tko_channelId && tko_lastMessageSequence) tko_markRead.mutate({ channelId: tko_channelId, lastReadSeq: tko_lastMessageSequence }); }, [tko_channelId, tko_lastMessageSequence]);
+  useEffect(() => {
+    if (!tko_channelId) return;
+    if (!tko_shouldSyncReadCursor({ channelId: tko_channelId, lastMessageSequence: tko_lastMessageSequence, lastReadSequence: tko_activeReadState?.lastReadSeq, lastAttemptKey: tko_lastReadAttempt.current })) return;
+    const tko_channel = tko_channelId;
+    tko_lastReadAttempt.current = tko_readCursorAttemptKey(tko_channel, tko_lastMessageSequence);
+    tko_markRead.mutate({ channelId: tko_channel, lastReadSeq: tko_lastMessageSequence });
+  }, [tko_activeReadState?.lastReadSeq, tko_channelId, tko_lastMessageSequence]);
   useEffect(() => { if (tko_activeReadState) tko_setNotificationLevel(tko_activeReadState.notificationLevel); }, [tko_activeReadState?.channelId, tko_activeReadState?.notificationLevel]);
   useEffect(() => { if (!isAuthenticated) return; tko_setPresence.mutate({ status: "online" }); const tko_interval = window.setInterval(() => tko_setPresence.mutate({ status: "online" }), 60_000); return () => window.clearInterval(tko_interval); }, [isAuthenticated]);
   useEffect(() => { if (!isAuthenticated || !tko_channelId) return; const tko_timeout = window.setTimeout(() => tko_setTyping.mutate({ channelId: tko_channelId, isTyping: Boolean(tko_draft.trim()) }), 550); return () => window.clearTimeout(tko_timeout); }, [isAuthenticated, tko_channelId, tko_draft]);

@@ -62,7 +62,7 @@ export async function board(tko_actor: PlatformActor, tko_projectId: string) {
 export async function itemDetails(tko_actor: PlatformActor, tko_workItemId: string) {
   const tko_item = await tko_itemFor(tko_actor, tko_workItemId);
   tko_require(tko_actor, "work.item.read", tko_item);
-  return { item: tko_item, comments: await getWorkStore().listComments(tko_actor.tenantId, tko_item.id), history: await getWorkStore().listHistory(tko_actor.tenantId, tko_item.id), customValues: await getWorkStore().listCustomFieldValues(tko_actor.tenantId, tko_item.id) };
+  return { item: tko_item, comments: await getWorkStore().listComments(tko_actor.tenantId, tko_item.id), dependencies: await getWorkStore().listDependencies(tko_actor.tenantId, tko_item.id), history: await getWorkStore().listHistory(tko_actor.tenantId, tko_item.id), customValues: await getWorkStore().listCustomFieldValues(tko_actor.tenantId, tko_item.id) };
 }
 
 export async function customFields(tko_actor: PlatformActor, tko_projectId: string) {
@@ -121,9 +121,16 @@ export async function createComment(tko_input: CreateCommentInput) {
 
 export async function addDependency(tko_actor: PlatformActor, tko_input: { sourceWorkItemId: string; targetWorkItemId: string; relationType: "blocks" | "blocked_by" | "relates_to" | "duplicates" | "duplicated_by"; correlationId: string }) {
   const tko_source = await tko_itemFor(tko_actor, tko_input.sourceWorkItemId);
-  await tko_itemFor(tko_actor, tko_input.targetWorkItemId);
+  const tko_target = await tko_itemFor(tko_actor, tko_input.targetWorkItemId);
   tko_require(tko_actor, "work.item.update", tko_source);
+  tko_require(tko_actor, "work.item.read", tko_target);
   return getWorkStore().addDependency(tko_actor, tko_input);
+}
+
+export async function removeDependency(tko_actor: PlatformActor, tko_input: { workItemId: string; relationId: string; correlationId: string }) {
+  const tko_item = await tko_itemFor(tko_actor, tko_input.workItemId);
+  tko_require(tko_actor, "work.item.update", tko_item);
+  return getWorkStore().removeDependency(tko_actor, tko_input);
 }
 
 export async function createSprint(tko_input: CreateSprintInput) {
@@ -137,8 +144,9 @@ export async function addItemsToSprint(tko_actor: PlatformActor, tko_input: { sp
   return getWorkStore().addItemsToSprint(tko_actor, tko_input);
 }
 
-export async function completeSprint(tko_actor: PlatformActor, tko_input: { sprintId: string; incompleteDisposition: "backlog" | "next_sprint"; correlationId: string }) {
+export async function completeSprint(tko_actor: PlatformActor, tko_input: import("../../../packages/contracts/src/work").CompleteSprintInput) {
   tko_require(tko_actor, "work.sprint.manage", { type: "sprint", id: tko_input.sprintId, visibility: "internal" });
+  if (tko_input.incompleteDisposition === "next_sprint" && !tko_input.nextSprintId) throw new Error("WORK_SPRINT_NEXT_REQUIRED");
   return getWorkStore().completeSprint(tko_actor, tko_input);
 }
 

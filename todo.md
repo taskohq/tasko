@@ -117,6 +117,14 @@
 - [x] Chat priority expansion: sau Work, nâng cấp thao tác Chat và liên kết Work–Chat theo backlog đã đánh giá, giữ tenant isolation và authorization.
 - [x] Chat search and Work linking: nối tìm kiếm Chat tenant-safe và flow liên kết message với WorkItem bằng procedures hiện có, gồm trạng thái loading/error, keyboard support và refresh server-authoritative.
 - [x] Work/Chat priority verification: bổ sung hoặc cập nhật tests, kiểm tra responsive, chạy regression/build, commit và checkpoint cho hai vòng mở rộng.
+- [x] Project-management capability map: lập ma trận tiêu chí Jira/ClickUp và inventory capability Tasko theo Work, planning, collaboration, reporting, CRM handoff, Workspace/Docs/Forms/Automation, AI và administration.
+- [x] Project-management functional audit: kiểm tra end-to-end từng capability qua UI, tRPC, service, store PostgreSQL/memory, authorization, audit/outbox và coverage test; phân loại real, partial hoặc UI-only.
+- [x] Chat mark-read runtime gap: điều tra và sửa phản hồi 500 của `chat.markRead` trên phiên tenant thật, bổ sung regression và xác nhận UI không retry lỗi liên tục.
+- [ ] Project-management gap remediation: hoàn thiện tuần tự các khoảng trống P0/P1 được audit xác nhận, không thêm UI-only placeholder.
+- [x] Work sprint planning remediation: đưa workflow sprint có dữ liệu thật vào Work gồm create sprint, chọn item, thêm item, hoàn tất sprint với disposition và trạng thái/feedback truy cập được.
+- [x] Work Sprint PostgreSQL proof: kiểm thử carry-over Sprint trên Postgres Docker với RLS tenant, item disposition, audit metadata và outbox trong cùng transaction.
+- [x] Work dependency remediation: xác minh và hoàn thiện flow tạo/xem/gỡ dependency từ inspector Work bằng API tenant-safe thực, có validation cycle/authorization, audit/outbox và regression.
+- [x] Project-management audit verification: viết/điều chỉnh tests, chạy regression/build, kiểm tra desktop/mobile, cập nhật evidence, commit và checkpoint.
 - [x] OAuth hardening evidence: mock hoặc tái hiện rõ nguồn `getaddrinfo ENOTFOUND base`, hoặc ghi nhận giới hạn provider với bằng chứng runtime/configuration.
 - [x] OAuth handler tests: kiểm tra callback success tạo session cookie/302 và exchange failure trả lỗi phù hợp sau khi state hợp lệ bằng SDK dependency mock.
 - [x] Runtime PostgreSQL configuration: thay giá trị `TASKO_POSTGRES_URL=1` không hợp lệ bằng connection string Docker hợp lệ để ngăn lỗi DNS `ENOTFOUND base` trong SaaS/API queries.
