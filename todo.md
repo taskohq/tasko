@@ -101,13 +101,21 @@
 - [x] M4 Automation v1: event-driven rule engine deterministic với condition schema tối thiểu, idempotency/depth guard, execution log/audit và action create WorkItem hoặc CRM activity; không dùng polling/scheduled worker cho trigger v1.
 - [x] M4 Operations Overview: thay thế platform status canvas bằng overview theo reference gồm KPI strip, Inbox/today context, cross-module activity, linked objects và work graph dùng dữ liệu tenant-scoped thực.
 - [x] M4 calendar/timeline: thêm calendar/timeline renderer tenant-scoped cho Work item dates và liên kết từ module navigation.
-- [ ] M4 verification: thêm acceptance search isolation/grouping, Inbox state, Doc relation, Form target mapping và automation idempotency/guest denial; typecheck, full test, build, visual desktop/mobile, Git commits và checkpoint.
+- [x] M4 verification: thêm acceptance search isolation/grouping, Inbox state, Doc relation, Form target mapping và automation idempotency/guest denial; typecheck, full test, build, visual desktop/mobile, Git commits và checkpoint (`bb0248b5`).
 - [x] M4 Overview verification: thêm acceptance cho `workspace.overview` với dữ liệu tenant-scoped thật, gồm KPI, linked objects, cross-module activity và work graph.
 - [x] M4 Overview authenticated visual verification: defer populated screenshot do preview proxy chặn POST seed HTTP 403; đã lưu bằng chứng phiên authenticated, empty state trung thực và service acceptance với dữ liệu thật.
 - [x] M4 Overview hardening: expose linked-object context và work graph thực từ service/API, rồi render chúng trong Operations Overview tenant-scoped.
 - [ ] OAuth callback regression: điều tra lỗi callback sau Google login, sửa nguyên nhân cấu hình/validation và thêm test cho success/failure contract trước khi tiếp tục visual verification M4.
 - [ ] Deferred OAuth/browser follow-up: quay lại sửa callback và tạo populated authenticated Overview screenshot sau khi hoàn tất M5–M7; không chặn checkpoint M4 theo yêu cầu người dùng.
-- [ ] M4 checkpoint: lưu snapshot Unified Workspace Beta sau commit hiện tại và ghi lại version/checkpoint ID; checkpoint không bao gồm OAuth regression fix hoặc populated authenticated screenshot đang deferred.
+- [x] M4 checkpoint: lưu snapshot Unified Workspace Beta sau commit hiện tại và ghi lại version/checkpoint ID (`bb0248b5`); checkpoint không bao gồm OAuth regression fix hoặc populated authenticated screenshot đang deferred.
+- [x] M5 foundation: thêm migration/RLS, tenant lifecycle state, plan catalog, tenant entitlement/usage ledger, provisioning idempotency, backup archives/restores và operational event metadata.
+- [x] M5 entitlement/quota: tạo centralized SaaS entitlement service và rate/quota guards có tenant scope; áp dụng vào capability giới hạn, API/search/forms/automation khi phù hợp mà không rải `if (saas)` vào core domains.
+- [x] M5 provisioning/lifecycle: xây dựng service/API typed tạo tenant idempotent, bootstrap owner/membership/default workspace, suspend/reactivate state và platform-admin authorization/audit.
+- [x] M5 billing boundary: tạo billing provider adapter và checkout/customer-portal contract không hard-code provider; cấu hình Stripe thật chỉ khi integration/secrets được chấp thuận.
+- [x] M5 operations: bổ sung platform-admin tenant listing/health, abuse rate controls, portable tenant export + restore-drill manifest và migration tooling status, luôn bảo toàn tenant isolation/audit.
+- [x] M5 observability: thêm metrics snapshot endpoint, correlation-safe structured operational summaries và deterministic load/recovery probes cho outbox/search theo target source-of-truth.
+- [x] M5 UI: thêm SaaS admin/settings canvases tenant-scoped, plan/usage/lifecycle/backup visibility và điều hướng an toàn, đồng thời ẩn đúng trong `single_tenant` profile.
+- [x] M5 verification: thêm acceptance provisioning idempotency, lifecycle denial, entitlement/quota, admin isolation, backup manifest restore validation, rate control/outbox recovery; typecheck, full tests, build, visual review, Git commits và checkpoint.
 - [x] M4 search grouping verification: thêm acceptance chứng minh global search nhóm Work/Chat/CRM/Docs theo type dưới tenant scope, ngoài coverage deny/isolation hiện có.
 - [x] M4 search Chat materialization: đăng ký outbox consumer cho channel/message events và kiểm chứng global search trả Chat theo exact authorization.
 - [x] M4 automation WorkItem trigger verification: thêm acceptance chứng minh event `work.work_item_created.v1` thực thi action CRM activity đúng một lần.
@@ -117,3 +125,7 @@
 - [x] M4 Work search authorization hardening: resolve project visibility khi kiểm tra WorkItem search để item trong private project không bị lộ cho non-owner cùng tenant.
 - [x] M4 private search materialization hardening: cho phép worker index trusted outbox của resource private trong tenant, nhưng chỉ lọc exact authorization ở read path user.
 - [x] M4 search CRM authorization clarification: ghi rõ CRM Alpha chỉ có tenant-wide visibility; bổ sung acceptance cross-tenant CRM isolation và điều chỉnh checklist không hứa hẹn restricted visibility chưa có trong domain model.
+- [x] M5 hardening: áp dụng entitlement/quota tại feature boundaries Forms và Automation, kèm acceptance chứng minh quyết định quota chặn durable write trước transaction.
+- [x] M5 operations hardening: bổ sung platform-admin export manifest tenant-scoped, abuse/rate controls cho mutation SaaS nhạy cảm và acceptance audit/isolation.
+- [x] M5 observability hardening: bổ sung operational probes cho outbox/search recovery, expose summary platform-admin và kiểm chứng bằng acceptance deterministic.
+- [x] M5 finalization: chạy lại full regression/build/visual review sau hardening, tạo commit Git theo nhóm và checkpoint milestone.
