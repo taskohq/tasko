@@ -5,6 +5,7 @@ import {
   Bell,
   Bot,
   BriefcaseBusiness,
+  ClipboardList,
   ChevronDown,
   CircleHelp,
   FileText,
@@ -32,8 +33,10 @@ export const tko_shellModules: Record<TkoModuleKey, { label: string; eyebrow: st
     eyebrow: "Operations",
     nav: [
       { label: "Overview", path: "/platform", icon: LayoutDashboard },
-      { label: "Today", path: "/platform#today", icon: Home },
-      { label: "My tasks", path: "/work", icon: Inbox },
+      { label: "Inbox", path: "/inbox", icon: Inbox },
+      { label: "Docs", path: "/docs", icon: FileText },
+      { label: "Forms", path: "/forms", icon: ClipboardList },
+      { label: "Automations", path: "/automations", icon: Bot },
       { label: "Projects", path: "/work", icon: BriefcaseBusiness },
     ],
   },
@@ -44,7 +47,7 @@ export const tko_shellModules: Record<TkoModuleKey, { label: string; eyebrow: st
       { label: "My work", path: "/work#my-work", icon: Inbox },
       { label: "Projects", path: "/work", icon: BriefcaseBusiness },
       { label: "Sprints", path: "/work#sprints", icon: Grid2X2 },
-      { label: "Calendar", path: "/work#calendar", icon: Home },
+      { label: "Calendar", path: "/calendar", icon: Home },
     ],
   },
   chat: {
@@ -96,12 +99,12 @@ export default function TaskoShell({ children }: { children: ReactNode }) {
   const tko_context = tko_shellModules[tko_module];
   const tko_primaryItems: Array<{ label: string; path: string; icon: ComponentType<{ className?: string }>; badge?: string }> = [
     { label: "Home", path: "/platform", icon: Home },
-    { label: "Inbox", path: "/platform#inbox", icon: Inbox, badge: "3" },
+    { label: "Inbox", path: "/inbox", icon: Inbox },
     { label: "Work", path: "/work", icon: BriefcaseBusiness },
     { label: "Chat", path: "/chat", icon: MessageSquareText },
     { label: "CRM", path: "/crm", icon: UsersRound },
-    { label: "Docs", path: "/platform#docs", icon: FileText },
-    { label: "Automations", path: "/platform#automations", icon: Bot },
+    { label: "Docs", path: "/docs", icon: FileText },
+    { label: "Automations", path: "/automations", icon: Bot },
   ];
   const tko_initial = user?.name?.trim().slice(0, 1).toUpperCase() || "T";
 
@@ -112,11 +115,11 @@ export default function TaskoShell({ children }: { children: ReactNode }) {
           <span className="grid h-7 w-7 place-items-center rounded-[9px] bg-gradient-to-br from-[#6257f6] via-[#5f7df4] to-[#e28dc7] text-sm font-black text-white shadow-sm">T</span>
           <span className="hidden text-[21px] font-bold tracking-[-0.055em] text-[#101828] sm:block">tasko</span>
         </Link>
-        <button type="button" className="hidden max-w-[525px] flex-1 items-center gap-3 rounded-lg border border-[#eaecf0] bg-[#fcfcfd] px-3.5 py-2 text-left text-[13px] text-[#98a2b3] shadow-sm md:flex" onClick={() => toast("Tìm kiếm toàn cục sẽ được mở trong M4 Unified Workspace.") }>
+        <Link href="/platform#search" className="hidden max-w-[525px] flex-1 items-center gap-3 rounded-lg border border-[#eaecf0] bg-[#fcfcfd] px-3.5 py-2 text-left text-[13px] text-[#98a2b3] shadow-sm md:flex">
           <Search className="h-4 w-4" />
           <span className="flex-1">Search Tasko or type / command</span>
           <kbd className="rounded border border-[#eaecf0] bg-white px-1.5 py-0.5 text-[10px] font-medium text-[#667085]">⌘ K</kbd>
-        </button>
+        </Link>
         <div className="ml-auto flex items-center gap-2">
           <button type="button" className="hidden items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 py-2 text-[13px] font-medium text-[#344054] shadow-sm lg:flex" onClick={() => toast("Workspace switcher sẽ hỗ trợ nhiều workspace trong M4.") }>
             <Grid2X2 className="h-4 w-4 text-[#667085]" />
@@ -126,10 +129,10 @@ export default function TaskoShell({ children }: { children: ReactNode }) {
           <button type="button" className="hidden h-9 items-center gap-1.5 rounded-lg bg-[#5b51e8] px-3.5 text-[13px] font-semibold text-white shadow-sm transition hover:bg-[#4d43da] active:scale-[.97] sm:flex" onClick={() => toast("Quick create sẽ tập hợp các flow Work, Chat và CRM trong M4.") }>
             <Plus className="h-4 w-4" /> Create
           </button>
-          <button type="button" aria-label="Notifications" className="relative grid h-9 w-9 place-items-center rounded-lg text-[#667085] hover:bg-[#f4f3ff] hover:text-[#5b51e8]">
+          <Link href="/inbox" aria-label="Notifications" className="relative grid h-9 w-9 place-items-center rounded-lg text-[#667085] hover:bg-[#f4f3ff] hover:text-[#5b51e8]">
             <Bell className="h-[18px] w-[18px]" />
             <span className="absolute right-1 top-1 h-2 w-2 rounded-full border-2 border-white bg-[#f04438]" />
-          </button>
+          </Link>
           <button type="button" aria-label="Help" className="hidden grid h-9 w-9 place-items-center rounded-lg text-[#667085] hover:bg-[#f4f3ff] hover:text-[#5b51e8] sm:grid"><CircleHelp className="h-[18px] w-[18px]" /></button>
           <button type="button" className="hidden items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-[#f9fafb] md:flex" onClick={() => toast("User profile controls are provided by Manus authentication.") }>
             <span className="grid h-7 w-7 place-items-center rounded-full bg-[#e7e5ff] text-[11px] font-bold text-[#5146d9]">{tko_initial}</span>

@@ -9,13 +9,19 @@ import Home from "./pages/Home";
 import Work from "./pages/Work";
 import Chat from "./pages/Chat";
 import CRM from "./pages/CRM";
+import Workspace from "./pages/Workspace";
 
 function Router() {
   return (
     <TaskoShell>
       <Switch>
         <Route path={"/"} component={Work} />
-        <Route path={"/platform"} component={Home} />
+        <Route path={"/platform"} component={() => <Workspace mode="overview" />} />
+        <Route path={"/inbox"} component={() => <Workspace mode="inbox" />} />
+        <Route path={"/docs"} component={() => <Workspace mode="docs" />} />
+        <Route path={"/forms"} component={() => <Workspace mode="forms" />} />
+        <Route path={"/automations"} component={() => <Workspace mode="automations" />} />
+        <Route path={"/calendar"} component={() => <Workspace mode="calendar" />} />
         <Route path={"/work"} component={Work} />
         <Route path={"/chat"} component={Chat} />
         <Route path={"/crm"} component={CRM} />
