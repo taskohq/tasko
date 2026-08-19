@@ -111,6 +111,7 @@
 - [x] Kanban optimistic create: chèn thẻ tạm vào cột đích ngay khi submit composer, rollback khi create/move lỗi và reconcile lại dữ liệu server-authoritative.
 - [x] Kanban optimistic create verification: bổ sung coverage cho optimistic create, rollback và reconcile khi create/move thất bại, rồi chạy regression/build trước checkpoint.
 - [x] Kanban optimistic UI-flow verification: kiểm thử flow được Work composer sử dụng cho pending card, create-fail rollback, move-fail recovery và success reconcile trước checkpoint.
+- [x] Kanban board refinement: đối chiếu các interaction còn thiếu với demo ClickUp và triển khai thao tác board ưu tiên tiếp theo theo Jira/ClickUp, kèm accessibility, tests, build và checkpoint.
 - [x] OAuth hardening evidence: mock hoặc tái hiện rõ nguồn `getaddrinfo ENOTFOUND base`, hoặc ghi nhận giới hạn provider với bằng chứng runtime/configuration.
 - [x] OAuth handler tests: kiểm tra callback success tạo session cookie/302 và exchange failure trả lỗi phù hợp sau khi state hợp lệ bằng SDK dependency mock.
 - [x] Runtime PostgreSQL configuration: thay giá trị `TASKO_POSTGRES_URL=1` không hợp lệ bằng connection string Docker hợp lệ để ngăn lỗi DNS `ENOTFOUND base` trong SaaS/API queries.

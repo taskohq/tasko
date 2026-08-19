@@ -1,6 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { startLogin } from "@/const";
+import { tko_filterKanbanItems, tko_groupKanbanItems, type TkoKanbanFilter, type TkoKanbanGrouping } from "@/lib/kanban-board-controls";
 import { tko_addOptimistic, tko_removeOptimistic, tko_runOptimisticCreate } from "@/lib/kanban-optimistic";
 import { trpc } from "@/lib/trpc";
 import {
@@ -112,6 +113,20 @@ function TkoPriority({ priority, compact = false }: { priority: TkoPriority; com
   );
 }
 
+function TkoKanbanCard({ tko_item, tko_canDrag, tko_isDragging, tko_onOpen, tko_onDragStart, tko_onDragEnd, tko_onDrop }: {
+  tko_item: TkoBoardItem;
+  tko_canDrag: boolean;
+  tko_isDragging: boolean;
+  tko_onOpen: () => void;
+  tko_onDragStart: () => void;
+  tko_onDragEnd: () => void;
+  tko_onDrop: (tko_event: DragEvent<HTMLElement>) => void;
+}) {
+  return <article draggable={tko_canDrag && !tko_item.optimistic} aria-busy={tko_item.optimistic || undefined} onDragStart={tko_onDragStart} onDragEnd={tko_onDragEnd} onDragOver={tko_event => { tko_event.preventDefault(); tko_event.stopPropagation(); }} onDrop={tko_onDrop} className={`rounded-lg border border-[#eaecf0] bg-white shadow-[0_1px_2px_rgba(16,24,40,.04)] transition ${tko_item.optimistic ? "border-dashed border-[#0c66e4] bg-[#f7fbff] opacity-80" : tko_isDragging ? "opacity-45" : "hover:border-[#c7c3ff] hover:shadow-[0_7px_18px_rgba(91,81,232,.09)]"}`}>
+    <button type="button" disabled={tko_item.optimistic} onClick={tko_onOpen} className="block w-full p-3 text-left disabled:cursor-wait"><div className="flex items-start justify-between gap-2"><span className="flex items-center gap-1 font-mono text-[10px] text-[#98a2b3]"><GripVertical className="h-3 w-3 text-[#c5cbd5]" />{tko_item.key}</span><TkoPriority priority={tko_item.priority} compact /></div><p className="mt-2 text-[13px] font-semibold leading-5 text-[#344054]">{tko_item.title}</p><div className="mt-3 flex items-center justify-between text-[11px] text-[#667085]"><span className="flex items-center gap-1"><CalendarDays className="h-3 w-3 text-[#98a2b3]" />{tko_item.dueLabel}</span><span className="flex items-center gap-2"><span className="grid h-5 w-5 place-items-center rounded-full bg-[#e7e5ff] text-[8px] font-bold text-[#5146d9]">{tko_item.assignee}</span><span className="flex items-center gap-0.5"><MessageCircle className="h-3 w-3" />0</span></span></div><p className="mt-2 flex items-center gap-1 text-[10px] text-[#5b51e8]"><FolderKanban className="h-3 w-3" />{tko_item.optimistic ? "Creating task…" : tko_item.detail}</p></button>
+  </article>;
+}
+
 function TkoKanbanCreateComposer({
   tko_draft,
   tko_columnLabel,
@@ -196,6 +211,9 @@ export default function Work() {
   const [tko_editor, setTkoEditor] = useState<TkoItemEditor | null>(null);
   const [tko_commentDraft, setTkoCommentDraft] = useState("");
   const [tko_filterOpen, setTkoFilterOpen] = useState(false);
+  const [tko_filter, setTkoFilter] = useState<TkoKanbanFilter>("all");
+  const [tko_groupOpen, setTkoGroupOpen] = useState(false);
+  const [tko_grouping, setTkoGrouping] = useState<TkoKanbanGrouping>("none");
   const [tko_draggedId, setTkoDraggedId] = useState<string | null>(null);
   const [tko_createDraft, setTkoCreateDraft] = useState<TkoCreateDraft | null>(null);
   const [tko_optimisticItems, setTkoOptimisticItems] = useState<TkoBoardItem[]>([]);
@@ -284,6 +302,9 @@ export default function Work() {
   const tko_projectName = tko_selectedProject?.name ?? "Q2 Renewal Implementation";
   const tko_isPreview = !isAuthenticated || !tko_selectedProject;
   const tko_selectedDetail = tko_itemDetails.data;
+  const tko_filteredItems = useMemo(() => tko_filterKanbanItems(tko_items, tko_filter), [tko_filter, tko_items]);
+  const tko_filterLabel = tko_filter === "all" ? "All tasks" : tko_filter === "high_priority" ? "High priority" : tko_filter === "assigned" ? "Assigned" : "Unassigned";
+  const tko_groupLabel = tko_grouping === "none" ? "None" : tko_grouping === "priority" ? "Priority" : "Assignee";
 
   useEffect(() => {
     if (!tko_selectedDetail?.item || tko_editor?.workItemId === tko_selectedDetail.item.id) return;
@@ -445,10 +466,10 @@ export default function Work() {
           <div className="flex flex-wrap gap-2">
             <button className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467]"><CalendarDays className="h-3.5 w-3.5" />Sprint 2 <ChevronDown className="h-3.5 w-3.5" /></button>
             <div className="relative">
-              <button onClick={() => setTkoFilterOpen(!tko_filterOpen)} className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467]"><ListFilter className="h-3.5 w-3.5" />Filters <ChevronDown className="h-3.5 w-3.5" /></button>
-              {tko_filterOpen ? <div className="absolute z-20 mt-1 w-48 rounded-lg border border-[#eaecf0] bg-white p-1.5 text-xs shadow-lg"><button className="block w-full rounded px-2 py-2 text-left hover:bg-[#f4f3ff]">Assigned to me</button><button className="block w-full rounded px-2 py-2 text-left hover:bg-[#f4f3ff]">Due this sprint</button></div> : null}
+              <button onClick={() => setTkoFilterOpen(!tko_filterOpen)} className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467]"><ListFilter className="h-3.5 w-3.5" />{tko_filter === "all" ? "Filters" : tko_filterLabel} <ChevronDown className="h-3.5 w-3.5" /></button>
+              {tko_filterOpen ? <div className="absolute z-20 mt-1 w-48 border border-[#dfe1e6] bg-white p-1 text-xs shadow-[0_3px_8px_rgba(9,30,66,.18)]"><p className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#6b778c]">Show tasks</p>{([ ["all", "All tasks"], ["high_priority", "High priority"], ["assigned", "Assigned"], ["unassigned", "Unassigned"] ] as Array<[TkoKanbanFilter, string]>).map(([tko_value, tko_label]) => <button key={tko_value} type="button" aria-pressed={tko_filter === tko_value} onClick={() => { setTkoFilter(tko_value); setTkoFilterOpen(false); }} className={`block w-full px-2 py-2 text-left hover:bg-[#deebff] ${tko_filter === tko_value ? "bg-[#deebff] font-semibold text-[#0c66e4]" : "text-[#172b4d]"}`}>{tko_label}</button>)}</div> : null}
             </div>
-            <button className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467]"><SlidersHorizontal className="h-3.5 w-3.5" />Group: None <ChevronDown className="h-3.5 w-3.5" /></button>
+            <div className="relative"><button type="button" onClick={() => setTkoGroupOpen(!tko_groupOpen)} className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467]"><SlidersHorizontal className="h-3.5 w-3.5" />Group: {tko_groupLabel} <ChevronDown className="h-3.5 w-3.5" /></button>{tko_groupOpen ? <div className="absolute z-20 mt-1 w-44 border border-[#dfe1e6] bg-white p-1 text-xs shadow-[0_3px_8px_rgba(9,30,66,.18)]"><p className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#6b778c]">Group cards</p>{([ ["none", "None"], ["priority", "Priority"], ["assignee", "Assignee"] ] as Array<[TkoKanbanGrouping, string]>).map(([tko_value, tko_label]) => <button key={tko_value} type="button" aria-pressed={tko_grouping === tko_value} onClick={() => { setTkoGrouping(tko_value); setTkoGroupOpen(false); }} className={`block w-full px-2 py-2 text-left hover:bg-[#deebff] ${tko_grouping === tko_value ? "bg-[#deebff] font-semibold text-[#0c66e4]" : "text-[#172b4d]"}`}>{tko_label}</button>)}</div> : null}</div>
           </div>
           <div className="flex items-center gap-1 rounded-lg border border-[#eaecf0] bg-white p-1">
             <button onClick={() => setTkoView("board")} aria-label="Board view" className={`grid h-7 w-7 place-items-center rounded ${tko_view === "board" ? "bg-[#f0efff] text-[#5b51e8]" : "text-[#667085]"}`}><Columns3 className="h-4 w-4" /></button>
@@ -459,18 +480,18 @@ export default function Work() {
         {tko_view === "board" ? (
           <div className="overflow-x-auto pb-4"><div className="grid min-w-[900px] grid-cols-3 gap-3">
             {tko_columns.map(tko_column => {
-              const tko_columnItems = tko_items.filter(tko_item => tko_item.status === tko_column.id).sort((tko_left, tko_right) => (tko_left.rank ?? "").localeCompare(tko_right.rank ?? ""));
+              const tko_columnItems = tko_filteredItems.filter(tko_item => tko_item.status === tko_column.id).sort((tko_left, tko_right) => (tko_left.rank ?? "").localeCompare(tko_right.rank ?? ""));
               return <section key={`${tko_column.id}-${tko_column.statusId ?? "preview"}`} onDragOver={tko_event => tko_event.preventDefault()} onDrop={tko_event => tko_dropOnColumn(tko_event, tko_column.statusId)} className={`min-h-[420px] bg-[#f4f5f7] p-2.5 ${tko_draggedId ? "ring-1 ring-inset ring-[#85b8ff]" : ""}`}>
                 <div className="mb-2.5 flex items-center justify-between px-1"><div className="flex items-center gap-2 text-xs font-semibold text-[#172b4d]"><span className={`h-2 w-2 rounded-full ${tko_column.accent}`} />{tko_column.label}<span className="grid h-5 min-w-5 place-items-center bg-white px-1 text-[10px] text-[#44546f]">{tko_columnItems.length}</span></div><button onClick={() => tko_openCreateComposer(tko_column.statusId, tko_column.id)} aria-label={`Add to ${tko_column.label}`} className="grid h-6 w-6 place-items-center text-[#626f86] hover:bg-[#dfe1e6] hover:text-[#0c66e4]"><Plus className="h-4 w-4" /></button></div>
                 <div className="space-y-2">
-                  {tko_columnItems.map(tko_item => <article key={tko_item.id} draggable={!tko_isPreview} onDragStart={() => setTkoDraggedId(tko_item.id)} onDragEnd={() => setTkoDraggedId(null)} onDragOver={tko_event => { tko_event.preventDefault(); tko_event.stopPropagation(); }} onDrop={tko_event => { tko_event.stopPropagation(); tko_dropOnColumn(tko_event, tko_column.statusId, tko_item.id); }} className={`rounded-lg border border-[#eaecf0] bg-white shadow-[0_1px_2px_rgba(16,24,40,.04)] transition ${tko_draggedId === tko_item.id ? "opacity-45" : "hover:border-[#c7c3ff] hover:shadow-[0_7px_18px_rgba(91,81,232,.09)]"}`}><button type="button" onClick={() => tko_openItem(tko_item)} className="block w-full p-3 text-left"><div className="flex items-start justify-between gap-2"><span className="flex items-center gap-1 font-mono text-[10px] text-[#98a2b3]"><GripVertical className="h-3 w-3 text-[#c5cbd5]" />{tko_item.key}</span><TkoPriority priority={tko_item.priority} compact /></div><p className="mt-2 text-[13px] font-semibold leading-5 text-[#344054]">{tko_item.title}</p><div className="mt-3 flex items-center justify-between text-[11px] text-[#667085]"><span className="flex items-center gap-1"><CalendarDays className="h-3 w-3 text-[#98a2b3]" />{tko_item.dueLabel}</span><span className="flex items-center gap-2"><span className="grid h-5 w-5 place-items-center rounded-full bg-[#e7e5ff] text-[8px] font-bold text-[#5146d9]">{tko_item.assignee}</span><span className="flex items-center gap-0.5"><MessageCircle className="h-3 w-3" />0</span></span></div><p className="mt-2 flex items-center gap-1 text-[10px] text-[#5b51e8]"><FolderKanban className="h-3 w-3" />{tko_item.detail}</p></button></article>)}
+                  {tko_groupKanbanItems(tko_columnItems, tko_grouping).map(tko_group => <div key={tko_group.key} className="space-y-2">{tko_grouping !== "none" ? <p className="border-b border-[#dfe1e6] px-1 pb-1.5 pt-1 text-[10px] font-bold uppercase tracking-[.08em] text-[#44546f]">{tko_group.label} <span className="ml-1 font-normal text-[#6b778c]">{tko_group.items.length}</span></p> : null}{tko_group.items.map(tko_item => <TkoKanbanCard key={tko_item.id} tko_item={tko_item} tko_canDrag={!tko_isPreview} tko_isDragging={tko_draggedId === tko_item.id} tko_onOpen={() => tko_openItem(tko_item)} tko_onDragStart={() => setTkoDraggedId(tko_item.id)} tko_onDragEnd={() => setTkoDraggedId(null)} tko_onDrop={tko_event => { tko_event.stopPropagation(); tko_dropOnColumn(tko_event, tko_column.statusId, tko_item.id); }} />)}</div>)}
                   {tko_createDraft && tko_createDraft.statusId === tko_column.statusId ? <TkoKanbanCreateComposer tko_draft={tko_createDraft} tko_columnLabel={tko_column.label} tko_assignees={tko_assignees.data ?? []} tko_isPending={tko_create.isPending || tko_move.isPending} tko_onChange={setTkoCreateDraft} tko_onSubmit={tko_submitCreateDraft} tko_onCancel={tko_cancelCreateComposer} /> : <button type="button" onClick={() => tko_openCreateComposer(tko_column.statusId, tko_column.id)} className="flex w-full items-center gap-2 px-2 py-2 text-xs text-[#626f86] hover:bg-white hover:text-[#0c66e4]"><Plus className="h-3.5 w-3.5" />Add task</button>}
                 </div>
               </section>;
             })}
           </div></div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-[#eaecf0] bg-white"><div className="grid grid-cols-[90px_minmax(260px,1fr)_130px_130px] border-b border-[#eaecf0] bg-[#fcfcfd] px-4 py-2.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#98a2b3]"><span>Key</span><span>Work item</span><span>Priority</span><span>Status</span></div>{tko_items.map(tko_item => <button type="button" key={tko_item.id} onClick={() => tko_openItem(tko_item)} className="grid w-full grid-cols-[90px_minmax(260px,1fr)_130px_130px] items-center border-b border-[#f2f4f7] px-4 py-3 text-left text-xs last:border-b-0 hover:bg-[#fcfcff]"><span className="font-mono text-[#98a2b3]">{tko_item.key}</span><span className="font-semibold text-[#344054]">{tko_item.title}</span><span><TkoPriority priority={tko_item.priority} /></span><span className="capitalize text-[#667085]">{tko_item.status.replace("_", " ")}</span></button>)}</div>
+          <div className="overflow-hidden rounded-xl border border-[#eaecf0] bg-white"><div className="grid grid-cols-[90px_minmax(260px,1fr)_130px_130px] border-b border-[#eaecf0] bg-[#fcfcfd] px-4 py-2.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#98a2b3]"><span>Key</span><span>Work item</span><span>Priority</span><span>Status</span></div>{tko_filteredItems.map(tko_item => <button type="button" key={tko_item.id} onClick={() => tko_openItem(tko_item)} className="grid w-full grid-cols-[90px_minmax(260px,1fr)_130px_130px] items-center border-b border-[#f2f4f7] px-4 py-3 text-left text-xs last:border-b-0 hover:bg-[#fcfcff]"><span className="font-mono text-[#98a2b3]">{tko_item.key}</span><span className="font-semibold text-[#344054]">{tko_item.title}</span><span><TkoPriority priority={tko_item.priority} /></span><span className="capitalize text-[#667085]">{tko_item.status.replace("_", " ")}</span></button>)}</div>
         )}
       </main>
 
