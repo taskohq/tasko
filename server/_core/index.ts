@@ -12,6 +12,8 @@ import { serveStatic, setupVite } from "./vite";
 import { createCorrelationId, tko_logger } from "../../packages/observability/src/logger";
 import { getPlatformHealth, getPlatformReadiness } from "../platform/health";
 import { registerWebSocketGateway } from "../platform/websocket-gateway";
+import { registerPublicApiRoutes } from "../ecosystem/public-api";
+import { registerEcosystemWebhookObserver } from "../../modules/ecosystem/src/developer-service";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -47,6 +49,8 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  registerPublicApiRoutes(app);
+  registerEcosystemWebhookObserver();
   registerWebSocketGateway(server);
   app.get("/health", async (_req, res) => {
     res.status(200).json(await getPlatformHealth());

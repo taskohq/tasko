@@ -11,6 +11,8 @@ import Chat from "./pages/Chat";
 import CRM from "./pages/CRM";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
+import Ecosystem from "./pages/Ecosystem";
+import Imports from "./pages/Imports";
 import Workspace from "./pages/Workspace";
 
 function Router() {
@@ -29,6 +31,8 @@ function Router() {
         <Route path={"/crm"} component={CRM} />
         <Route path={"/settings"} component={Settings} />
         <Route path={"/admin"} component={Admin} />
+        <Route path={"/imports"} component={Imports} />
+        <Route path={"/ecosystem"} component={Ecosystem} />
         <Route path={"/404"} component={NotFound} />
         <Route component={NotFound} />
       </Switch>

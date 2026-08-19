@@ -13,6 +13,8 @@ import * as chatService from "../modules/chat/src/chat-service";
 import * as crmService from "../modules/crm/src/crm-service";
 import * as workspaceService from "../modules/workspace/src/workspace-service";
 import { getSaaSService } from "../modules/saas/src/saas-service";
+import { getImportService } from "../modules/ecosystem/src/import-service";
+import { getDeveloperService } from "../modules/ecosystem/src/developer-service";
 import { getWorkStore } from "../packages/database/src/work-store";
 import { z } from "zod";
 
@@ -235,6 +237,24 @@ export const appRouter = router({
     exportTenantManifest: protectedProcedure.input(z.object({ tenantId: z.string().uuid() })).mutation(({ ctx, input }) => getSaaSService().exportTenantManifest(ctx.user.openId, input.tenantId, ctx.correlationId)),
     provision: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(160), slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]{2,80}$/), ownerAuthSubject: z.string().trim().min(1).max(256), ownerDisplayName: z.string().trim().min(1).max(160), planKey: z.string().trim().min(1).max(80).optional(), idempotencyKey: z.string().uuid() })).mutation(({ ctx, input }) => getSaaSService().provision(ctx.user.openId, { ...input, correlationId: ctx.correlationId })),
     lifecycle: protectedProcedure.input(z.object({ tenantId: z.string().uuid(), status: z.enum(["active", "suspended"]) })).mutation(({ ctx, input }) => getSaaSService().lifecycle(ctx.user.openId, input.tenantId, input.status, ctx.correlationId)),
+  }),
+
+  ecosystem: router({
+    imports: tenantProcedure.query(({ ctx }) => getImportService().list(ctx.platform.actor)),
+    createImport: tenantProcedure.input(z.object({ source: z.enum(["jira", "clickup", "slack", "crm_csv"]), name: z.string().trim().min(1).max(240), sourceObjectKey: z.string().trim().max(1024).nullable().optional(), idempotencyKey: z.string().uuid() })).mutation(({ ctx, input }) => getImportService().create(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    previewImport: tenantProcedure.input(z.object({ jobId: z.string().uuid() })).query(({ ctx, input }) => getImportService().preview(ctx.platform.actor, input.jobId)),
+    stageImport: tenantProcedure.input(z.object({ jobId: z.string().uuid(), records: z.array(z.object({ sourceRecordId: z.string().trim().min(1).max(240), sourceType: z.string().trim().min(1).max(120), payload: z.record(z.string(), z.unknown()), status: z.enum(["staged", "valid", "warning", "error"]).optional(), validationErrors: z.array(z.string()).optional(), validationWarnings: z.array(z.string()).optional() })).min(1).max(500) })).mutation(({ ctx, input }) => getImportService().stage(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    saveImportMapping: tenantProcedure.input(z.object({ jobId: z.string().uuid(), sourceType: z.string().trim().min(1).max(120), targetKind: z.enum(["space", "project", "saved_view", "work_item", "channel", "message", "lead", "company", "contact", "deal"]), duplicateStrategy: z.enum(["skip", "update", "create_duplicate"]), ownerMemberId: z.string().uuid().nullable().optional(), fields: z.array(z.object({ sourceField: z.string().trim().min(1).max(240), targetField: z.string().trim().min(1).max(240), transform: z.enum(["identity", "lowercase", "email", "date", "split_name"]), required: z.boolean() })).min(1).max(100) })).mutation(({ ctx, input }) => getImportService().saveMapping(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    queueImport: tenantProcedure.input(z.object({ jobId: z.string().uuid(), idempotencyKey: z.string().uuid(), batchSize: z.number().int().min(1).max(100).optional() })).mutation(({ ctx, input }) => getImportService().queue(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    executeImportBatch: tenantProcedure.input(z.object({ batchId: z.string().uuid() })).mutation(({ ctx, input }) => getImportService().executeBatch(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    issueToken: tenantProcedure.input(z.object({ name: z.string().trim().min(1).max(160), scopes: z.array(z.enum(["imports:read", "imports:write", "webhooks:manage", "integrations:manage", "work:read", "work:write", "chat:read", "chat:write", "crm:read", "crm:write"])).min(1).max(10), expiresAt: z.date().nullable().optional() })).mutation(({ ctx, input }) => getDeveloperService().issueToken(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    tokens: tenantProcedure.query(({ ctx }) => getDeveloperService().listTokens(ctx.platform.actor)),
+    revokeToken: tenantProcedure.input(z.object({ tokenId: z.string().uuid() })).mutation(({ ctx, input }) => getDeveloperService().revokeToken(ctx.platform.actor, input.tokenId, ctx.correlationId)),
+    createWebhook: tenantProcedure.input(z.object({ name: z.string().trim().min(1).max(160), endpointUrl: z.string().url().max(2048), eventTypes: z.array(z.string().trim().min(1).max(180)).min(1).max(100) })).mutation(({ ctx, input }) => getDeveloperService().createWebhook(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    webhooks: tenantProcedure.query(({ ctx }) => getDeveloperService().listWebhooks(ctx.platform.actor)),
+    deliveries: tenantProcedure.input(z.object({ subscriptionId: z.string().uuid().optional() })).query(({ ctx, input }) => getDeveloperService().listDeliveries(ctx.platform.actor, input.subscriptionId)),
+    connect: tenantProcedure.input(z.object({ provider: z.enum(["github", "gitlab", "jira", "clickup", "slack"]), displayName: z.string().trim().min(1).max(160), externalAccountId: z.string().trim().max(240).nullable().optional(), config: z.record(z.string(), z.unknown()).optional() })).mutation(({ ctx, input }) => getDeveloperService().connect(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    connections: tenantProcedure.query(({ ctx }) => getDeveloperService().listConnections(ctx.platform.actor)),
   }),
 
   // TODO: add feature routers here, e.g.

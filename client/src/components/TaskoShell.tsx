@@ -6,6 +6,7 @@ import {
   Bot,
   BriefcaseBusiness,
   ClipboardList,
+  Cable,
   ChevronDown,
   CircleHelp,
   FileText,
@@ -105,6 +106,8 @@ export default function TaskoShell({ children }: { children: ReactNode }) {
     { label: "CRM", path: "/crm", icon: UsersRound },
     { label: "Docs", path: "/docs", icon: FileText },
     { label: "Automations", path: "/automations", icon: Bot },
+    { label: "Imports", path: "/imports", icon: ClipboardList },
+    { label: "Ecosystem", path: "/ecosystem", icon: Cable },
   ];
   const tko_initial = user?.name?.trim().slice(0, 1).toUpperCase() || "T";
 
