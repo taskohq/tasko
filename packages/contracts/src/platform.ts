@@ -51,7 +51,16 @@ export type Capability =
   | "crm.deal.manage"
   | "crm.activity.manage"
   | "crm.follow_up.create"
-  | "crm.deal.handoff";
+  | "crm.deal.handoff"
+  | "workspace.search"
+  | "workspace.inbox.manage"
+  | "workspace.link.manage"
+  | "workspace.document.read"
+  | "workspace.document.manage"
+  | "workspace.form.read"
+  | "workspace.form.manage"
+  | "workspace.form.submit"
+  | "workspace.automation.manage";
 
 export interface Tenant {
   id: string;

@@ -18,6 +18,8 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "chat.notification.manage", "chat.saved_message.manage", "chat.search",
     "crm.read", "crm.lead.manage", "crm.lead.convert", "crm.company.manage", "crm.contact.manage",
     "crm.pipeline.manage", "crm.deal.manage", "crm.activity.manage", "crm.follow_up.create", "crm.deal.handoff",
+    "workspace.search", "workspace.inbox.manage", "workspace.link.manage", "workspace.document.read", "workspace.document.manage",
+    "workspace.form.read", "workspace.form.manage", "workspace.form.submit", "workspace.automation.manage",
   ],
   admin: [
     "workspace.read", "workspace.settings.manage", "workspace.members.manage", "workspace.audit.read",
@@ -30,6 +32,8 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "chat.notification.manage", "chat.saved_message.manage", "chat.search",
     "crm.read", "crm.lead.manage", "crm.lead.convert", "crm.company.manage", "crm.contact.manage",
     "crm.pipeline.manage", "crm.deal.manage", "crm.activity.manage", "crm.follow_up.create", "crm.deal.handoff",
+    "workspace.search", "workspace.inbox.manage", "workspace.link.manage", "workspace.document.read", "workspace.document.manage",
+    "workspace.form.read", "workspace.form.manage", "workspace.form.submit", "workspace.automation.manage",
   ],
   member: [
     "workspace.read", "attachment.upload", "attachment.download", "realtime.connect",
@@ -39,18 +43,23 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "chat.reaction.toggle", "chat.read_cursor.update", "chat.notification.manage", "chat.saved_message.manage", "chat.search",
     "crm.read", "crm.lead.manage", "crm.lead.convert", "crm.company.manage", "crm.contact.manage",
     "crm.deal.manage", "crm.activity.manage", "crm.follow_up.create",
+    "workspace.search", "workspace.inbox.manage", "workspace.link.manage", "workspace.document.read", "workspace.document.manage",
+    "workspace.form.read", "workspace.form.submit",
   ],
   guest: [
     "workspace.read", "attachment.download", "realtime.connect",
     "work.space.read", "work.project.read", "work.item.read", "work.comment.create",
     "chat.channel.read", "chat.message.read", "chat.message.send", "chat.message.edit_own", "chat.message.delete_own",
     "chat.reaction.toggle", "chat.read_cursor.update", "chat.notification.manage", "chat.saved_message.manage", "chat.search",
+    "workspace.search", "workspace.inbox.manage", "workspace.document.read", "workspace.form.read", "workspace.form.submit",
   ],
   service_account: [
     "workspace.read", "attachment.upload", "attachment.download", "job.enqueue", "job.process",
-    "work.space.read", "work.space.manage", "work.project.read", "work.project.manage", "work.item.read", "work.item.update", "work.item.transition",
+    "work.space.read", "work.space.manage", "work.project.read", "work.project.manage", "work.item.read", "work.item.create", "work.item.update", "work.item.transition",
     "chat.channel.read", "chat.channel.manage", "chat.message.read", "chat.message.send", "chat.reaction.toggle",
     "crm.read", "crm.deal.manage", "crm.activity.manage", "crm.follow_up.create", "crm.deal.handoff",
+    "workspace.search", "workspace.inbox.manage", "workspace.link.manage", "workspace.document.read", "workspace.document.manage",
+    "workspace.form.read", "workspace.form.manage", "workspace.form.submit", "workspace.automation.manage",
   ],
 };
 
