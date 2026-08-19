@@ -136,6 +136,34 @@ describe("Work Alpha acceptance boundaries", () => {
     await expect(work.moveWorkItem({ actor: tko_owner, workItemId: tko_second.id, targetStatusId: tko_inProgress.id, expectedVersion: 1, correlationId: tko_owner.correlationId })).rejects.toThrow("WORK_ITEM_VERSION_CONFLICT");
   });
 
+  it("creates a metadata-rich task and places it in the requested Kanban column with durable history", async () => {
+    const tko_owner = await tko_actor();
+    const tko_space = await work.createSpace(tko_owner, { name: "Product delivery", slug: "product-delivery", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Kanban composition", key: "CMP", methodology: "kanban", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_dueAt = new Date("2026-09-01T12:00:00.000Z");
+    const tko_created = await work.createWorkItem({
+      actor: tko_owner,
+      projectId: tko_project.id,
+      title: "Prepare launch checklist",
+      description: "Confirm owner, scope and handoff.",
+      priority: "high",
+      assigneeMemberIds: [tko_owner.memberId],
+      dueAt: tko_dueAt,
+      estimateMinutes: 90,
+      correlationId: tko_owner.correlationId,
+    });
+    const tko_board = await work.board(tko_owner, tko_project.id);
+    const tko_done = tko_board.statuses.find(tko_status => tko_status.category === "done");
+    if (!tko_done) throw new Error("TEST_DONE_STATUS_MISSING");
+    const tko_moved = await work.moveWorkItem({ actor: tko_owner, workItemId: tko_created.id, targetStatusId: tko_done.id, expectedVersion: tko_created.version, correlationId: tko_owner.correlationId });
+
+    expect(tko_created).toMatchObject({ title: "Prepare launch checklist", description: "Confirm owner, scope and handoff.", priority: "high", assigneeMemberIds: [tko_owner.memberId], estimateMinutes: 90 });
+    expect(tko_created.dueAt?.toISOString()).toBe(tko_dueAt.toISOString());
+    expect(tko_moved.statusId).toBe(tko_done.id);
+    expect((await tko_workStore.listHistory(tko_owner.tenantId, tko_created.id)).map(tko_entry => tko_entry.field)).toEqual(["created", "kanban_position"]);
+    expect((await tko_platformStore.listAuditLogs()).filter(tko_event => ["work.work_item.created", "work.work_item.moved"].includes(tko_event.action))).toHaveLength(2);
+  });
+
   it("keeps custom fields tenant and project scoped while rejecting guest administration", async () => {
     const tko_owner = await tko_actor();
     const tko_guest = { ...tko_owner, authSubject: "demo-guest:tasko-demo", memberId: "guest-member", role: "guest" as const };

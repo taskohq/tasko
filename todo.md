@@ -107,6 +107,10 @@
 - [x] M4 Overview hardening: expose linked-object context và work graph thực từ service/API, rồi render chúng trong Operations Overview tenant-scoped.
 - [x] OAuth callback regression: điều tra lỗi callback sau Google login, sửa nguyên nhân cấu hình/validation và thêm test cho success/failure contract trước khi tiếp tục visual verification M4.
 - [ ] Deferred OAuth/browser follow-up: đăng nhập Google thực tế và tạo populated authenticated Overview screenshot khi người dùng sẵn sàng xác nhận trong browser; không chặn các checkpoint theo yêu cầu người dùng.
+- [x] Kanban task creation refinement: đối chiếu demo ClickUp đính kèm, rồi thay quick-create tối giản bằng flow tạo task trên board có trường lõi, trạng thái/cột đích, phản hồi lạc quan, keyboard support và kiểm thử.
+- [x] Kanban optimistic create: chèn thẻ tạm vào cột đích ngay khi submit composer, rollback khi create/move lỗi và reconcile lại dữ liệu server-authoritative.
+- [x] Kanban optimistic create verification: bổ sung coverage cho optimistic create, rollback và reconcile khi create/move thất bại, rồi chạy regression/build trước checkpoint.
+- [x] Kanban optimistic UI-flow verification: kiểm thử flow được Work composer sử dụng cho pending card, create-fail rollback, move-fail recovery và success reconcile trước checkpoint.
 - [x] OAuth hardening evidence: mock hoặc tái hiện rõ nguồn `getaddrinfo ENOTFOUND base`, hoặc ghi nhận giới hạn provider với bằng chứng runtime/configuration.
 - [x] OAuth handler tests: kiểm tra callback success tạo session cookie/302 và exchange failure trả lỗi phù hợp sau khi state hợp lệ bằng SDK dependency mock.
 - [x] Runtime PostgreSQL configuration: thay giá trị `TASKO_POSTGRES_URL=1` không hợp lệ bằng connection string Docker hợp lệ để ngăn lỗi DNS `ENOTFOUND base` trong SaaS/API queries.

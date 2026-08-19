@@ -1,6 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { startLogin } from "@/const";
+import { tko_addOptimistic, tko_removeOptimistic, tko_runOptimisticCreate } from "@/lib/kanban-optimistic";
 import { trpc } from "@/lib/trpc";
 import {
   CalendarDays,
@@ -40,6 +41,7 @@ type TkoBoardItem = {
   detail: string;
   assignee: string;
   dueLabel: string;
+  optimistic?: boolean;
 };
 
 type TkoItemEditor = {
@@ -51,6 +53,19 @@ type TkoItemEditor = {
   dueAt: string;
   estimateMinutes: string;
 };
+
+type TkoCreateDraft = {
+  statusId: string;
+  status: TkoCategory;
+  title: string;
+  description: string;
+  priority: TkoPriority;
+  assigneeMemberIds: string[];
+  dueAt: string;
+  estimateMinutes: string;
+};
+
+type TkoAssigneeOption = { id: string; displayName: string; role: string };
 
 const tko_previewItems: TkoBoardItem[] = [
   { id: "preview-1", key: "TASKO-12", title: "Confirm workspace hierarchy", priority: "urgent", status: "todo", detail: "Architecture", assignee: "TL", dueLabel: "May 23", rank: "001" },
@@ -97,6 +112,82 @@ function TkoPriority({ priority, compact = false }: { priority: TkoPriority; com
   );
 }
 
+function TkoKanbanCreateComposer({
+  tko_draft,
+  tko_columnLabel,
+  tko_assignees,
+  tko_isPending,
+  tko_onChange,
+  tko_onSubmit,
+  tko_onCancel,
+}: {
+  tko_draft: TkoCreateDraft;
+  tko_columnLabel: string;
+  tko_assignees: TkoAssigneeOption[];
+  tko_isPending: boolean;
+  tko_onChange: (tko_next: TkoCreateDraft) => void;
+  tko_onSubmit: (tko_event: FormEvent) => void;
+  tko_onCancel: () => void;
+}) {
+  return (
+    <form
+      onSubmit={tko_onSubmit}
+      onKeyDown={tko_event => {
+        if (tko_event.key === "Escape") {
+          tko_event.preventDefault();
+          tko_onCancel();
+        }
+      }}
+      className="border border-[#0c66e4] bg-white p-3 shadow-[0_1px_2px_rgba(9,30,66,.16)]"
+      aria-label={`Create task in ${tko_columnLabel}`}
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-[.08em] text-[#44546f]">New task · {tko_columnLabel}</span>
+        <button type="button" onClick={tko_onCancel} aria-label="Cancel creating task" className="grid h-6 w-6 place-items-center text-[#626f86] hover:bg-[#f1f2f4] hover:text-[#172b4d]"><X className="h-3.5 w-3.5" /></button>
+      </div>
+      <label className="sr-only" htmlFor={`create-title-${tko_draft.statusId}`}>Task title</label>
+      <input
+        id={`create-title-${tko_draft.statusId}`}
+        autoFocus
+        value={tko_draft.title}
+        onChange={tko_event => tko_onChange({ ...tko_draft, title: tko_event.target.value })}
+        placeholder="What needs to be done?"
+        className="h-9 w-full border border-[#dfe1e6] px-2.5 text-xs font-medium text-[#172b4d] outline-none placeholder:text-[#6b778c] focus:border-[#0c66e4] focus:ring-1 focus:ring-[#0c66e4]"
+      />
+      <label className="sr-only" htmlFor={`create-description-${tko_draft.statusId}`}>Description</label>
+      <textarea
+        id={`create-description-${tko_draft.statusId}`}
+        value={tko_draft.description}
+        onChange={tko_event => tko_onChange({ ...tko_draft, description: tko_event.target.value })}
+        placeholder="Add context (optional)"
+        className="mt-2 min-h-16 w-full resize-y border border-[#dfe1e6] px-2.5 py-2 text-xs leading-5 text-[#172b4d] outline-none placeholder:text-[#6b778c] focus:border-[#0c66e4] focus:ring-1 focus:ring-[#0c66e4]"
+      />
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <label className="text-[10px] font-semibold text-[#44546f]">Priority
+          <select value={tko_draft.priority} onChange={tko_event => tko_onChange({ ...tko_draft, priority: tko_event.target.value as TkoPriority })} className="mt-1 block h-8 w-full border border-[#dfe1e6] bg-white px-2 text-[11px] text-[#172b4d] outline-none focus:border-[#0c66e4]">
+            <option value="none">No priority</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option>
+          </select>
+        </label>
+        <label className="text-[10px] font-semibold text-[#44546f]">Assignee
+          <select value={tko_draft.assigneeMemberIds[0] ?? "unassigned"} onChange={tko_event => tko_onChange({ ...tko_draft, assigneeMemberIds: tko_event.target.value === "unassigned" ? [] : [tko_event.target.value] })} className="mt-1 block h-8 w-full border border-[#dfe1e6] bg-white px-2 text-[11px] text-[#172b4d] outline-none focus:border-[#0c66e4]">
+            <option value="unassigned">Unassigned</option>{tko_assignees.map(tko_assignee => <option key={tko_assignee.id} value={tko_assignee.id}>{tko_assignee.displayName}</option>)}
+          </select>
+        </label>
+        <label className="text-[10px] font-semibold text-[#44546f]">Due date
+          <input type="date" value={tko_draft.dueAt} onChange={tko_event => tko_onChange({ ...tko_draft, dueAt: tko_event.target.value })} className="mt-1 block h-8 w-full border border-[#dfe1e6] bg-white px-2 text-[11px] text-[#172b4d] outline-none focus:border-[#0c66e4]" />
+        </label>
+        <label className="text-[10px] font-semibold text-[#44546f]">Estimate (min)
+          <input type="number" min="0" step="1" value={tko_draft.estimateMinutes} onChange={tko_event => tko_onChange({ ...tko_draft, estimateMinutes: tko_event.target.value })} placeholder="—" className="mt-1 block h-8 w-full border border-[#dfe1e6] px-2 text-[11px] text-[#172b4d] outline-none placeholder:text-[#6b778c] focus:border-[#0c66e4]" />
+        </label>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <span className="text-[10px] text-[#626f86]">Enter to create · Esc to cancel</span>
+        <div className="flex gap-1.5"><button type="button" onClick={tko_onCancel} className="h-7 px-2 text-[11px] font-medium text-[#44546f] hover:bg-[#f1f2f4]">Cancel</button><Button type="submit" disabled={!tko_draft.title.trim() || tko_isPending} className="h-7 rounded-sm bg-[#0c66e4] px-2.5 text-[11px] font-semibold hover:bg-[#0055cc]">{tko_isPending ? "Creating…" : "Create & open"}</Button></div>
+      </div>
+    </form>
+  );
+}
+
 export default function Work() {
   const { isAuthenticated, loading: tko_authLoading } = useAuth();
   const tko_utils = trpc.useUtils();
@@ -106,8 +197,8 @@ export default function Work() {
   const [tko_commentDraft, setTkoCommentDraft] = useState("");
   const [tko_filterOpen, setTkoFilterOpen] = useState(false);
   const [tko_draggedId, setTkoDraggedId] = useState<string | null>(null);
-  const [tko_quickStatusId, setTkoQuickStatusId] = useState<string | null>(null);
-  const [tko_quickTitle, setTkoQuickTitle] = useState("");
+  const [tko_createDraft, setTkoCreateDraft] = useState<TkoCreateDraft | null>(null);
+  const [tko_optimisticItems, setTkoOptimisticItems] = useState<TkoBoardItem[]>([]);
 
   const tko_projects = trpc.work.projects.useQuery(undefined, { enabled: isAuthenticated });
   const tko_assignees = trpc.work.assignees.useQuery(undefined, { enabled: isAuthenticated });
@@ -127,28 +218,11 @@ export default function Work() {
   const tko_seed = trpc.work.seedDemo.useMutation({
     onSuccess: async () => { await tko_utils.work.projects.invalidate(); },
   });
-  const tko_transition = trpc.work.transitionItem.useMutation({
-    onSuccess: async () => { await tko_refreshBoard(); toast.success("Workflow đã được cập nhật."); },
-    onError: () => toast.error("Không thể cập nhật trạng thái. Hãy thử lại."),
-  });
   const tko_move = trpc.work.moveItem.useMutation({
     onSuccess: async () => { await tko_refreshBoard(); toast.success("Đã cập nhật vị trí trên board."); },
     onError: async () => { await tko_refreshBoard(); toast.error("Board vừa thay đổi. Dữ liệu đã được làm mới, hãy thử lại."); },
   });
-  const tko_create = trpc.work.createItem.useMutation({
-    onSuccess: async tko_item => {
-      const tko_target = tko_quickStatusId;
-      setTkoQuickTitle("");
-      setTkoQuickStatusId(null);
-      if (tko_target && tko_item.statusId !== tko_target) {
-        tko_transition.mutate({ workItemId: tko_item.id, targetStatusId: tko_target, expectedVersion: tko_item.version });
-        return;
-      }
-      await tko_refreshBoard();
-      toast.success("Đã tạo work item.");
-    },
-    onError: () => toast.error("Không thể tạo work item. Hãy kiểm tra lại quyền của bạn."),
-  });
+  const tko_create = trpc.work.createItem.useMutation();
   const tko_comment = trpc.work.createComment.useMutation({
     onSuccess: async () => {
       setTkoCommentDraft("");
@@ -189,9 +263,9 @@ export default function Work() {
     }));
   }, [tko_board.data]);
   const tko_items = useMemo<TkoBoardItem[]>(() => {
-    if (!tko_board.data) return tko_previewItems;
+    if (!tko_board.data) return [...tko_previewItems, ...tko_optimisticItems];
     const tko_statusById = new Map(tko_board.data.statuses.map(tko_status => [tko_status.id, tko_status.category]));
-    return tko_board.data.items.map(tko_item => ({
+    const tko_serverItems = tko_board.data.items.map(tko_item => ({
       id: tko_item.id,
       key: tko_item.key,
       title: tko_item.title,
@@ -204,7 +278,8 @@ export default function Work() {
       assignee: tko_item.assigneeMemberIds.length ? "ME" : "—",
       dueLabel: tko_dueLabel(tko_item.dueAt),
     }));
-  }, [tko_board.data]);
+    return [...tko_serverItems, ...tko_optimisticItems];
+  }, [tko_board.data, tko_optimisticItems]);
 
   const tko_projectName = tko_selectedProject?.name ?? "Q2 Renewal Implementation";
   const tko_isPreview = !isAuthenticated || !tko_selectedProject;
@@ -252,10 +327,65 @@ export default function Work() {
     tko_requestMove(tko_item, tko_statusId, tko_beforeWorkItemId);
   }
 
-  function tko_submitQuickAdd(tko_event: FormEvent) {
+  function tko_openCreateComposer(tko_statusId: string | undefined, tko_status: TkoCategory) {
+    if (!isAuthenticated) { startLogin(); return; }
+    if (!tko_statusId) return;
+    setTkoCreateDraft({ statusId: tko_statusId, status: tko_status, title: "", description: "", priority: "none", assigneeMemberIds: [], dueAt: "", estimateMinutes: "" });
+  }
+
+  function tko_cancelCreateComposer() { setTkoCreateDraft(null); }
+
+  async function tko_submitCreateDraft(tko_event: FormEvent) {
     tko_event.preventDefault();
-    if (!tko_selectedProject || !tko_quickTitle.trim()) return;
-    tko_create.mutate({ projectId: tko_selectedProject.id, title: tko_quickTitle.trim(), priority: "none" });
+    if (!tko_selectedProject || !tko_createDraft?.title.trim()) return;
+    const tko_draft = tko_createDraft;
+    const tko_estimateText = tko_draft.estimateMinutes.trim();
+    const tko_estimate = tko_estimateText ? Number(tko_estimateText) : null;
+    if (tko_estimate !== null && (!Number.isInteger(tko_estimate) || tko_estimate < 0)) {
+      toast.error("Estimate phải là số phút không âm.");
+      return;
+    }
+    const tko_optimisticId = `optimistic:${crypto.randomUUID()}`;
+    const tko_optimisticItem: TkoBoardItem = {
+      id: tko_optimisticId,
+      key: "Creating…",
+      title: tko_draft.title.trim(),
+      priority: tko_draft.priority,
+      status: tko_draft.status,
+      statusId: tko_draft.statusId,
+      version: 0,
+      rank: "zzzzzzzzzzzz",
+      detail: tko_estimate ? `${Math.round(tko_estimate / 60)}h estimate` : "Work item",
+      assignee: tko_draft.assigneeMemberIds.length ? "ME" : "—",
+      dueLabel: tko_draft.dueAt ? tko_draft.dueAt : "No due date",
+      optimistic: true,
+    };
+    const tko_result = await tko_runOptimisticCreate({
+      onOptimistic: () => setTkoOptimisticItems(tko_current => tko_addOptimistic(tko_current, tko_optimisticItem)),
+      onRollback: () => setTkoOptimisticItems(tko_current => tko_removeOptimistic(tko_current, tko_optimisticId)),
+      onReconciled: () => setTkoOptimisticItems(tko_current => tko_removeOptimistic(tko_current, tko_optimisticId)),
+      create: () => tko_create.mutateAsync({ projectId: tko_selectedProject.id, title: tko_draft.title.trim(), description: tko_draft.description.trim(), priority: tko_draft.priority, assigneeMemberIds: tko_draft.assigneeMemberIds, dueAt: tko_draft.dueAt ? new Date(`${tko_draft.dueAt}T12:00:00`) : null, estimateMinutes: tko_estimate }),
+      shouldMove: tko_created => tko_created.statusId !== tko_draft.statusId,
+      move: tko_created => tko_move.mutateAsync({ workItemId: tko_created.id, targetStatusId: tko_draft.statusId, beforeWorkItemId: null, expectedVersion: tko_created.version }),
+    });
+    if (tko_result.outcome === "create-failed") {
+      await tko_refreshBoard();
+      toast.error("Không thể tạo task. Board đã được làm mới, hãy thử lại.");
+      return;
+    }
+    if (tko_result.outcome === "move-failed") {
+      const tko_created = tko_result.created;
+      setTkoCreateDraft(null);
+      await tko_refreshBoard();
+      tko_openItem({ id: tko_created.id, key: tko_created.key, title: tko_created.title, priority: tko_created.priority, status: "todo", statusId: tko_created.statusId, version: tko_created.version, rank: tko_created.rank, detail: tko_created.estimateMinutes ? `${Math.round(tko_created.estimateMinutes / 60)}h estimate` : "Work item", assignee: tko_created.assigneeMemberIds.length ? "ME" : "—", dueLabel: tko_dueLabel(tko_created.dueAt) });
+      toast.error("Task đã tạo ở To do nhưng chưa thể đặt vào cột đã chọn. Đã mở task để bạn thử lại.");
+      return;
+    }
+    const tko_finalItem = tko_result.item;
+    setTkoCreateDraft(null);
+    await tko_refreshBoard();
+    tko_openItem({ id: tko_finalItem.id, key: tko_finalItem.key, title: tko_finalItem.title, priority: tko_finalItem.priority, status: tko_draft.status, statusId: tko_finalItem.statusId, version: tko_finalItem.version, rank: tko_finalItem.rank, detail: tko_finalItem.estimateMinutes ? `${Math.round(tko_finalItem.estimateMinutes / 60)}h estimate` : "Work item", assignee: tko_finalItem.assigneeMemberIds.length ? "ME" : "—", dueLabel: tko_dueLabel(tko_finalItem.dueAt) });
+    toast.success("Đã tạo task và mở chi tiết để hoàn thiện.");
   }
 
   function tko_saveEditor(tko_event: FormEvent) {
@@ -297,7 +427,7 @@ export default function Work() {
             <p className="mt-1 text-[13px] text-[#667085]">Plan delivery, coordinate work and turn conversations into outcomes.</p>
           </div>
           {isAuthenticated ? (
-            <Button onClick={() => tko_selectedProject ? setTkoQuickStatusId(tko_columns[0]?.statusId ?? null) : tko_seed.mutate()} disabled={tko_seed.isPending} className="h-9 rounded-lg bg-[#5b51e8] px-3.5 text-xs font-semibold hover:bg-[#4d43da]"><Plus className="mr-1.5 h-4 w-4" />{tko_selectedProject ? "Create task" : "Set up demo"}</Button>
+            <Button onClick={() => tko_selectedProject ? tko_openCreateComposer(tko_columns[0]?.statusId, tko_columns[0]?.id ?? "todo") : tko_seed.mutate()} disabled={tko_seed.isPending} className="h-9 rounded-sm bg-[#0c66e4] px-3.5 text-xs font-semibold hover:bg-[#0055cc]"><Plus className="mr-1.5 h-4 w-4" />{tko_selectedProject ? "Create task" : "Set up demo"}</Button>
           ) : <Button onClick={startLogin} className="h-9 rounded-lg bg-[#5b51e8] px-3.5 text-xs font-semibold hover:bg-[#4d43da]">Sign in</Button>}
         </div>
         <nav className="mt-5 flex items-center gap-5 overflow-x-auto border-t border-[#f2f4f7] pt-3 text-[13px] whitespace-nowrap" aria-label="Project views">
@@ -330,11 +460,11 @@ export default function Work() {
           <div className="overflow-x-auto pb-4"><div className="grid min-w-[900px] grid-cols-3 gap-3">
             {tko_columns.map(tko_column => {
               const tko_columnItems = tko_items.filter(tko_item => tko_item.status === tko_column.id).sort((tko_left, tko_right) => (tko_left.rank ?? "").localeCompare(tko_right.rank ?? ""));
-              return <section key={`${tko_column.id}-${tko_column.statusId ?? "preview"}`} onDragOver={tko_event => tko_event.preventDefault()} onDrop={tko_event => tko_dropOnColumn(tko_event, tko_column.statusId)} className={`min-h-[420px] rounded-xl bg-[#f8f8fc] p-2.5 ${tko_draggedId ? "ring-1 ring-inset ring-[#c7c3ff]" : ""}`}>
-                <div className="mb-2.5 flex items-center justify-between px-1"><div className="flex items-center gap-2 text-xs font-semibold text-[#344054]"><span className={`h-2 w-2 rounded-full ${tko_column.accent}`} />{tko_column.label}<span className="grid h-5 min-w-5 place-items-center rounded bg-white px-1 text-[10px] text-[#667085]">{tko_columnItems.length}</span></div><button onClick={() => isAuthenticated ? setTkoQuickStatusId(tko_column.statusId ?? null) : startLogin()} aria-label={`Add to ${tko_column.label}`} className="text-[#98a2b3] hover:text-[#5b51e8]"><Plus className="h-4 w-4" /></button></div>
+              return <section key={`${tko_column.id}-${tko_column.statusId ?? "preview"}`} onDragOver={tko_event => tko_event.preventDefault()} onDrop={tko_event => tko_dropOnColumn(tko_event, tko_column.statusId)} className={`min-h-[420px] bg-[#f4f5f7] p-2.5 ${tko_draggedId ? "ring-1 ring-inset ring-[#85b8ff]" : ""}`}>
+                <div className="mb-2.5 flex items-center justify-between px-1"><div className="flex items-center gap-2 text-xs font-semibold text-[#172b4d]"><span className={`h-2 w-2 rounded-full ${tko_column.accent}`} />{tko_column.label}<span className="grid h-5 min-w-5 place-items-center bg-white px-1 text-[10px] text-[#44546f]">{tko_columnItems.length}</span></div><button onClick={() => tko_openCreateComposer(tko_column.statusId, tko_column.id)} aria-label={`Add to ${tko_column.label}`} className="grid h-6 w-6 place-items-center text-[#626f86] hover:bg-[#dfe1e6] hover:text-[#0c66e4]"><Plus className="h-4 w-4" /></button></div>
                 <div className="space-y-2">
                   {tko_columnItems.map(tko_item => <article key={tko_item.id} draggable={!tko_isPreview} onDragStart={() => setTkoDraggedId(tko_item.id)} onDragEnd={() => setTkoDraggedId(null)} onDragOver={tko_event => { tko_event.preventDefault(); tko_event.stopPropagation(); }} onDrop={tko_event => { tko_event.stopPropagation(); tko_dropOnColumn(tko_event, tko_column.statusId, tko_item.id); }} className={`rounded-lg border border-[#eaecf0] bg-white shadow-[0_1px_2px_rgba(16,24,40,.04)] transition ${tko_draggedId === tko_item.id ? "opacity-45" : "hover:border-[#c7c3ff] hover:shadow-[0_7px_18px_rgba(91,81,232,.09)]"}`}><button type="button" onClick={() => tko_openItem(tko_item)} className="block w-full p-3 text-left"><div className="flex items-start justify-between gap-2"><span className="flex items-center gap-1 font-mono text-[10px] text-[#98a2b3]"><GripVertical className="h-3 w-3 text-[#c5cbd5]" />{tko_item.key}</span><TkoPriority priority={tko_item.priority} compact /></div><p className="mt-2 text-[13px] font-semibold leading-5 text-[#344054]">{tko_item.title}</p><div className="mt-3 flex items-center justify-between text-[11px] text-[#667085]"><span className="flex items-center gap-1"><CalendarDays className="h-3 w-3 text-[#98a2b3]" />{tko_item.dueLabel}</span><span className="flex items-center gap-2"><span className="grid h-5 w-5 place-items-center rounded-full bg-[#e7e5ff] text-[8px] font-bold text-[#5146d9]">{tko_item.assignee}</span><span className="flex items-center gap-0.5"><MessageCircle className="h-3 w-3" />0</span></span></div><p className="mt-2 flex items-center gap-1 text-[10px] text-[#5b51e8]"><FolderKanban className="h-3 w-3" />{tko_item.detail}</p></button></article>)}
-                  {tko_quickStatusId === tko_column.statusId ? <form onSubmit={tko_submitQuickAdd} className="rounded-lg border border-[#c7c3ff] bg-white p-2"><label className="sr-only" htmlFor={`quick-${tko_column.id}`}>Task title</label><input id={`quick-${tko_column.id}`} autoFocus value={tko_quickTitle} onChange={tko_event => setTkoQuickTitle(tko_event.target.value)} placeholder="What needs to be done?" className="w-full rounded border border-[#d0d5dd] px-2.5 py-2 text-xs outline-none focus:border-[#5b51e8] focus:ring-2 focus:ring-[#e7e5ff]" /><div className="mt-2 flex gap-2"><Button type="submit" disabled={!tko_quickTitle.trim() || tko_create.isPending} className="h-7 rounded bg-[#5b51e8] px-2.5 text-[11px]">Add task</Button><button type="button" onClick={() => { setTkoQuickStatusId(null); setTkoQuickTitle(""); }} className="px-1 text-[11px] font-medium text-[#667085]">Cancel</button></div></form> : <button type="button" onClick={() => isAuthenticated ? setTkoQuickStatusId(tko_column.statusId ?? null) : startLogin()} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs text-[#667085] hover:bg-white hover:text-[#5b51e8]"><Plus className="h-3.5 w-3.5" />Add task</button>}
+                  {tko_createDraft && tko_createDraft.statusId === tko_column.statusId ? <TkoKanbanCreateComposer tko_draft={tko_createDraft} tko_columnLabel={tko_column.label} tko_assignees={tko_assignees.data ?? []} tko_isPending={tko_create.isPending || tko_move.isPending} tko_onChange={setTkoCreateDraft} tko_onSubmit={tko_submitCreateDraft} tko_onCancel={tko_cancelCreateComposer} /> : <button type="button" onClick={() => tko_openCreateComposer(tko_column.statusId, tko_column.id)} className="flex w-full items-center gap-2 px-2 py-2 text-xs text-[#626f86] hover:bg-white hover:text-[#0c66e4]"><Plus className="h-3.5 w-3.5" />Add task</button>}
                 </div>
               </section>;
             })}
