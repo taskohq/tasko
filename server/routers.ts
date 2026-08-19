@@ -1,4 +1,5 @@
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router, tenantProcedure } from "./_core/trpc";
@@ -16,6 +17,7 @@ import { getSaaSService } from "../modules/saas/src/saas-service";
 import { getImportService } from "../modules/ecosystem/src/import-service";
 import { getDeveloperService } from "../modules/ecosystem/src/developer-service";
 import * as aiService from "../modules/ai/src/ai-service";
+import { signInWithEmailPassword, signUpWithEmailPassword } from "../modules/auth/src/email-password-service";
 import { listAITools } from "../modules/ai/src/tool-registry";
 import { getWorkStore } from "../packages/database/src/work-store";
 import { z } from "zod";
@@ -25,6 +27,33 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    signUpWithEmailPassword: publicProcedure
+      .input(z.object({ email: z.string().email().max(254), password: z.string().min(12).max(128), displayName: z.string().trim().min(2).max(100), workspaceName: z.string().trim().min(2).max(100).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const tko_result = await signUpWithEmailPassword({ ...input, correlationId: ctx.correlationId });
+          ctx.res.cookie(COOKIE_NAME, tko_result.sessionToken, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
+          return { account: { email: tko_result.account.email, displayName: tko_result.account.displayName } };
+        } catch (tko_error) {
+          const tko_code = tko_error instanceof Error ? tko_error.message : "";
+          if (tko_code === "TASKO_AUTH_RATE_LIMITED") throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Please wait before trying again." });
+          if (tko_code === "TASKO_PASSWORD_POLICY_FAILED") throw new TRPCError({ code: "BAD_REQUEST", message: "Password does not meet the security requirements." });
+          throw new TRPCError({ code: "CONFLICT", message: "Unable to create this account." });
+        }
+      }),
+    signInWithEmailPassword: publicProcedure
+      .input(z.object({ email: z.string().email().max(254), password: z.string().min(1).max(128) }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const tko_result = await signInWithEmailPassword({ ...input, correlationId: ctx.correlationId });
+          ctx.res.cookie(COOKIE_NAME, tko_result.sessionToken, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
+          return { account: { email: tko_result.account.email, displayName: tko_result.account.displayName } };
+        } catch (tko_error) {
+          const tko_code = tko_error instanceof Error ? tko_error.message : "";
+          if (tko_code === "TASKO_AUTH_RATE_LIMITED") throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Please wait before trying again." });
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password." });
+        }
+      }),
     logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });

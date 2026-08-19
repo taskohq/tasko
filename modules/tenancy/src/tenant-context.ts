@@ -30,8 +30,9 @@ export async function resolveTenantRequestContext(tko_input: {
 }): Promise<TenantRequestContext | null> {
   const tko_store = getPlatformStore();
   const tko_memberships = await tko_store.listMemberships(tko_input.authSubject);
+  const tko_isLocalEmailPrincipal = tko_input.authSubject.startsWith("email:");
   const tko_requestedSlug =
-    tko_config.deploymentProfile === "single_tenant"
+    tko_config.deploymentProfile === "single_tenant" && !tko_isLocalEmailPrincipal
       ? tko_config.singleTenantSlug
       : tko_input.candidateTenantSlug?.trim() || tko_memberships[0]?.tenant.slug;
 

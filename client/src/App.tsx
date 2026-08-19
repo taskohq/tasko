@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import TaskoShell from "./components/TaskoShell";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -15,8 +15,11 @@ import Ecosystem from "./pages/Ecosystem";
 import Imports from "./pages/Imports";
 import Workspace from "./pages/Workspace";
 import AI from "./pages/AI";
+import Login from "./pages/Login";
 
 function Router() {
+  const [tko_location] = useLocation();
+  if (tko_location === "/login") return <Login />;
   return (
     <TaskoShell>
       <Switch>

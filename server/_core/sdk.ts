@@ -6,6 +6,8 @@ import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
+import { getEmailPasswordStore } from "../../packages/database/src/email-password-store";
+import { tko_isEmailPasswordSubject } from "../../modules/auth/src/email-password-service";
 import { ENV } from "./env";
 import type {
   ExchangeTokenRequest,
@@ -309,6 +311,21 @@ class SDKServer {
 
     const sessionUserId = session.openId;
     const signedInAt = new Date();
+    if (tko_isEmailPasswordSubject(sessionUserId)) {
+      const tko_account = await getEmailPasswordStore().getByAuthSubject(sessionUserId);
+      if (!tko_account) throw ForbiddenError("Local credential account not found");
+      return {
+        id: -2,
+        openId: tko_account.authSubject,
+        name: tko_account.displayName,
+        email: tko_account.email,
+        loginMethod: "email_password",
+        role: "user",
+        createdAt: tko_account.createdAt,
+        updatedAt: signedInAt,
+        lastSignedIn: tko_account.lastSignedInAt ?? signedInAt,
+      };
+    }
     let user = await db.getUserByOpenId(sessionUserId);
 
     // If user not in DB, sync from OAuth server automatically

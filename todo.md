@@ -112,6 +112,10 @@
 - [x] Runtime PostgreSQL configuration: thay giá trị `TASKO_POSTGRES_URL=1` không hợp lệ bằng connection string Docker hợp lệ để ngăn lỗi DNS `ENOTFOUND base` trong SaaS/API queries.
 - [x] Runtime PostgreSQL verification: xác nhận cùng endpoint Docker development kết nối được, migration M7 còn nguyên và API SaaS không còn lỗi DNS.
 - [x] Runtime PostgreSQL M7 schema verification: kiểm tra trực tiếp `ai_runs`, `ai_context_references` và `ai_tool_proposals` tồn tại trên PostgreSQL Docker runtime đã cấu hình.
+- [x] Authentication email/password: thêm credential persistence tenant-safe, băm mật khẩu bằng KDF, chống enumeration/rate-limit, session HTTP-only và audit/outbox phù hợp.
+- [x] Authentication email/password API: cung cấp đăng ký, đăng nhập, đăng xuất và kiểm tra trạng thái qua tRPC, giữ Google OAuth là phương thức song song.
+- [x] Authentication email/password UI: tạo luồng sign-in/sign-up responsive theo design system Tasko, validation và trạng thái lỗi rõ ràng.
+- [x] Authentication email/password verification: thêm negative/security tests, typecheck, full regression, build, visual verification, commit và checkpoint.
 - [x] M4 checkpoint: lưu snapshot Unified Workspace Beta sau commit hiện tại và ghi lại version/checkpoint ID (`bb0248b5`); checkpoint không bao gồm OAuth regression fix hoặc populated authenticated screenshot đang deferred.
 - [x] M5 foundation: thêm migration/RLS, tenant lifecycle state, plan catalog, tenant entitlement/usage ledger, provisioning idempotency, backup archives/restores và operational event metadata.
 - [x] M5 entitlement/quota: tạo centralized SaaS entitlement service và rate/quota guards có tenant scope; áp dụng vào capability giới hạn, API/search/forms/automation khi phù hợp mà không rải `if (saas)` vào core domains.
@@ -124,6 +128,7 @@
 - [x] M4 search grouping verification: thêm acceptance chứng minh global search nhóm Work/Chat/CRM/Docs theo type dưới tenant scope, ngoài coverage deny/isolation hiện có.
 - [x] M4 search Chat materialization: đăng ký outbox consumer cho channel/message events và kiểm chứng global search trả Chat theo exact authorization.
 - [x] M4 automation WorkItem trigger verification: thêm acceptance chứng minh event `work.work_item_created.v1` thực thi action CRM activity đúng một lần.
+- [x] Authentication email/password single-tenant fix: dùng tenant vừa provision khi ghi audit và phát hành session, không resolve sai sang `TASKO_SINGLE_TENANT_SLUG` trong signup mới.
 - [x] M4 search Chat auth verification: thêm acceptance private channel/message để chứng minh non-member/guest không thấy kết quả, count hoặc snippet sau materialization.
 - [x] M4 global search leak-prevention verification: thêm acceptance cross-tenant và cross-visibility cho Work/Chat/CRM/Docs sau materialization, assert exact authorization trước trả kết quả.
 - [x] M4 search same-tenant visibility verification: thêm acceptance Docs private và resource Work hoặc CRM restricted để non-owner cùng tenant không thấy result/count/snippet sau materialization.
