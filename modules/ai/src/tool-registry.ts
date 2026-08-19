@@ -1,0 +1,23 @@
+import type { AIToolDefinition, AIToolName } from "../../../packages/contracts/src/ai";
+import type { PlatformActor } from "../../../packages/contracts/src/platform";
+import { requireCapability } from "../../permissions/src/authorization";
+import * as chatService from "../../chat/src/chat-service";
+import * as workService from "../../work/src/work-service";
+import { resolveContext } from "./context-resolver";
+
+export interface AITool extends AIToolDefinition { execute(actor: PlatformActor, input: Record<string, unknown>, correlationId: string): Promise<Record<string, unknown>>; }
+const tko_text = (tko_value: unknown, tko_name: string, tko_max = 4_000): string => { if (typeof tko_value !== "string" || !tko_value.trim()) throw new Error(`AI_TOOL_${tko_name}_REQUIRED`); return tko_value.trim().slice(0, tko_max); };
+const tko_array = (tko_value: unknown): Array<{ kind: "work_item" | "project" | "channel" | "message" | "lead" | "deal" | "document" | "form"; id: string }> => Array.isArray(tko_value) ? tko_value.filter((tko_item): tko_item is { kind: "work_item" | "project" | "channel" | "message" | "lead" | "deal" | "document" | "form"; id: string } => typeof tko_item === "object" && tko_item !== null && typeof (tko_item as { kind?: unknown }).kind === "string" && typeof (tko_item as { id?: unknown }).id === "string") : [];
+
+function tko_tool(tko_definition: AIToolDefinition, tko_execute: AITool["execute"]): AITool { return { ...tko_definition, execute: async (tko_actor, tko_input, tko_correlationId) => { requireCapability(tko_actor, tko_definition.capability, { tenantId: tko_actor.tenantId, type: "ai_tool", id: tko_definition.name, visibility: "internal" }); return tko_execute(tko_actor, tko_input, tko_correlationId); } }; }
+
+const tko_tools: AITool[] = [
+  tko_tool({ name: "context.read", risk: "read", capability: "ai.context.read", requiresConfirmation: false, idempotent: true, description: "Resolve only entities that the current Tasko identity can read." }, async (tko_actor, tko_input) => ({ context: await resolveContext(tko_actor, tko_array(tko_input.entityRefs), typeof tko_input.intent === "string" ? tko_input.intent : "context" ) })),
+  tko_tool({ name: "work_item.draft", risk: "draft", capability: "ai.draft.create", requiresConfirmation: false, idempotent: true, description: "Prepare a non-persistent Work item draft." }, async (_tko_actor, tko_input) => ({ draft: { projectId: tko_text(tko_input.projectId, "PROJECT_ID", 80), title: tko_text(tko_input.title, "TITLE", 240), description: typeof tko_input.description === "string" ? tko_input.description.slice(0, 8_000) : "" } })),
+  tko_tool({ name: "document.draft", risk: "draft", capability: "ai.draft.create", requiresConfirmation: false, idempotent: true, description: "Prepare a non-persistent document draft." }, async (_tko_actor, tko_input) => ({ draft: { title: tko_text(tko_input.title, "TITLE", 240), body: tko_text(tko_input.body, "BODY", 12_000) } })),
+  tko_tool({ name: "work_item.create", risk: "write", capability: "ai.action.propose", requiresConfirmation: true, idempotent: true, description: "Create a Work item only after the proposed action is explicitly confirmed." }, async (tko_actor, tko_input, tko_correlationId) => { const tko_item = await workService.createWorkItem({ actor: tko_actor, projectId: tko_text(tko_input.projectId, "PROJECT_ID", 80), title: tko_text(tko_input.title, "TITLE", 240), description: typeof tko_input.description === "string" ? tko_input.description.slice(0, 8_000) : undefined, correlationId: tko_correlationId }); return { workItemId: tko_item.id, key: tko_item.key, title: tko_item.title }; }),
+  tko_tool({ name: "chat.message.send", risk: "write", capability: "ai.action.propose", requiresConfirmation: true, idempotent: true, description: "Send a Tasko chat message only after the proposed action is explicitly confirmed." }, async (tko_actor, tko_input, tko_correlationId) => { const tko_message = await chatService.sendMessage(tko_actor, { channelId: tko_text(tko_input.channelId, "CHANNEL_ID", 80), body: { type: "text", text: tko_text(tko_input.text, "TEXT", 8_000), mentions: [] }, clientMessageId: tko_text(tko_input.idempotencyKey, "IDEMPOTENCY_KEY", 180) }, tko_correlationId); return { messageId: tko_message.id, channelId: tko_message.channelId }; }),
+];
+
+export function listAITools(): AIToolDefinition[] { return tko_tools.map(({ execute: _tko_execute, ...tko_definition }) => tko_definition); }
+export function getAITool(tko_name: AIToolName): AITool { const tko_toolEntry = tko_tools.find(tko_toolItem => tko_toolItem.name === tko_name); if (!tko_toolEntry) throw new Error("AI_TOOL_NOT_FOUND"); return tko_toolEntry; }

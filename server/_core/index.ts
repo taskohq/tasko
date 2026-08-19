@@ -14,6 +14,7 @@ import { getPlatformHealth, getPlatformReadiness } from "../platform/health";
 import { registerWebSocketGateway } from "../platform/websocket-gateway";
 import { registerPublicApiRoutes } from "../ecosystem/public-api";
 import { registerEcosystemWebhookObserver } from "../../modules/ecosystem/src/developer-service";
+import { registerMCPRoutes } from "../ai/mcp-server";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -50,6 +51,7 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   registerPublicApiRoutes(app);
+  registerMCPRoutes(app);
   registerEcosystemWebhookObserver();
   registerWebSocketGateway(server);
   app.get("/health", async (_req, res) => {

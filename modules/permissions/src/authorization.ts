@@ -22,6 +22,7 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "workspace.form.read", "workspace.form.manage", "workspace.form.submit", "workspace.automation.manage",
     "saas.entitlement.read", "saas.entitlement.manage", "saas.usage.read", "saas.billing.manage", "saas.backup.manage", "saas.restore.manage", "saas.metrics.read",
     "ecosystem.import.read", "ecosystem.import.manage", "ecosystem.api_token.manage", "ecosystem.webhook.manage", "ecosystem.integration.manage",
+    "ai.context.read", "ai.draft.create", "ai.action.propose", "ai.action.confirm", "mcp.connect",
   ],
   admin: [
     "workspace.read", "workspace.settings.manage", "workspace.members.manage", "workspace.audit.read",
@@ -38,6 +39,7 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "workspace.form.read", "workspace.form.manage", "workspace.form.submit", "workspace.automation.manage",
     "saas.entitlement.read", "saas.usage.read", "saas.billing.manage", "saas.backup.manage", "saas.restore.manage", "saas.metrics.read",
     "ecosystem.import.read", "ecosystem.import.manage", "ecosystem.api_token.manage", "ecosystem.webhook.manage", "ecosystem.integration.manage",
+    "ai.context.read", "ai.draft.create", "ai.action.propose", "ai.action.confirm", "mcp.connect",
   ],
   member: [
     "workspace.read", "attachment.upload", "attachment.download", "realtime.connect",
@@ -49,6 +51,7 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "crm.deal.manage", "crm.activity.manage", "crm.follow_up.create",
     "workspace.search", "workspace.inbox.manage", "workspace.link.manage", "workspace.document.read", "workspace.document.manage",
     "workspace.form.read", "workspace.form.submit", "saas.entitlement.read", "saas.usage.read", "ecosystem.import.read",
+    "ai.context.read", "ai.draft.create", "ai.action.propose", "mcp.connect",
   ],
   guest: [
     "workspace.read", "attachment.download", "realtime.connect",
@@ -56,6 +59,7 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "chat.channel.read", "chat.message.read", "chat.message.send", "chat.message.edit_own", "chat.message.delete_own",
     "chat.reaction.toggle", "chat.read_cursor.update", "chat.notification.manage", "chat.saved_message.manage", "chat.search",
     "workspace.search", "workspace.inbox.manage", "workspace.document.read", "workspace.form.read", "workspace.form.submit",
+    "ai.context.read",
   ],
   service_account: [
     "workspace.read", "attachment.upload", "attachment.download", "job.enqueue", "job.process",
@@ -65,6 +69,7 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "workspace.search", "workspace.inbox.manage", "workspace.link.manage", "workspace.document.read", "workspace.document.manage",
     "workspace.form.read", "workspace.form.manage", "workspace.form.submit", "workspace.automation.manage",
     "ecosystem.import.read", "ecosystem.import.manage", "ecosystem.webhook.manage", "ecosystem.integration.manage",
+    "ai.context.read", "ai.draft.create", "ai.action.propose", "ai.action.confirm", "mcp.connect",
     "saas.entitlement.read", "saas.usage.read", "saas.backup.manage", "saas.restore.manage", "saas.metrics.read",
   ],
 };

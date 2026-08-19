@@ -135,3 +135,9 @@
 - [x] M6 developer platform: phát hành public `/api/v1` scoped token surface, webhook subscription/delivery HMAC/replay/retry/dead-letter và GitHub/GitLab integration boundary.
 - [x] M6 UI: thêm canvas Import và Developer Ecosystem cho mapping/preview/execution/reporting, token/webhook management và trạng thái integration.
 - [x] M6 verification: thêm acceptance import resume/idempotency, mapping/isolation, public API scope denial, webhook signature/retry/dead-letter và GitHub/GitLab boundary; typecheck, tests, build, visual review, commits và checkpoint.
+- [x] M7 foundation: thêm contracts, migration/RLS, persistence cho AI sessions/runs/context references/tool proposals/approvals/audit metadata và capability model AI/MCP.
+- [x] M7 Context Resolver/Tool Registry: resolve context chỉ từ resource đã exact-authorize, tạo registry tool typed có risk level, capability, idempotency và confirmation policy tập trung.
+- [x] M7 AI actions: cung cấp AI read/draft server-side, citations/backlinks, model/cost metadata; các write chỉ chạy sau proposal/explicit confirmation với audit/outbox và replay protection.
+- [x] M7 MCP beta: phát hành server permission-aware có identity/token mapping, list/read/call tool allowlist, rate/quota control, audit và không lộ SQL/generic HTTP.
+- [x] M7 UI: thêm contextual AI panel và canvas quản trị action/approval hiển thị nguồn, trạng thái, proposal/diff và controls an toàn.
+- [x] M7 verification: thêm negative tests context leak/MCP scope, confirmation/audit/outbox/idempotency, typecheck, regression, build, visual review, commits và checkpoint.

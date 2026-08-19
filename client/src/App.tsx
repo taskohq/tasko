@@ -14,6 +14,7 @@ import Admin from "./pages/Admin";
 import Ecosystem from "./pages/Ecosystem";
 import Imports from "./pages/Imports";
 import Workspace from "./pages/Workspace";
+import AI from "./pages/AI";
 
 function Router() {
   return (
@@ -33,6 +34,7 @@ function Router() {
         <Route path={"/admin"} component={Admin} />
         <Route path={"/imports"} component={Imports} />
         <Route path={"/ecosystem"} component={Ecosystem} />
+        <Route path={"/ai"} component={AI} />
         <Route path={"/404"} component={NotFound} />
         <Route component={NotFound} />
       </Switch>

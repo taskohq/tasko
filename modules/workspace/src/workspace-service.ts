@@ -23,7 +23,7 @@ const tko_require = (tko_actor: PlatformActor, tko_capability: Capability, tko_t
 function tko_text(tko_value: unknown): string { return typeof tko_value === "string" ? tko_value.trim() : ""; }
 function tko_stringArray(tko_value: unknown): string[] { return Array.isArray(tko_value) ? tko_value.filter((tko_item): tko_item is string => typeof tko_item === "string") : []; }
 
-async function tko_requireEntityRead(tko_actor: PlatformActor, tko_entityType: WorkspaceEntityType, tko_entityId: string): Promise<void> {
+export async function tko_requireEntityRead(tko_actor: PlatformActor, tko_entityType: WorkspaceEntityType, tko_entityId: string): Promise<void> {
   if (tko_entityType === "work_item") { const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_entityId); if (!tko_item) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_item.projectId); if (!tko_project) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "work.project.read", tko_project); requireCapability(tko_actor, "work.item.read", tko_item); return; }
   if (tko_entityType === "project") { const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_entityId); if (!tko_project) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "work.project.read", tko_project); return; }
   if (tko_entityType === "channel") { const tko_channel = await getChatStore().getChannel(tko_actor.tenantId, tko_entityId); if (!tko_channel) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "chat.channel.read", tko_channel); return; }

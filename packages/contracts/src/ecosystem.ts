@@ -92,7 +92,8 @@ export type DeveloperApiScope =
   | "imports:read"
   | "imports:write"
   | "webhooks:manage"
-  | "integrations:manage";
+  | "integrations:manage"
+  | "mcp:connect";
 
 export interface DeveloperApiToken extends TenantResource {
   type: "developer_api_token";

@@ -15,6 +15,8 @@ import * as workspaceService from "../modules/workspace/src/workspace-service";
 import { getSaaSService } from "../modules/saas/src/saas-service";
 import { getImportService } from "../modules/ecosystem/src/import-service";
 import { getDeveloperService } from "../modules/ecosystem/src/developer-service";
+import * as aiService from "../modules/ai/src/ai-service";
+import { listAITools } from "../modules/ai/src/tool-registry";
 import { getWorkStore } from "../packages/database/src/work-store";
 import { z } from "zod";
 
@@ -247,7 +249,7 @@ export const appRouter = router({
     saveImportMapping: tenantProcedure.input(z.object({ jobId: z.string().uuid(), sourceType: z.string().trim().min(1).max(120), targetKind: z.enum(["space", "project", "saved_view", "work_item", "channel", "message", "lead", "company", "contact", "deal"]), duplicateStrategy: z.enum(["skip", "update", "create_duplicate"]), ownerMemberId: z.string().uuid().nullable().optional(), fields: z.array(z.object({ sourceField: z.string().trim().min(1).max(240), targetField: z.string().trim().min(1).max(240), transform: z.enum(["identity", "lowercase", "email", "date", "split_name"]), required: z.boolean() })).min(1).max(100) })).mutation(({ ctx, input }) => getImportService().saveMapping(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     queueImport: tenantProcedure.input(z.object({ jobId: z.string().uuid(), idempotencyKey: z.string().uuid(), batchSize: z.number().int().min(1).max(100).optional() })).mutation(({ ctx, input }) => getImportService().queue(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     executeImportBatch: tenantProcedure.input(z.object({ batchId: z.string().uuid() })).mutation(({ ctx, input }) => getImportService().executeBatch(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
-    issueToken: tenantProcedure.input(z.object({ name: z.string().trim().min(1).max(160), scopes: z.array(z.enum(["imports:read", "imports:write", "webhooks:manage", "integrations:manage", "work:read", "work:write", "chat:read", "chat:write", "crm:read", "crm:write"])).min(1).max(10), expiresAt: z.date().nullable().optional() })).mutation(({ ctx, input }) => getDeveloperService().issueToken(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    issueToken: tenantProcedure.input(z.object({ name: z.string().trim().min(1).max(160), scopes: z.array(z.enum(["imports:read", "imports:write", "webhooks:manage", "integrations:manage", "work:read", "work:write", "chat:read", "chat:write", "crm:read", "crm:write", "mcp:connect"])).min(1).max(10), expiresAt: z.date().nullable().optional() })).mutation(({ ctx, input }) => getDeveloperService().issueToken(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     tokens: tenantProcedure.query(({ ctx }) => getDeveloperService().listTokens(ctx.platform.actor)),
     revokeToken: tenantProcedure.input(z.object({ tokenId: z.string().uuid() })).mutation(({ ctx, input }) => getDeveloperService().revokeToken(ctx.platform.actor, input.tokenId, ctx.correlationId)),
     createWebhook: tenantProcedure.input(z.object({ name: z.string().trim().min(1).max(160), endpointUrl: z.string().url().max(2048), eventTypes: z.array(z.string().trim().min(1).max(180)).min(1).max(100) })).mutation(({ ctx, input }) => getDeveloperService().createWebhook(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
@@ -255,6 +257,17 @@ export const appRouter = router({
     deliveries: tenantProcedure.input(z.object({ subscriptionId: z.string().uuid().optional() })).query(({ ctx, input }) => getDeveloperService().listDeliveries(ctx.platform.actor, input.subscriptionId)),
     connect: tenantProcedure.input(z.object({ provider: z.enum(["github", "gitlab", "jira", "clickup", "slack"]), displayName: z.string().trim().min(1).max(160), externalAccountId: z.string().trim().max(240).nullable().optional(), config: z.record(z.string(), z.unknown()).optional() })).mutation(({ ctx, input }) => getDeveloperService().connect(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     connections: tenantProcedure.query(({ ctx }) => getDeveloperService().listConnections(ctx.platform.actor)),
+  }),
+
+  ai: router({
+    tools: tenantProcedure.query(({ ctx }) => { require("../modules/permissions/src/authorization").requireCapability(ctx.platform.actor, "ai.context.read", { tenantId: ctx.platform.actor.tenantId, type: "ai_tool", id: "list", visibility: "internal" }); return listAITools(); }),
+    runs: tenantProcedure.query(({ ctx }) => aiService.listRuns(ctx.platform.actor)),
+    proposals: tenantProcedure.query(({ ctx }) => aiService.listProposals(ctx.platform.actor)),
+    read: tenantProcedure.input(z.object({ prompt: z.string().trim().min(1).max(8_000), context: z.array(z.object({ kind: z.enum(["work_item", "project", "channel", "message", "lead", "deal", "document", "form"]), id: z.string().uuid() })).max(12).default([]) })).mutation(({ ctx, input }) => aiService.runRead(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    draft: tenantProcedure.input(z.object({ prompt: z.string().trim().min(1).max(8_000), context: z.array(z.object({ kind: z.enum(["work_item", "project", "channel", "message", "lead", "deal", "document", "form"]), id: z.string().uuid() })).max(12).default([]) })).mutation(({ ctx, input }) => aiService.runDraft(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    propose: tenantProcedure.input(z.object({ toolName: z.enum(["work_item.create", "chat.message.send"]), input: z.record(z.string(), z.unknown()), idempotencyKey: z.string().trim().min(1).max(180).optional() })).mutation(({ ctx, input }) => aiService.proposeAction(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    confirm: tenantProcedure.input(z.object({ proposalId: z.string().uuid() })).mutation(({ ctx, input }) => aiService.confirmProposal(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    execute: tenantProcedure.input(z.object({ proposalId: z.string().uuid() })).mutation(({ ctx, input }) => aiService.executeConfirmedProposal(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
   }),
 
   // TODO: add feature routers here, e.g.

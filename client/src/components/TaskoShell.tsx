@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 
-type TkoModuleKey = "overview" | "work" | "chat" | "crm";
+type TkoModuleKey = "overview" | "work" | "chat" | "crm" | "ai";
 type TkoNavItem = { label: string; path: string; icon: ComponentType<{ className?: string }>; badge?: string };
 
 export const tko_shellModules: Record<TkoModuleKey, { label: string; eyebrow: string; nav: TkoNavItem[] }> = {
@@ -70,11 +70,20 @@ export const tko_shellModules: Record<TkoModuleKey, { label: string; eyebrow: st
       { label: "Pipelines", path: "/crm#pipelines", icon: Grid2X2 },
     ],
   },
+  ai: {
+    label: "Tasko AI",
+    eyebrow: "Intelligence",
+    nav: [
+      { label: "Assistant", path: "/ai", icon: Sparkles },
+      { label: "Proposals", path: "/ai#proposals", icon: Bot },
+    ],
+  },
 };
 
 export function tko_moduleForPath(tko_path: string): TkoModuleKey {
   if (tko_path.startsWith("/chat")) return "chat";
   if (tko_path.startsWith("/crm")) return "crm";
+  if (tko_path.startsWith("/ai")) return "ai";
   if (tko_path.startsWith("/work") || tko_path === "/") return "work";
   return "overview";
 }
@@ -108,6 +117,7 @@ export default function TaskoShell({ children }: { children: ReactNode }) {
     { label: "Automations", path: "/automations", icon: Bot },
     { label: "Imports", path: "/imports", icon: ClipboardList },
     { label: "Ecosystem", path: "/ecosystem", icon: Cable },
+    { label: "Tasko AI", path: "/ai", icon: Sparkles },
   ];
   const tko_initial = user?.name?.trim().slice(0, 1).toUpperCase() || "T";
 

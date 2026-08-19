@@ -72,7 +72,12 @@ export type Capability =
   | "ecosystem.import.manage"
   | "ecosystem.api_token.manage"
   | "ecosystem.webhook.manage"
-  | "ecosystem.integration.manage";
+  | "ecosystem.integration.manage"
+  | "ai.context.read"
+  | "ai.draft.create"
+  | "ai.action.propose"
+  | "ai.action.confirm"
+  | "mcp.connect";
 
 export interface Tenant {
   id: string;
