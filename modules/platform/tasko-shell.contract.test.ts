@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { tko_moduleForPath, tko_shellModules } from "../../client/src/components/TaskoShell";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { tko_brandAssets, tko_moduleForPath, tko_shellModules } from "../../client/src/components/TaskoShell";
 
 describe("TaskoShell navigation contracts", () => {
   it("resolves every primary module and keeps unknown paths on operations overview", () => {
@@ -19,5 +21,14 @@ describe("TaskoShell navigation contracts", () => {
       expect(tko_module.nav.every(tko_item => tko_item.path.startsWith("/"))).toBe(true);
       expect(tko_module.nav.every(tko_item => tko_item.label.length > 0)).toBe(true);
     }
+  });
+
+  it("uses the official immutable logo and favicon assets across shell metadata", () => {
+    expect(tko_brandAssets.logo).toBe("/manus-storage/tasko-logo_50726dd1.png");
+    expect(tko_brandAssets.favicon).toBe("/manus-storage/tasko-favicon_2220cdac.png");
+
+    const tko_indexHtml = readFileSync(resolve(process.cwd(), "client/index.html"), "utf8");
+    expect(tko_indexHtml).toContain(`href="${tko_brandAssets.favicon}"`);
+    expect(tko_indexHtml).toContain('name="application-name" content="Tasko"');
   });
 });

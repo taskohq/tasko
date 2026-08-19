@@ -28,6 +28,11 @@ import type { ComponentType, ReactNode } from "react";
 type TkoModuleKey = "overview" | "work" | "chat" | "crm" | "ai";
 type TkoNavItem = { label: string; path: string; icon: ComponentType<{ className?: string }>; badge?: string };
 
+export const tko_brandAssets = {
+  logo: "/manus-storage/tasko-logo_50726dd1.png",
+  favicon: "/manus-storage/tasko-favicon_2220cdac.png",
+} as const;
+
 export const tko_shellModules: Record<TkoModuleKey, { label: string; eyebrow: string; nav: TkoNavItem[] }> = {
   overview: {
     label: "Overview",
@@ -125,8 +130,17 @@ export default function TaskoShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-[#f8f8fc] text-[#182230]">
       <header className="sticky top-0 z-50 flex h-16 items-center gap-4 border-b border-[#eaecf0] bg-white px-4 shadow-[0_1px_2px_rgba(16,24,40,.02)] lg:px-5">
         <Link href="/platform" className="flex shrink-0 items-center gap-2.5 pr-2" aria-label="Tasko operations overview">
-          <span className="grid h-7 w-7 place-items-center rounded-[9px] bg-gradient-to-br from-[#6257f6] via-[#5f7df4] to-[#e28dc7] text-sm font-black text-white shadow-sm">T</span>
-          <span className="hidden text-[21px] font-bold tracking-[-0.055em] text-[#101828] sm:block">tasko</span>
+          <img
+            src={tko_brandAssets.favicon}
+            alt=""
+            aria-hidden="true"
+            className="h-8 w-8 object-contain sm:hidden"
+          />
+          <img
+            src={tko_brandAssets.logo}
+            alt="Tasko"
+            className="hidden h-8 w-auto object-contain sm:block"
+          />
         </Link>
         <Link href="/platform#search" className="hidden max-w-[525px] flex-1 items-center gap-3 rounded-lg border border-[#eaecf0] bg-[#fcfcfd] px-3.5 py-2 text-left text-[13px] text-[#98a2b3] shadow-sm md:flex">
           <Search className="h-4 w-4" />

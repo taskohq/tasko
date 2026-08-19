@@ -141,3 +141,4 @@
 - [x] M7 MCP beta: phát hành server permission-aware có identity/token mapping, list/read/call tool allowlist, rate/quota control, audit và không lộ SQL/generic HTTP.
 - [x] M7 UI: thêm contextual AI panel và canvas quản trị action/approval hiển thị nguồn, trạng thái, proposal/diff và controls an toàn.
 - [x] M7 verification: thêm negative tests context leak/MCP scope, confirmation/audit/outbox/idempotency, typecheck, regression, build, visual review, commits và checkpoint.
+- [x] Branding: dùng logo và favicon chính thức từ tệp người dùng cung cấp, cập nhật app shell, metadata và kiểm chứng hiển thị responsive.
