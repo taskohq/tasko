@@ -129,3 +129,9 @@
 - [x] M5 operations hardening: bổ sung platform-admin export manifest tenant-scoped, abuse/rate controls cho mutation SaaS nhạy cảm và acceptance audit/isolation.
 - [x] M5 observability hardening: bổ sung operational probes cho outbox/search recovery, expose summary platform-admin và kiểm chứng bằng acceptance deterministic.
 - [x] M5 finalization: chạy lại full regression/build/visual review sau hardening, tạo commit Git theo nhóm và checkpoint milestone.
+- [x] M6 foundation: thêm domain contracts, migration/RLS và persistence cho import jobs/batches/staging/mappings, API tokens, webhook subscriptions/deliveries và external connections.
+- [x] M6 import pipeline: xây staged workflow resumable/idempotent upload/connect → parse → validate → map → preview → batch execute → warnings/errors, giữ source IDs và audit/outbox cho mọi durable mutation.
+- [x] M6 adapters: hỗ trợ Jira, ClickUp, Slack export/API path và CSV CRM theo neutral staging model, mappings phù hợp domain Tasko và immutable historical Slack messages.
+- [x] M6 developer platform: phát hành public `/api/v1` scoped token surface, webhook subscription/delivery HMAC/replay/retry/dead-letter và GitHub/GitLab integration boundary.
+- [x] M6 UI: thêm canvas Import và Developer Ecosystem cho mapping/preview/execution/reporting, token/webhook management và trạng thái integration.
+- [x] M6 verification: thêm acceptance import resume/idempotency, mapping/isolation, public API scope denial, webhook signature/retry/dead-letter và GitHub/GitLab boundary; typecheck, tests, build, visual review, commits và checkpoint.
