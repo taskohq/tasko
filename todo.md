@@ -112,6 +112,11 @@
 - [x] Kanban optimistic create verification: bổ sung coverage cho optimistic create, rollback và reconcile khi create/move thất bại, rồi chạy regression/build trước checkpoint.
 - [x] Kanban optimistic UI-flow verification: kiểm thử flow được Work composer sử dụng cho pending card, create-fail rollback, move-fail recovery và success reconcile trước checkpoint.
 - [x] Kanban board refinement: đối chiếu các interaction còn thiếu với demo ClickUp và triển khai thao tác board ưu tiên tiếp theo theo Jira/ClickUp, kèm accessibility, tests, build và checkpoint.
+- [x] Work priority expansion: đánh giá backlog Work theo demo ClickUp/Jira và triển khai thao tác board có tác động cao nhất còn thiếu, kèm authorization/outbox khi có mutation durable.
+- [x] Work bulk status action: cho phép chọn nhiều work item trên board/backlog và chuyển chúng sang trạng thái đích qua các mutation tenant-safe hiện có, với tiến trình, partial-failure recovery và accessibility.
+- [x] Chat priority expansion: sau Work, nâng cấp thao tác Chat và liên kết Work–Chat theo backlog đã đánh giá, giữ tenant isolation và authorization.
+- [x] Chat search and Work linking: nối tìm kiếm Chat tenant-safe và flow liên kết message với WorkItem bằng procedures hiện có, gồm trạng thái loading/error, keyboard support và refresh server-authoritative.
+- [x] Work/Chat priority verification: bổ sung hoặc cập nhật tests, kiểm tra responsive, chạy regression/build, commit và checkpoint cho hai vòng mở rộng.
 - [x] OAuth hardening evidence: mock hoặc tái hiện rõ nguồn `getaddrinfo ENOTFOUND base`, hoặc ghi nhận giới hạn provider với bằng chứng runtime/configuration.
 - [x] OAuth handler tests: kiểm tra callback success tạo session cookie/302 và exchange failure trả lỗi phù hợp sau khi state hợp lệ bằng SDK dependency mock.
 - [x] Runtime PostgreSQL configuration: thay giá trị `TASKO_POSTGRES_URL=1` không hợp lệ bằng connection string Docker hợp lệ để ngăn lỗi DNS `ENOTFOUND base` trong SaaS/API queries.

@@ -74,6 +74,19 @@ describe("Collaboration Alpha M2", () => {
     expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["chat.notification.preference_updated", "chat.message.saved"]));
   });
 
+  it("links an accessible work item to a message through a durable, auditable mutation", async () => {
+    const tko_owner = tko_actor();
+    const tko_channel = await chat.seedDemo(tko_owner);
+    const tko_message = await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "8b3d0b25-fd09-4686-88a5-69ce87cbd8ba", body: { type: "text", text: "Please attach this customer decision to the renewal work item." } }, "link-source");
+
+    const tko_linked = await chat.linkWorkItem(tko_owner, tko_message.id, "e0f2122d-4d3e-4d54-846f-303864c59017", "link-work-item");
+
+    expect(tko_linked.linkedWorkItemId).toBe("e0f2122d-4d3e-4d54-846f-303864c59017");
+    expect((await chat.messages(tko_owner, tko_channel.id)).find(tko_item => tko_item.id === tko_message.id)?.linkedWorkItemId).toBe(tko_linked.linkedWorkItemId);
+    expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toContain("chat.message.work_item_linked");
+    expect((await tko_platform.listOutbox()).map(tko_event => tko_event.eventType)).toContain("chat.message_linked_work_item.v1");
+  });
+
   it("publishes presence and typing as TTL-bound non-durable tenant events", async () => {
     const tko_owner = tko_actor();
     const tko_channel = await chat.seedDemo(tko_owner);
