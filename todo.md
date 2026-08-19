@@ -107,6 +107,7 @@
 - [x] M4 Overview hardening: expose linked-object context và work graph thực từ service/API, rồi render chúng trong Operations Overview tenant-scoped.
 - [ ] OAuth callback regression: điều tra lỗi callback sau Google login, sửa nguyên nhân cấu hình/validation và thêm test cho success/failure contract trước khi tiếp tục visual verification M4.
 - [ ] Deferred OAuth/browser follow-up: quay lại sửa callback và tạo populated authenticated Overview screenshot sau khi hoàn tất M5–M7; không chặn checkpoint M4 theo yêu cầu người dùng.
+- [ ] M4 checkpoint: lưu snapshot Unified Workspace Beta sau commit hiện tại và ghi lại version/checkpoint ID; checkpoint không bao gồm OAuth regression fix hoặc populated authenticated screenshot đang deferred.
 - [x] M4 search grouping verification: thêm acceptance chứng minh global search nhóm Work/Chat/CRM/Docs theo type dưới tenant scope, ngoài coverage deny/isolation hiện có.
 - [x] M4 search Chat materialization: đăng ký outbox consumer cho channel/message events và kiểm chứng global search trả Chat theo exact authorization.
 - [x] M4 automation WorkItem trigger verification: thêm acceptance chứng minh event `work.work_item_created.v1` thực thi action CRM activity đúng một lần.
