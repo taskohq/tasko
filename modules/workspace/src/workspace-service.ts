@@ -13,6 +13,7 @@ import { getCRMStore } from "../../../packages/database/src/crm-store";
 import { getWorkStore } from "../../../packages/database/src/work-store";
 import { getWorkspaceStore } from "../../../packages/database/src/workspace-store";
 import { requireCapability } from "../../permissions/src/authorization";
+import { getSaaSService } from "../../saas/src/saas-service";
 import * as crmService from "../../crm/src/crm-service";
 import * as workService from "../../work/src/work-service";
 
@@ -81,6 +82,7 @@ export async function submitForm(tko_actor: PlatformActor, tko_input: { formId: 
   const tko_existing = await getWorkspaceStore().getFormSubmission(tko_actor.tenantId, tko_form.id, tko_input.idempotencyKey);
   if (tko_existing) return tko_existing;
   const tko_automationCorrelation = `tko_form:${tko_form.id}:${tko_input.idempotencyKey}`;
+  await getSaaSService().enforceFeatureUsage(tko_actor, { feature: "forms", metric: "form_submissions", amount: 1, idempotencyKey: `form:${tko_form.id}:${tko_input.idempotencyKey}`, correlationId: tko_input.correlationId });
   if (tko_form.targetType === "work_item") {
     const tko_projectId = tko_text(tko_form.targetConfig.projectId); if (!tko_projectId) throw new Error("WORKSPACE_FORM_WORK_PROJECT_REQUIRED");
     const tko_item = await workService.createWorkItem({ actor: tko_actor, projectId: tko_projectId, title: tko_text(tko_input.values.title) || tko_form.name, description: tko_text(tko_input.values.description) || undefined, correlationId: tko_automationCorrelation });
@@ -90,7 +92,7 @@ export async function submitForm(tko_actor: PlatformActor, tko_input: { formId: 
   return getWorkspaceStore().recordFormSubmission(tko_actor, { formId: tko_form.id, values: tko_input.values, targetEntityType: "crm_lead", targetEntityId: tko_lead.id, idempotencyKey: tko_input.idempotencyKey, correlationId: tko_input.correlationId });
 }
 
-export async function createAutomationRule(tko_actor: PlatformActor, tko_input: { name: string; triggerType: AutomationTriggerType; condition?: Record<string, unknown>; actions: WorkspaceAutomationAction[]; correlationId: string }) { tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_rule", "new"); if (!tko_input.actions.length) throw new Error("WORKSPACE_AUTOMATION_ACTION_REQUIRED"); return getWorkspaceStore().createAutomationRule(tko_actor, { name: tko_input.name, status: "active", triggerType: tko_input.triggerType, condition: tko_input.condition ?? {}, actions: tko_input.actions, correlationId: tko_input.correlationId }); }
+export async function createAutomationRule(tko_actor: PlatformActor, tko_input: { name: string; triggerType: AutomationTriggerType; condition?: Record<string, unknown>; actions: WorkspaceAutomationAction[]; correlationId: string }) { tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_rule", "new"); await getSaaSService().requireFeature(tko_actor, "automation"); if (!tko_input.actions.length) throw new Error("WORKSPACE_AUTOMATION_ACTION_REQUIRED"); return getWorkspaceStore().createAutomationRule(tko_actor, { name: tko_input.name, status: "active", triggerType: tko_input.triggerType, condition: tko_input.condition ?? {}, actions: tko_input.actions, correlationId: tko_input.correlationId }); }
 export async function automationRules(tko_actor: PlatformActor) { tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_rule", "list"); return getWorkspaceStore().listAutomationRules(tko_actor.tenantId); }
 export async function automationExecutions(tko_actor: PlatformActor) {
   tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_execution", "list");
@@ -109,6 +111,7 @@ export async function processAutomationEvent(tko_actor: PlatformActor, tko_recor
     const tko_previous = await getWorkspaceStore().getAutomationExecution(tko_actor.tenantId, tko_rule.id, tko_record.eventId, tko_rule.version); if (tko_previous?.status === "completed" || tko_previous?.status === "skipped") continue;
     if (!tko_matchesCondition(tko_rule, tko_record)) { await getWorkspaceStore().recordAutomationExecution(tko_actor, { ruleId: tko_rule.id, ruleVersion: tko_rule.version, sourceEventId: tko_record.eventId, status: "skipped", results: { reason: "condition_not_matched" }, error: null, correlationId: `tko_automation:${tko_record.eventId}` }); continue; }
     try {
+      await getSaaSService().enforceFeatureUsage(tko_actor, { feature: "automation", metric: "automation_executions", amount: 1, idempotencyKey: `automation:${tko_rule.id}:${tko_record.eventId}:${tko_rule.version}`, correlationId: `tko_automation:${tko_record.eventId}` });
       const tko_results: Record<string, unknown> = {};
       for (const tko_action of tko_rule.actions) {
         if (tko_action.type === "create_work_item") { const tko_projectId = tko_text(tko_action.config.projectId); if (!tko_projectId) throw new Error("WORKSPACE_AUTOMATION_PROJECT_REQUIRED"); const tko_item = await workService.createWorkItem({ actor: tko_actor, projectId: tko_projectId, title: tko_template(tko_action.config.title, tko_record) || `Automation: ${tko_rule.name}`, correlationId: `tko_automation:${tko_record.eventId}` }); tko_results.workItemId = tko_item.id; }

@@ -3,6 +3,8 @@ import type { PlatformActor } from "../../packages/contracts/src/platform";
 import { MemoryChatStore, setChatStoreForTests } from "../../packages/database/src/chat-store";
 import { MemoryCRMStore, getCRMStore, setCRMStoreForTests } from "../../packages/database/src/crm-store";
 import { MemoryPlatformStore, setPlatformStoreForTests } from "../../packages/database/src/platform-store";
+import { tko_config } from "../../packages/config/src/tasko-config";
+import { MemorySaaSStore, setSaaSStoreForTests } from "../../packages/database/src/saas-store";
 import { MemoryWorkStore, getWorkStore, setWorkStoreForTests } from "../../packages/database/src/work-store";
 import { MemoryWorkspaceStore, getWorkspaceStore, setWorkspaceStoreForTests } from "../../packages/database/src/workspace-store";
 import { createInMemoryRedisAdapter, setRedisAdapterForTests } from "../../packages/redis/src/redis-adapter";
@@ -174,5 +176,32 @@ describe("Unified Workspace Beta M4", () => {
     const tko_activities = await getCRMStore().listActivities(tko_owner.tenantId, "lead", tko_lead.id);
     expect(tko_activities.filter(tko_activity => tko_activity.subject.includes(tko_item.id))).toHaveLength(1);
     expect(await workspace.automationExecutions(tko_owner)).toEqual(expect.arrayContaining([expect.objectContaining({ ruleId: tko_rule.id, status: "completed" })]));
+  });
+
+  it("enforces SaaS form and automation quotas before their durable target actions", async () => {
+    const tko_runtimeConfig = tko_config as unknown as { deploymentProfile: "single_tenant" | "saas" };
+    const tko_previousProfile = tko_runtimeConfig.deploymentProfile;
+    tko_runtimeConfig.deploymentProfile = "saas";
+    setSaaSStoreForTests(new MemorySaaSStore({ plans: [{ key: "quota-test", name: "Quota test", description: "Acceptance fixture", entitlements: { forms: true, automation: true }, quotas: { form_submissions: 1, automation_executions: 0 }, active: true }] }));
+    try {
+      const tko_owner = tko_actor();
+      const tko_project = await tko_createProject(tko_owner);
+      const tko_form = await workspace.createForm(tko_owner, { name: "Intake", fields: [{ id: "title", label: "Title", type: "text", required: true }], targetType: "work_item", targetConfig: { projectId: tko_project.id }, correlationId: "m5-form" });
+      await workspace.activateForm(tko_owner, { formId: tko_form.id, correlationId: "m5-form-activate" });
+      await workspace.submitForm(tko_owner, { formId: tko_form.id, values: { title: "Permitted intake" }, idempotencyKey: "m5-form-1", correlationId: "m5-form-1" });
+      await expect(workspace.submitForm(tko_owner, { formId: tko_form.id, values: { title: "Blocked intake" }, idempotencyKey: "m5-form-2", correlationId: "m5-form-2" })).rejects.toThrow("TASKO_SAAS_QUOTA_EXCEEDED");
+      expect(await getWorkspaceStore().getFormSubmission(tko_owner.tenantId, tko_form.id, "m5-form-2")).toBeNull();
+
+      const tko_rule = await workspace.createAutomationRule(tko_owner, { name: "Quota automation", triggerType: "crm.lead_created.v1", actions: [{ type: "create_work_item", config: { projectId: tko_project.id, title: "Must not be created" } }], correlationId: "m5-rule" });
+      await crm.createLead({ actor: tko_owner, firstName: "Quota", lastName: "Event", correlationId: "m5-automation-source" });
+      const tko_record = (await tko_platform.reserveOutbox(50)).find(tko_event => tko_event.eventType === "crm.lead_created.v1");
+      if (!tko_record) throw new Error("M5_AUTOMATION_SOURCE_EVENT_MISSING");
+      await expect(workspace.processAutomationEvent(tko_owner, tko_record)).rejects.toThrow("TASKO_SAAS_QUOTA_EXCEEDED");
+      expect((await getWorkspaceStore().getAutomationExecution(tko_owner.tenantId, tko_rule.id, tko_record.eventId, tko_rule.version))?.status).toBe("failed");
+      expect((await getWorkStore().listWorkItems(tko_owner.tenantId, tko_project.id)).map(tko_item => tko_item.title)).not.toContain("Must not be created");
+    } finally {
+      tko_runtimeConfig.deploymentProfile = tko_previousProfile;
+      setSaaSStoreForTests(null);
+    }
   });
 });
