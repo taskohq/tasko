@@ -60,7 +60,14 @@ export type Capability =
   | "workspace.form.read"
   | "workspace.form.manage"
   | "workspace.form.submit"
-  | "workspace.automation.manage";
+  | "workspace.automation.manage"
+  | "saas.entitlement.read"
+  | "saas.entitlement.manage"
+  | "saas.usage.read"
+  | "saas.billing.manage"
+  | "saas.backup.manage"
+  | "saas.restore.manage"
+  | "saas.metrics.read";
 
 export interface Tenant {
   id: string;

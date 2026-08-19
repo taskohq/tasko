@@ -8,6 +8,7 @@ import type {
   Tenant,
   TenantMembership,
 } from "../../contracts/src/platform";
+import type { TenantProvisionInput } from "../../contracts/src/saas";
 
 export type PlatformStoreMode = "memory" | "postgres";
 
@@ -32,8 +33,12 @@ export interface PlatformStore {
     tko_tenantSlug: string,
   ): Promise<TenantMembership | null>;
   seedDemoWorkspace(tko_input: SeedWorkspaceInput): Promise<Tenant>;
+  provisionTenant(tko_input: TenantProvisionInput): Promise<{ tenant: Tenant; created: boolean }>;
+  setTenantLifecycle(tko_input: { actor: { authSubject: string }; tenantId: string; status: Tenant["status"]; correlationId: string }): Promise<Tenant>;
+  listTenants(): Promise<Tenant[]>;
   changeTenantMemberRole(tko_input: ChangeTenantMemberRoleInput): Promise<void>;
   writeDurableMutation(tko_input: DurableMutationInput): Promise<OutboxRecord>;
+  listOutbox(): Promise<OutboxRecord[]>;
   reserveOutbox(tko_limit: number): Promise<OutboxRecord[]>;
   markOutboxProcessed(tko_outboxId: string): Promise<void>;
   rescheduleOutbox(tko_outboxId: string, tko_error: string, tko_maxAttempts: number): Promise<void>;
@@ -75,6 +80,15 @@ function parsePayload(tko_value: unknown): Record<string, unknown> {
   }
 
   return {};
+}
+
+function tko_mapTenant(tko_row: Record<string, unknown>): Tenant {
+  return {
+    id: String(tko_row.id), slug: String(tko_row.slug), name: String(tko_row.name),
+    status: String(tko_row.status) as Tenant["status"],
+    deploymentProfile: String(tko_row.deployment_profile) as Tenant["deploymentProfile"],
+    createdAt: new Date(String(tko_row.created_at)),
+  };
 }
 
 export class MemoryPlatformStore implements PlatformStore {
@@ -134,6 +148,33 @@ export class MemoryPlatformStore implements PlatformStore {
 
     return { ...tko_tenant };
   }
+
+  async provisionTenant(tko_input: TenantProvisionInput): Promise<{ tenant: Tenant; created: boolean }> {
+    const tko_existing = Array.from(this.tko_tenants.values()).find(tko_tenant => tko_tenant.slug === tko_input.slug);
+    if (tko_existing) return { tenant: { ...tko_existing }, created: false };
+    const tko_tenant = await this.seedDemoWorkspace({ ownerAuthSubject: tko_input.ownerAuthSubject, tenantSlug: tko_input.slug, tenantName: tko_input.name });
+    await this.writeDurableMutation({
+      actor: null, tenantId: tko_tenant.id, topic: "tenant.lifecycle", eventType: "tenant.provisioned.v1",
+      payload: { tenantId: tko_tenant.id, slug: tko_tenant.slug, planKey: tko_input.planKey ?? "starter", idempotencyKey: tko_input.idempotencyKey },
+      auditAction: "tenant.provisioned", resourceType: "tenant", resourceId: tko_tenant.id, correlationId: tko_input.correlationId,
+    });
+    return { tenant: tko_tenant, created: true };
+  }
+
+  async setTenantLifecycle(tko_input: { actor: { authSubject: string }; tenantId: string; status: Tenant["status"]; correlationId: string }): Promise<Tenant> {
+    const tko_current = this.tko_tenants.get(tko_input.tenantId);
+    if (!tko_current) throw new Error("TASKO_TENANT_NOT_FOUND");
+    const tko_next = { ...tko_current, status: tko_input.status };
+    this.tko_tenants.set(tko_next.id, tko_next);
+    for (const tko_memberships of Array.from(this.tko_memberships.values())) for (const tko_membership of tko_memberships) if (tko_membership.tenant.id === tko_next.id) tko_membership.tenant = tko_next;
+    await this.writeDurableMutation({
+      actor: null, tenantId: tko_next.id, topic: "tenant.lifecycle", eventType: `tenant.${tko_next.status}.v1`, payload: { tenantId: tko_next.id, status: tko_next.status },
+      auditAction: "tenant.lifecycle_changed", resourceType: "tenant", resourceId: tko_next.id, auditMetadata: { actorAuthSubject: tko_input.actor.authSubject, status: tko_next.status }, correlationId: tko_input.correlationId,
+    });
+    return { ...tko_next };
+  }
+
+  async listTenants(): Promise<Tenant[]> { return Array.from(this.tko_tenants.values()).map(tko_tenant => ({ ...tko_tenant })); }
 
   async changeTenantMemberRole(tko_input: ChangeTenantMemberRoleInput): Promise<void> {
     for (const [tko_authSubject, tko_memberships] of Array.from(this.tko_memberships.entries())) {
@@ -209,6 +250,10 @@ export class MemoryPlatformStore implements PlatformStore {
     return tko_records.map(cloneOutbox);
   }
 
+  async listOutbox(): Promise<OutboxRecord[]> {
+    return Array.from(this.tko_outbox.values()).map(cloneOutbox);
+  }
+
   async markOutboxProcessed(tko_outboxId: string): Promise<void> {
     const tko_record = this.tko_outbox.get(tko_outboxId);
     if (tko_record) tko_record.status = "processed";
@@ -250,6 +295,46 @@ export class PostgresPlatformStore implements PlatformStore {
   constructor(tko_connectionString: string) {
     this.tko_pool = new Pool({ connectionString: tko_connectionString });
   }
+
+  async provisionTenant(tko_input: TenantProvisionInput): Promise<{ tenant: Tenant; created: boolean }> {
+    const tko_client = await this.tko_pool.connect();
+    try {
+      await tko_client.query("BEGIN");
+      const tko_prior = await tko_client.query("select t.id,t.slug,t.name,t.status,t.deployment_profile,t.created_at from tenant_provisioning_requests r join tenants t on t.id=r.tenant_id where r.idempotency_key=$1 for update", [tko_input.idempotencyKey]);
+      if (tko_prior.rowCount) { await tko_client.query("COMMIT"); return { tenant: tko_mapTenant(tko_prior.rows[0]), created: false }; }
+      const tko_slugPrior = await tko_client.query("select id,slug,name,status,deployment_profile,created_at from tenants where slug=$1 for update", [tko_input.slug]);
+      if (tko_slugPrior.rowCount) { await tko_client.query("COMMIT"); return { tenant: tko_mapTenant(tko_slugPrior.rows[0]), created: false }; }
+      const tko_tenantResult = await tko_client.query("insert into tenants(id,slug,name,status,deployment_profile) values(gen_random_uuid(),$1,$2,'active','saas') returning id,slug,name,status,deployment_profile,created_at", [tko_input.slug, tko_input.name]);
+      const tko_tenant = tko_mapTenant(tko_tenantResult.rows[0]);
+      const tko_ownerResult = await tko_client.query("insert into users(id,auth_subject,email,status) values(gen_random_uuid(),$1,null,'active') on conflict(auth_subject) do update set status='active' returning id", [tko_input.ownerAuthSubject]);
+      await tko_client.query("insert into tenant_members(id,tenant_id,user_id,role,status,display_name) values(gen_random_uuid(),$1,$2,'owner','active',$3) on conflict(tenant_id,user_id) do update set role='owner',status='active',display_name=excluded.display_name", [tko_tenant.id, tko_ownerResult.rows[0].id, tko_input.ownerDisplayName]);
+      const tko_workerResult = await tko_client.query("insert into users(id,auth_subject,email,status) values(gen_random_uuid(),$1,null,'active') on conflict(auth_subject) do update set status='active' returning id", [tko_config.workerServiceAuthSubject]);
+      await tko_client.query("insert into tenant_members(id,tenant_id,user_id,role,status,display_name) values(gen_random_uuid(),$1,$2,'service_account','active','Tasko Worker') on conflict(tenant_id,user_id) do update set role='service_account',status='active'", [tko_tenant.id, tko_workerResult.rows[0].id]);
+      const tko_planKey = tko_input.planKey ?? "starter";
+      const tko_plan = await tko_client.query("select plan_key,entitlements_json,quotas_json from saas_plans where plan_key=$1 and active=true", [tko_planKey]);
+      if (!tko_plan.rowCount) throw new Error("TASKO_SAAS_PLAN_NOT_FOUND");
+      await tko_client.query("insert into tenant_entitlements(tenant_id,plan_key,status,entitlements_json,quotas_json) values($1,$2,'trialing',$3::jsonb,$4::jsonb)", [tko_tenant.id, tko_planKey, JSON.stringify(tko_plan.rows[0].entitlements_json), JSON.stringify(tko_plan.rows[0].quotas_json)]);
+      await tko_client.query("insert into tenant_provisioning_requests(id,tenant_id,owner_auth_subject,idempotency_key) values(gen_random_uuid(),$1,$2,$3)", [tko_tenant.id, tko_input.ownerAuthSubject, tko_input.idempotencyKey]);
+      await tko_client.query("insert into audit_logs(id,tenant_id,actor_auth_subject,action,resource_type,resource_id,correlation_id,metadata_json) values(gen_random_uuid(),$1,$2,'tenant.provisioned','tenant',$1,$3,$4::jsonb)", [tko_tenant.id, tko_input.ownerAuthSubject, tko_input.correlationId, JSON.stringify({ slug: tko_tenant.slug, planKey: tko_planKey })]);
+      await tko_client.query("insert into outbox(id,event_id,tenant_id,topic,event_type,payload_json,actor_auth_subject,correlation_id,status,attempts,available_at) values(gen_random_uuid(),gen_random_uuid(),$1,'tenant.lifecycle','tenant.provisioned.v1',$2::jsonb,$3,$4,'pending',0,now())", [tko_tenant.id, JSON.stringify({ tenantId: tko_tenant.id, slug: tko_tenant.slug, planKey: tko_planKey }), tko_input.ownerAuthSubject, tko_input.correlationId]);
+      await tko_client.query("COMMIT"); return { tenant: tko_tenant, created: true };
+    } catch (tko_error) { await tko_client.query("ROLLBACK"); throw tko_error; } finally { tko_client.release(); }
+  }
+
+  async setTenantLifecycle(tko_input: { actor: { authSubject: string }; tenantId: string; status: Tenant["status"]; correlationId: string }): Promise<Tenant> {
+    const tko_client = await this.tko_pool.connect();
+    try {
+      await tko_client.query("BEGIN");
+      const tko_result = await tko_client.query("update tenants set status=$1 where id=$2 returning id,slug,name,status,deployment_profile,created_at", [tko_input.status, tko_input.tenantId]);
+      if (!tko_result.rowCount) throw new Error("TASKO_TENANT_NOT_FOUND");
+      const tko_tenant = tko_mapTenant(tko_result.rows[0]);
+      await tko_client.query("insert into audit_logs(id,tenant_id,actor_auth_subject,action,resource_type,resource_id,correlation_id,metadata_json) values(gen_random_uuid(),$1,$2,'tenant.lifecycle_changed','tenant',$1,$3,$4::jsonb)", [tko_tenant.id, tko_input.actor.authSubject, tko_input.correlationId, JSON.stringify({ status: tko_tenant.status })]);
+      await tko_client.query("insert into outbox(id,event_id,tenant_id,topic,event_type,payload_json,actor_auth_subject,correlation_id,status,attempts,available_at) values(gen_random_uuid(),gen_random_uuid(),$1,'tenant.lifecycle',$2,$3::jsonb,$4,$5,'pending',0,now())", [tko_tenant.id, `tenant.${tko_tenant.status}.v1`, JSON.stringify({ tenantId: tko_tenant.id, status: tko_tenant.status }), tko_input.actor.authSubject, tko_input.correlationId]);
+      await tko_client.query("COMMIT"); return tko_tenant;
+    } catch (tko_error) { await tko_client.query("ROLLBACK"); throw tko_error; } finally { tko_client.release(); }
+  }
+
+  async listTenants(): Promise<Tenant[]> { return (await this.tko_pool.query("select id,slug,name,status,deployment_profile,created_at from tenants order by created_at asc")).rows.map(tko_mapTenant); }
 
   async health(): Promise<PlatformStoreHealth> {
     try {
@@ -456,6 +541,15 @@ export class PostgresPlatformStore implements PlatformStore {
     } finally {
       tko_client.release();
     }
+  }
+
+  async listOutbox(): Promise<OutboxRecord[]> {
+    const tko_result = await this.tko_pool.query(
+      `select id, event_id, tenant_id, topic, event_type, payload_json,
+              actor_auth_subject, correlation_id, status, attempts, available_at, created_at
+         from outbox order by created_at desc`,
+    );
+    return tko_result.rows.map(tko_row => this.mapOutbox(tko_row));
   }
 
   async markOutboxProcessed(tko_outboxId: string): Promise<void> {
