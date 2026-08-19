@@ -28,6 +28,28 @@ const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
 const GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
 const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt`;
 
+/**
+ * OAuth calls must use an explicit public HTTP(S) endpoint. This prevents an
+ * opaque DNS failure later in the callback when a placeholder such as `base`
+ * is accidentally supplied as the server URL.
+ */
+export function tko_requireOAuthServerUrl(tko_rawUrl: string): string {
+  let tko_url: URL;
+  try {
+    tko_url = new URL(tko_rawUrl);
+  } catch {
+    throw new Error("[OAuth] OAUTH_SERVER_URL must be an absolute HTTP(S) URL");
+  }
+
+  const tko_isHttp = tko_url.protocol === "https:" || tko_url.protocol === "http:";
+  const tko_isHostPlaceholder = tko_url.hostname === "base";
+  if (!tko_isHttp || !tko_url.hostname || tko_isHostPlaceholder) {
+    throw new Error("[OAuth] OAUTH_SERVER_URL must identify a valid OAuth server host");
+  }
+
+  return tko_url.toString().replace(/\/$/, "");
+}
+
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
     console.log("[OAuth] Initialized with baseURL:", ENV.oAuthServerUrl);
@@ -77,7 +99,7 @@ class OAuthService {
 
 const createOAuthHttpClient = (): AxiosInstance =>
   axios.create({
-    baseURL: ENV.oAuthServerUrl,
+    baseURL: tko_requireOAuthServerUrl(ENV.oAuthServerUrl),
     timeout: AXIOS_TIMEOUT_MS,
   });
 

@@ -105,8 +105,13 @@
 - [x] M4 Overview verification: thêm acceptance cho `workspace.overview` với dữ liệu tenant-scoped thật, gồm KPI, linked objects, cross-module activity và work graph.
 - [x] M4 Overview authenticated visual verification: defer populated screenshot do preview proxy chặn POST seed HTTP 403; đã lưu bằng chứng phiên authenticated, empty state trung thực và service acceptance với dữ liệu thật.
 - [x] M4 Overview hardening: expose linked-object context và work graph thực từ service/API, rồi render chúng trong Operations Overview tenant-scoped.
-- [ ] OAuth callback regression: điều tra lỗi callback sau Google login, sửa nguyên nhân cấu hình/validation và thêm test cho success/failure contract trước khi tiếp tục visual verification M4.
-- [ ] Deferred OAuth/browser follow-up: quay lại sửa callback và tạo populated authenticated Overview screenshot sau khi hoàn tất M5–M7; không chặn checkpoint M4 theo yêu cầu người dùng.
+- [x] OAuth callback regression: điều tra lỗi callback sau Google login, sửa nguyên nhân cấu hình/validation và thêm test cho success/failure contract trước khi tiếp tục visual verification M4.
+- [ ] Deferred OAuth/browser follow-up: đăng nhập Google thực tế và tạo populated authenticated Overview screenshot khi người dùng sẵn sàng xác nhận trong browser; không chặn các checkpoint theo yêu cầu người dùng.
+- [x] OAuth hardening evidence: mock hoặc tái hiện rõ nguồn `getaddrinfo ENOTFOUND base`, hoặc ghi nhận giới hạn provider với bằng chứng runtime/configuration.
+- [x] OAuth handler tests: kiểm tra callback success tạo session cookie/302 và exchange failure trả lỗi phù hợp sau khi state hợp lệ bằng SDK dependency mock.
+- [x] Runtime PostgreSQL configuration: thay giá trị `TASKO_POSTGRES_URL=1` không hợp lệ bằng connection string Docker hợp lệ để ngăn lỗi DNS `ENOTFOUND base` trong SaaS/API queries.
+- [x] Runtime PostgreSQL verification: xác nhận cùng endpoint Docker development kết nối được, migration M7 còn nguyên và API SaaS không còn lỗi DNS.
+- [x] Runtime PostgreSQL M7 schema verification: kiểm tra trực tiếp `ai_runs`, `ai_context_references` và `ai_tool_proposals` tồn tại trên PostgreSQL Docker runtime đã cấu hình.
 - [x] M4 checkpoint: lưu snapshot Unified Workspace Beta sau commit hiện tại và ghi lại version/checkpoint ID (`bb0248b5`); checkpoint không bao gồm OAuth regression fix hoặc populated authenticated screenshot đang deferred.
 - [x] M5 foundation: thêm migration/RLS, tenant lifecycle state, plan catalog, tenant entitlement/usage ledger, provisioning idempotency, backup archives/restores và operational event metadata.
 - [x] M5 entitlement/quota: tạo centralized SaaS entitlement service và rate/quota guards có tenant scope; áp dụng vào capability giới hạn, API/search/forms/automation khi phù hợp mà không rải `if (saas)` vào core domains.
