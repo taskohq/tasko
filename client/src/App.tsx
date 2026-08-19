@@ -9,6 +9,8 @@ import Home from "./pages/Home";
 import Work from "./pages/Work";
 import Chat from "./pages/Chat";
 import CRM from "./pages/CRM";
+import Settings from "./pages/Settings";
+import Admin from "./pages/Admin";
 import Workspace from "./pages/Workspace";
 
 function Router() {
@@ -25,6 +27,8 @@ function Router() {
         <Route path={"/work"} component={Work} />
         <Route path={"/chat"} component={Chat} />
         <Route path={"/crm"} component={CRM} />
+        <Route path={"/settings"} component={Settings} />
+        <Route path={"/admin"} component={Admin} />
         <Route path={"/404"} component={NotFound} />
         <Route component={NotFound} />
       </Switch>

@@ -12,6 +12,7 @@ import * as workService from "../modules/work/src/work-service";
 import * as chatService from "../modules/chat/src/chat-service";
 import * as crmService from "../modules/crm/src/crm-service";
 import * as workspaceService from "../modules/workspace/src/workspace-service";
+import { getSaaSService } from "../modules/saas/src/saas-service";
 import { getWorkStore } from "../packages/database/src/work-store";
 import { z } from "zod";
 
@@ -217,6 +218,23 @@ export const appRouter = router({
     setTyping: tenantProcedure.input(z.object({ channelId: z.string().uuid(), isTyping: z.boolean() })).mutation(({ ctx, input }) => chatService.setTyping(ctx.platform.actor, input.channelId, input.isTyping)),
     typing: tenantProcedure.input(z.object({ channelId: z.string().uuid() })).query(({ ctx, input }) => chatService.typing(ctx.platform.actor, input.channelId)),
     seedDemo: tenantProcedure.mutation(({ ctx }) => chatService.seedDemo(ctx.platform.actor)),
+  }),
+
+  saas: router({
+    plans: publicProcedure.query(() => import("../packages/database/src/saas-store").then(({ getSaaSStore }) => getSaaSStore().listPlans())),
+    entitlement: tenantProcedure.query(({ ctx }) => getSaaSService().entitlement(ctx.platform.actor)),
+    quota: tenantProcedure.input(z.object({ metric: z.string().trim().min(1).max(120), amount: z.number().min(0).default(0), feature: z.string().trim().min(1).max(120).optional() })).query(({ ctx, input }) => getSaaSService().quota(ctx.platform.actor, input.metric, input.amount, input.feature)),
+    consumeUsage: tenantProcedure.input(z.object({ metric: z.string().trim().min(1).max(120), amount: z.number().positive().max(1_000_000), idempotencyKey: z.string().uuid(), feature: z.string().trim().min(1).max(120).optional() })).mutation(({ ctx, input }) => getSaaSService().consumeUsage(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    backups: tenantProcedure.query(({ ctx }) => getSaaSService().backups(ctx.platform.actor)),
+    backup: tenantProcedure.input(z.object({ schemaVersion: z.string().trim().min(1).max(120), checksum: z.string().trim().min(16).max(512), objectKey: z.string().trim().max(1024).nullable(), resourceCounts: z.record(z.string().max(120), z.number().int().min(0).max(1_000_000_000)).default({}) })).mutation(({ ctx, input }) => getSaaSService().backup(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    restoreDrill: tenantProcedure.input(z.object({ backupManifestId: z.string().uuid(), validation: z.record(z.string().max(120), z.unknown()).default({}) })).mutation(({ ctx, input }) => getSaaSService().restoreDrill(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    operations: protectedProcedure.query(({ ctx }) => getSaaSService().operations(ctx.user.openId)),
+    recoveryProbe: protectedProcedure.mutation(({ ctx }) => getSaaSService().recoveryProbe(ctx.user.openId)),
+    billing: tenantProcedure.input(z.object({ kind: z.enum(["checkout", "customer_portal"]) })).mutation(({ ctx, input }) => getSaaSService().billing(ctx.platform.actor, input.kind)),
+    listTenants: protectedProcedure.query(({ ctx }) => getSaaSService().listTenants(ctx.user.openId)),
+    exportTenantManifest: protectedProcedure.input(z.object({ tenantId: z.string().uuid() })).mutation(({ ctx, input }) => getSaaSService().exportTenantManifest(ctx.user.openId, input.tenantId, ctx.correlationId)),
+    provision: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(160), slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]{2,80}$/), ownerAuthSubject: z.string().trim().min(1).max(256), ownerDisplayName: z.string().trim().min(1).max(160), planKey: z.string().trim().min(1).max(80).optional(), idempotencyKey: z.string().uuid() })).mutation(({ ctx, input }) => getSaaSService().provision(ctx.user.openId, { ...input, correlationId: ctx.correlationId })),
+    lifecycle: protectedProcedure.input(z.object({ tenantId: z.string().uuid(), status: z.enum(["active", "suspended"]) })).mutation(({ ctx, input }) => getSaaSService().lifecycle(ctx.user.openId, input.tenantId, input.status, ctx.correlationId)),
   }),
 
   // TODO: add feature routers here, e.g.
