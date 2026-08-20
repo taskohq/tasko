@@ -69,7 +69,9 @@ describe("Tasko M6 staged import pipeline", () => {
     const tko_webhook = await tko_developers.createWebhook(tko_owner, { name: "Events", endpointUrl: "https://hooks.example.test/tasko", eventTypes: ["work.work_item_created.v1"], correlationId: "webhook-1" });
     expect(tko_webhook.signingSecret).toHaveLength(32); expect((await tko_developers.listWebhooks(tko_owner))[0]?.id).toBe(tko_webhook.subscription.id);
     await tko_developers.connect(tko_owner, { provider: "github", displayName: "Tasko GitHub", correlationId: "github-1" }); await tko_developers.connect(tko_owner, { provider: "gitlab", displayName: "Tasko GitLab", correlationId: "gitlab-1" });
-    expect((await tko_developers.listConnections(tko_owner)).map(tko_item => tko_item.provider)).toEqual(["github", "gitlab"]);
+    const tko_connections = await tko_developers.listConnections(tko_owner);
+    expect(tko_connections.map(tko_item => tko_item.provider)).toEqual(["github", "gitlab"]);
+    expect(tko_connections).toEqual(expect.arrayContaining([expect.objectContaining({ provider: "github", status: "pending", externalAccountId: null, encryptedSecretRef: null, config: {} })]));
     await expect(tko_developers.listTokens(tko_actor({ role: "guest", memberId: "guest-member" }))).rejects.toThrow("TASKO_AUTHORIZATION_DENIED");
   });
 });

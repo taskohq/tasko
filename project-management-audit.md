@@ -27,7 +27,8 @@ _Cập nhật lần đầu: 2026-08-19. Phạm vi audit này đối chiếu canv
 | Workspace | Search, inbox, documents | Workspace router/service + Workspace canvas mutations/queries | **Real** cho thao tác hiển thị | Cần kiểm tra edit document, entity links và permission filtering trên từng surface. |
 | Workspace | Internal Forms & automations | Forms/Automations canvas có field builder, target project selector, activation, submission history, rule/condition/action builder và durable execution log; tRPC/service/store, authorization, audit/outbox, memory + PostgreSQL regressions | **Real** | Phạm vi được chốt là **internal intake**: form submit luôn qua actor tenant đã xác thực. Public anonymous/external links chưa được tuyên bố hoặc giả lập là capability. |
 | Imports | Create, preview, stage, map, queue, execute batch | Ecosystem import service/router, Imports canvas | **Real** cho workflow staged | Cần kiểm tra upload/source ingestion có thật, thay vì chỉ input record thủ công. |
-| Ecosystem | Token, webhook, connection registry | API token/webhook/connect/list có thật; Ecosystem canvas gọi mutations | **Partial** | `connect` hiện là registration boundary; cần không trình bày như OAuth sync provider nếu chưa có thực thi provider. |
+| Ecosystem | Scoped tokens & signed webhooks | Token issuance/authentication, HMAC delivery, bounded retry/dead-letter, tenant-safe UI/service/store và regression | **Real** | API tokens và webhooks là các capability vận hành thật, có durable audit/outbox và worker delivery. |
+| Ecosystem | Provider registration | `connect` ghi metadata provider ở trạng thái `pending`; canvas ghi rõ registration-only; regression xác nhận không có account, secret hoặc config provider | **Partial — intentionally bounded** | Không có OAuth authorization, credential exchange, account verification, polling/webhook ingest hay provider sync. UI không mô tả registration này là “connected” hoặc một sync đang hoạt động. |
 | AI | Read/draft/proposal/confirm/execute | Permission-aware AI service, tool registry, proposal confirmation paths và UI | **Real** | Cần duy trì citations/audit/mutation authorization ở regression. |
 | Administration | Tenant lifecycle, plan, export/backup probes | SaaS procedures/service; Admin/Settings mutations | **Partial** | Product-management không phụ thuộc trực tiếp; audit role boundary/external billing separately. |
 | Auth | Email/password | Rate limited scrypt credential flow, tenant provisioning/session HTTP-only, tests | **Real** | Không phải PM feature nhưng là precondition. |
@@ -39,7 +40,7 @@ _Cập nhật lần đầu: 2026-08-19. Phạm vi audit này đối chiếu canv
 |---|---|---|
 | **P0 — Closed** | `chat.markRead` trả HTTP 500 trên PostgreSQL do UUID truyền vào toán tử JSONB cần text coercion. | Đã sửa store PostgreSQL, thêm Docker read cursor regression/audit-outbox coverage, và guard UI chỉ thử một lần trên một channel/sequence. |
 | **P1 — Partially closed** | Work planning API (sprint, custom field, saved view, dependency) hiện không được chứng minh đầy đủ qua workflow UI. | Sprint và dependencies đã có workflow UI thật, domain regression và persistence proof; custom field/saved view vẫn là phần audit tiếp theo. |
-| **P1 — Partially closed** | CRM delivery handoff, Workspace forms/automation và Ecosystem connection cần phân biệt rõ execution thật với registration/UI. | CRM handoff và Workspace internal Forms/Automations đã closed với full flow, observability UI, authorization và PostgreSQL proof. Ecosystem connection vẫn cần audit/remediation. |
+| **P1 — Closed with explicit boundary** | CRM delivery handoff, Workspace forms/automation và Ecosystem connection cần phân biệt rõ execution thật với registration/UI. | CRM handoff và Workspace internal Forms/Automations đã closed với full flow, observability UI, authorization và PostgreSQL proof. Ecosystem canvas và regression nay phân biệt registration `pending` với OAuth/sync không được triển khai. |
 
 ## Nguyên tắc remediation
 
@@ -52,7 +53,7 @@ _Cập nhật lần đầu: 2026-08-19. Phạm vi audit này đối chiếu canv
 
 | Kiểm tra | Kết quả |
 |---|---|
-| Full regression | `pnpm test`: 18 test files pass, 81 tests pass; 5 PostgreSQL/storage suites được opt-in và skip theo cấu hình mặc định. |
+| Full regression | `pnpm test`: 18 test files pass, 81 tests pass; 5 PostgreSQL suites được opt-in và skip theo cấu hình mặc định. Wasabi storage integration vẫn pass trong suite mặc định. |
 | Production build | `pnpm build`: Vite client bundle và Express server bundle hoàn tất thành công. Cảnh báo chunk JavaScript lớn hơn 500 kB được giữ lại như một workstream hiệu năng riêng, không phải lỗi build. |
 | PostgreSQL Docker | `TASKO_RUN_POSTGRES_INTEGRATION_TESTS=1 pnpm vitest run modules/work/work.postgres.integration.test.ts modules/chat/chat.postgres.integration.test.ts`: 2 files, 3 tests pass. |
 | Work canvas desktop | Canvas tải ổn định theo app shell; inspector dependency đã nằm trên read/write path tRPC và được production build kiểm tra type/bundle. |
@@ -61,3 +62,7 @@ _Cập nhật lần đầu: 2026-08-19. Phạm vi audit này đối chiếu canv
 | Workspace Forms/Automations regression | `pnpm vitest run modules/workspace/workspace.integration.test.ts`: 11 tests pass, gồm submit idempotent, inbox/outbox, automation execution đúng một lần, SaaS quota, submission history, guest denial và cross-tenant target rejection. |
 | Workspace Forms PostgreSQL | `TASKO_RUN_POSTGRES_INTEGRATION_TESTS=1 pnpm vitest run modules/workspace/workspace.postgres.integration.test.ts`: 2 tests pass, gồm Form submission history idempotent, tenant-scoped, audit/outbox durable. |
 | Forms/Automations desktop | Builder và vùng outcomes/execution log hiển thị ổn định tại `/forms` và `/automations`; empty states chỉ phản ánh dataset tenant hiện hành, không phải dữ liệu mô phỏng. |
+| Ecosystem boundary regression | `pnpm vitest run modules/ecosystem/import.integration.test.ts`: 4 tests pass; connection registration được assert `pending` với `externalAccountId`, secret reference và config trống. |
+| Ecosystem desktop | Canvas `/ecosystem` hiển thị rõ “Provider registration”, `registration only` và thông báo OAuth/account verification/provider sync chưa có trong release. |
+| Combined PostgreSQL proof | `TASKO_RUN_POSTGRES_INTEGRATION_TESTS=1 pnpm vitest run` cho Chat, CRM, Work và Workspace: 4 files, 7 tests pass; bao phủ read cursor, CRM handoff materialization, Sprint carry-over và Form submission history tenant-scoped. |
+| Production build | `pnpm build` hoàn tất Vite + Express bundle. Cảnh báo JavaScript chunk lớn hơn 500 kB được ghi nhận là workstream hiệu năng tiếp theo, không phải lỗi build. |

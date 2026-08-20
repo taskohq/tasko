@@ -120,10 +120,10 @@
 - [x] Project-management capability map: lập ma trận tiêu chí Jira/ClickUp và inventory capability Tasko theo Work, planning, collaboration, reporting, CRM handoff, Workspace/Docs/Forms/Automation, AI và administration.
 - [x] Project-management functional audit: kiểm tra end-to-end từng capability qua UI, tRPC, service, store PostgreSQL/memory, authorization, audit/outbox và coverage test; phân loại real, partial hoặc UI-only.
 - [x] Chat mark-read runtime gap: điều tra và sửa phản hồi 500 của `chat.markRead` trên phiên tenant thật, bổ sung regression và xác nhận UI không retry lỗi liên tục.
-- [ ] Project-management gap remediation: hoàn thiện tuần tự các khoảng trống P0/P1 được audit xác nhận, không thêm UI-only placeholder.
+- [x] Project-management gap remediation: hoàn thiện tuần tự các khoảng trống P0/P1 được audit xác nhận, không thêm UI-only placeholder.
 - [x] CRM delivery handoff P1 audit/remediation: xác minh và nếu cần hoàn thiện full flow won-deal → request handoff → outbox worker → delivery project/channel trên UI, service, PostgreSQL và regression.
 - [x] Workspace Forms/Automation P1 audit/remediation: xác minh cấu hình, kích hoạt, chạy/submit, execution log và authorization; chỉ hoàn thiện những flow có backend thực.
-- [ ] Ecosystem connections P1 audit/remediation: phân tách rõ registration boundary khỏi provider OAuth/sync thực và loại bỏ mọi mô tả UI gây hiểu nhầm.
+- [x] Ecosystem connections P1 audit/remediation: phân tách rõ registration boundary khỏi provider OAuth/sync thực và loại bỏ mọi mô tả UI gây hiểu nhầm.
 - [x] Work sprint planning remediation: đưa workflow sprint có dữ liệu thật vào Work gồm create sprint, chọn item, thêm item, hoàn tất sprint với disposition và trạng thái/feedback truy cập được.
 - [x] Work Sprint PostgreSQL proof: kiểm thử carry-over Sprint trên Postgres Docker với RLS tenant, item disposition, audit metadata và outbox trong cùng transaction.
 - [x] Work dependency remediation: xác minh và hoàn thiện flow tạo/xem/gỡ dependency từ inspector Work bằng API tenant-safe thực, có validation cycle/authorization, audit/outbox và regression.
