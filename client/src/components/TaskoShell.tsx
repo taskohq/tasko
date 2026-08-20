@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
 import {
@@ -109,12 +110,14 @@ function TkoRailLink({ item, active }: { item: TkoNavItem; active: boolean }) {
 
 export default function TaskoShell({ children }: { children: ReactNode }) {
   const [tko_location] = useLocation();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const tko_inbox = trpc.workspace.inbox.useQuery({ includeArchived: false }, { enabled: isAuthenticated });
+  const tko_unreadCount = tko_inbox.data?.filter(tko_item => !tko_item.readAt).length ?? 0;
   const tko_module = tko_moduleForPath(tko_location);
   const tko_context = tko_shellModules[tko_module];
   const tko_primaryItems: Array<{ label: string; path: string; icon: ComponentType<{ className?: string }>; badge?: string }> = [
     { label: "Home", path: "/platform", icon: Home },
-    { label: "Inbox", path: "/inbox", icon: Inbox },
+    { label: "Inbox", path: "/inbox", icon: Inbox, badge: tko_unreadCount ? (tko_unreadCount > 99 ? "99+" : String(tko_unreadCount)) : undefined },
     { label: "Work", path: "/work", icon: BriefcaseBusiness },
     { label: "Chat", path: "/chat", icon: MessageSquareText },
     { label: "CRM", path: "/crm", icon: UsersRound },
@@ -156,9 +159,9 @@ export default function TaskoShell({ children }: { children: ReactNode }) {
           <button type="button" className="hidden h-8 items-center gap-1.5 bg-[#0c66e4] px-3 text-[13px] font-semibold text-white transition hover:bg-[#0055cc] active:scale-[.97] sm:flex" onClick={() => toast("Quick create sẽ tập hợp các flow Work, Chat và CRM trong M4.") }>
             <Plus className="h-4 w-4" /> Create
           </button>
-          <Link href="/inbox" aria-label="Notifications" className="relative grid h-8 w-8 place-items-center text-[#5e6c84] hover:bg-[#deebff] hover:text-[#0052cc]">
+          <Link href="/inbox" aria-label={tko_unreadCount ? `Notifications (${tko_unreadCount} unread)` : "Notifications"} className="relative grid h-8 w-8 place-items-center text-[#5e6c84] hover:bg-[#deebff] hover:text-[#0052cc]">
             <Bell className="h-[18px] w-[18px]" />
-            <span className="absolute right-1 top-1 h-2 w-2 rounded-full border-2 border-white bg-[#f04438]" />
+            {tko_unreadCount ? <span aria-hidden="true" className="absolute right-1 top-1 h-2 w-2 rounded-full border-2 border-white bg-[#f04438]" /> : null}
           </Link>
           <button type="button" aria-label="Help" className="hidden grid h-8 w-8 place-items-center text-[#5e6c84] hover:bg-[#deebff] hover:text-[#0052cc] sm:grid"><CircleHelp className="h-[18px] w-[18px]" /></button>
           <button type="button" className="hidden items-center gap-2 px-1 py-1 hover:bg-[#f4f5f7] md:flex" onClick={() => toast("User profile controls are provided by Manus authentication.") }>

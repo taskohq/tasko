@@ -187,3 +187,5 @@
 - [x] M7 UI: thêm contextual AI panel và canvas quản trị action/approval hiển thị nguồn, trạng thái, proposal/diff và controls an toàn.
 - [x] M7 verification: thêm negative tests context leak/MCP scope, confirmation/audit/outbox/idempotency, typecheck, regression, build, visual review, commits và checkpoint.
 - [x] Branding: dùng logo và favicon chính thức từ tệp người dùng cung cấp, cập nhật app shell, metadata và kiểm chứng hiển thị responsive.
+- [x] Work board realtime: đồng bộ các thay đổi board giữa nhiều thành viên theo tenant channel, không bỏ qua authorization hay server-authoritative reconciliation.
+- [x] Work board notifications: phát notification tenant-safe và có ngữ cảnh cho các thay đổi board liên quan đến người dùng.

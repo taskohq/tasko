@@ -17,7 +17,7 @@ export interface WorkerStatus {
   lastError: string | null;
 }
 
-const tko_consumers = new Map<string, RegisteredConsumer>();
+const tko_consumers = new Map<string, RegisteredConsumer[]>();
 const tko_observers = new Set<OutboxConsumer>();
 let tko_workerStatus: WorkerStatus = {
   name: "worker",
@@ -32,7 +32,9 @@ export function registerOutboxConsumer(
   tko_consumer: OutboxConsumer,
   tko_requiredCapability: RegisteredConsumer["requiredCapability"] = "job.process",
 ): void {
-  tko_consumers.set(tko_eventType, { consumer: tko_consumer, requiredCapability: tko_requiredCapability });
+  const tko_registered = tko_consumers.get(tko_eventType) ?? [];
+  if (!tko_registered.some(tko_entry => tko_entry.consumer === tko_consumer)) tko_registered.push({ consumer: tko_consumer, requiredCapability: tko_requiredCapability });
+  tko_consumers.set(tko_eventType, tko_registered);
 }
 
 export function registerOutboxObserver(tko_observer: OutboxConsumer): void {
@@ -51,8 +53,8 @@ export async function processOutboxOnce(tko_limit = 25): Promise<number> {
   for (const tko_record of tko_records) {
     try {
       for (const tko_observer of Array.from(tko_observers)) await tko_observer(tko_record);
-      const tko_registeredConsumer = tko_consumers.get(tko_record.eventType);
-      if (tko_registeredConsumer) {
+      const tko_registeredConsumers = tko_consumers.get(tko_record.eventType) ?? [];
+      for (const tko_registeredConsumer of tko_registeredConsumers) {
         const tko_serviceActor = await resolveWorkerServiceActor({
           tenantId: tko_record.tenantId,
           correlationId: tko_record.correlationId,
@@ -66,11 +68,14 @@ export async function processOutboxOnce(tko_limit = 25): Promise<number> {
         });
         await tko_registeredConsumer.consumer(tko_record);
       }
+      const tko_actorMembership = tko_record.actorAuthSubject
+        ? (await getPlatformStore().listMemberships(tko_record.actorAuthSubject)).find(tko_membership => tko_membership.tenant.id === tko_record.tenantId && tko_membership.status === "active")
+        : null;
       await getRedisAdapter().publishTenant({
         tenantId: tko_record.tenantId,
         eventId: tko_record.eventId,
         eventType: tko_record.eventType,
-        payload: tko_record.payload,
+        payload: { ...tko_record.payload, actorMemberId: tko_actorMembership?.id ?? null },
       });
       await tko_store.markOutboxProcessed(tko_record.id);
       tko_workerStatus = { ...tko_workerStatus, processedCount: tko_workerStatus.processedCount + 1 };

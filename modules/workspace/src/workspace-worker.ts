@@ -13,14 +13,14 @@ async function tko_actorFor(tko_record: OutboxRecord): Promise<PlatformActor> { 
 async function tko_indexWork(tko_record: OutboxRecord): Promise<void> {
   const tko_id = tko_payloadId(tko_record, "workItemId"); if (!tko_id) throw new Error("WORKSPACE_WORK_ITEM_ID_REQUIRED");
   const tko_actor = await tko_actorFor(tko_record); const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_id); if (!tko_item) return;
-  await materializeSearchDocument(tko_actor, { entityType: "work_item", entityId: tko_item.id, kind: "work", title: `${tko_item.key} · ${tko_item.title}`, bodyText: tko_item.description ?? "", href: `/work?item=${tko_item.id}`, visibility: tko_item.visibility, explicitMemberIds: [], correlationId: `tko_materialize:${tko_record.eventId}` });
+  await materializeSearchDocument(tko_actor, { entityType: "work_item", entityId: tko_item.id, kind: "work", title: `${tko_item.key} · ${tko_item.title}`, bodyText: tko_item.description ?? "", href: `/work?item=${tko_item.id}`, visibility: tko_item.visibility ?? "internal", explicitMemberIds: [], correlationId: `tko_materialize:${tko_record.eventId}` });
   await processAutomationEvent(tko_actor, tko_record);
 }
 
 async function tko_indexLead(tko_record: OutboxRecord): Promise<void> {
   const tko_id = tko_payloadId(tko_record, "leadId"); if (!tko_id) throw new Error("WORKSPACE_LEAD_ID_REQUIRED");
   const tko_actor = await tko_actorFor(tko_record); const tko_lead = await getCRMStore().getLead(tko_actor.tenantId, tko_id); if (!tko_lead) return;
-  await materializeSearchDocument(tko_actor, { entityType: "crm_lead", entityId: tko_lead.id, kind: "crm", title: `${tko_lead.firstName} ${tko_lead.lastName}`.trim(), bodyText: [tko_lead.companyName, tko_lead.email, tko_lead.notes].filter(Boolean).join(" · "), href: `/crm?lead=${tko_lead.id}`, visibility: tko_lead.visibility, explicitMemberIds: [], correlationId: `tko_materialize:${tko_record.eventId}` });
+  await materializeSearchDocument(tko_actor, { entityType: "crm_lead", entityId: tko_lead.id, kind: "crm", title: `${tko_lead.firstName} ${tko_lead.lastName}`.trim(), bodyText: [tko_lead.companyName, tko_lead.email, tko_lead.notes].filter(Boolean).join(" · "), href: `/crm?lead=${tko_lead.id}`, visibility: tko_lead.visibility ?? "internal", explicitMemberIds: [], correlationId: `tko_materialize:${tko_record.eventId}` });
   await processAutomationEvent(tko_actor, tko_record);
 }
 

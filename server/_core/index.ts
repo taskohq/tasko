@@ -15,6 +15,10 @@ import { registerWebSocketGateway } from "../platform/websocket-gateway";
 import { registerPublicApiRoutes } from "../ecosystem/public-api";
 import { registerEcosystemWebhookObserver } from "../../modules/ecosystem/src/developer-service";
 import { registerMCPRoutes } from "../ai/mcp-server";
+import { registerCRMHandoffWorker } from "../../modules/crm/src/crm-handoff-worker";
+import { registerWorkRealtimeWorker } from "../../modules/work/src/work-realtime-worker";
+import { registerWorkspaceWorker } from "../../modules/workspace/src/workspace-worker";
+import { startWorker } from "../../modules/worker/src/worker-service";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -53,6 +57,10 @@ async function startServer() {
   registerPublicApiRoutes(app);
   registerMCPRoutes(app);
   registerEcosystemWebhookObserver();
+  registerCRMHandoffWorker();
+  registerWorkspaceWorker();
+  registerWorkRealtimeWorker();
+  const tko_stopWorker = startWorker();
   registerWebSocketGateway(server);
   app.get("/health", async (_req, res) => {
     res.status(200).json(await getPlatformHealth());
@@ -86,6 +94,10 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  for (const tko_signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(tko_signal, () => tko_stopWorker());
+  }
 }
 
 startServer().catch(console.error);

@@ -4,6 +4,7 @@ import { startLogin } from "@/const";
 import { tko_runBulkStatusMove } from "@/lib/bulk-work-status";
 import { tko_filterKanbanItems, tko_groupKanbanItems, type TkoKanbanFilter, type TkoKanbanGrouping } from "@/lib/kanban-board-controls";
 import { tko_addOptimistic, tko_removeOptimistic, tko_runOptimisticCreate } from "@/lib/kanban-optimistic";
+import { useWorkBoardRealtime } from "@/hooks/useWorkBoardRealtime";
 import { trpc } from "@/lib/trpc";
 import {
   CalendarDays,
@@ -31,7 +32,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import { toast } from "sonner";
 
 type TkoCategory = "todo" | "in_progress" | "done";
@@ -303,6 +304,7 @@ export default function Work() {
 
   const tko_projects = trpc.work.projects.useQuery(undefined, { enabled: isAuthenticated });
   const tko_assignees = trpc.work.assignees.useQuery(undefined, { enabled: isAuthenticated });
+  const tko_currentTenant = trpc.platform.currentTenant.useQuery(undefined, { enabled: isAuthenticated });
   const tko_selectedProject = tko_projects.data?.[0];
   const tko_board = trpc.work.board.useQuery(
     { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" },
@@ -312,10 +314,19 @@ export default function Work() {
     { workItemId: tko_selectedItem?.id ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(tko_selectedItem && isAuthenticated && tko_selectedProject) },
   );
-  const tko_refreshBoard = async () => Promise.all([
+  const tko_refreshBoard = useCallback(async () => Promise.all([
     tko_utils.work.board.invalidate(),
     tko_utils.work.item.invalidate(),
-  ]);
+  ]), [tko_utils]);
+  useWorkBoardRealtime({
+    enabled: Boolean(isAuthenticated && tko_selectedProject),
+    projectId: tko_selectedProject?.id,
+    memberId: tko_currentTenant.data?.memberId,
+    onBoardChanged: () => {
+      void tko_refreshBoard();
+      void tko_utils.workspace.inbox.invalidate();
+    },
+  });
   const tko_seed = trpc.work.seedDemo.useMutation({
     onSuccess: async () => { await tko_utils.work.projects.invalidate(); },
   });

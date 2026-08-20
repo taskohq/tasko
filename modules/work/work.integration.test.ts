@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemoryPlatformStore, setPlatformStoreForTests } from "../../packages/database/src/platform-store";
 import { getRedisAdapter } from "../../packages/redis/src/redis-adapter";
 import { MemoryWorkStore, setWorkStoreForTests } from "../../packages/database/src/work-store";
+import { getWorkspaceStore, MemoryWorkspaceStore, setWorkspaceStoreForTests } from "../../packages/database/src/workspace-store";
 import { resolveTenantRequestContext } from "../tenancy/src/tenant-context";
 import { processOutboxOnce } from "../worker/src/worker-service";
 import * as work from "./src/work-service";
+import { registerWorkRealtimeWorker } from "./src/work-realtime-worker";
 
 const tko_ownerSubject = "work-owner";
 const tko_otherSubject = "work-other-owner";
@@ -12,12 +14,16 @@ const tko_otherSubject = "work-other-owner";
 describe("Work Alpha acceptance boundaries", () => {
   let tko_platformStore: MemoryPlatformStore;
   let tko_workStore: MemoryWorkStore;
+  let tko_workspaceStore: MemoryWorkspaceStore;
 
   beforeEach(async () => {
     tko_platformStore = new MemoryPlatformStore();
     tko_workStore = new MemoryWorkStore();
+    tko_workspaceStore = new MemoryWorkspaceStore();
     setPlatformStoreForTests(tko_platformStore);
     setWorkStoreForTests(tko_workStore);
+    setWorkspaceStoreForTests(tko_workspaceStore);
+    registerWorkRealtimeWorker();
     await tko_platformStore.seedDemoWorkspace({ ownerAuthSubject: tko_ownerSubject, tenantSlug: "tasko-demo" });
     await tko_platformStore.seedDemoWorkspace({ ownerAuthSubject: tko_otherSubject, tenantSlug: "other-workspace" });
   });
@@ -25,6 +31,7 @@ describe("Work Alpha acceptance boundaries", () => {
   afterEach(() => {
     setPlatformStoreForTests(null);
     setWorkStoreForTests(null);
+    setWorkspaceStoreForTests(null);
   });
 
   async function tko_actor(tko_subject = tko_ownerSubject, tko_slug = "tasko-demo") {
@@ -32,6 +39,21 @@ describe("Work Alpha acceptance boundaries", () => {
     if (!tko_context) throw new Error("TEST_ACTOR_MISSING");
     return tko_context.actor;
   }
+
+  it("materializes a durable notification for an active assignee after an outbox-backed board change", async () => {
+    const tko_owner = await tko_actor();
+    const tko_space = await work.createSpace(tko_owner, { name: "Notifications", slug: "notifications", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Notifications", key: "NOT", methodology: "kanban", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_nonRecipientActor = { ...tko_owner, authSubject: "work-board-collaborator", memberId: "tko-member-collaborator", correlationId: "test:work-notification" };
+    const tko_item = await work.createWorkItem({ actor: tko_nonRecipientActor, projectId: tko_project.id, title: "Notify assignee", assigneeMemberIds: [tko_owner.memberId], correlationId: tko_nonRecipientActor.correlationId });
+
+    await processOutboxOnce(50);
+
+    const tko_inbox = await getWorkspaceStore().listInbox(tko_owner.tenantId, tko_owner.memberId);
+    expect(tko_inbox).toEqual(expect.arrayContaining([expect.objectContaining({ entityId: tko_item.id, kind: "assignment", sourceEventId: expect.any(String) })]));
+    expect((await tko_platformStore.listAuditLogs()).some(tko_entry => tko_entry.action === "workspace.inbox.item_created")).toBe(true);
+    expect((await tko_platformStore.listOutbox()).some(tko_entry => tko_entry.eventType === "workspace.inbox_item_created.v1")).toBe(true);
+  });
 
   it("delivers the board + sprint acceptance flow with stable project keys and durable history", async () => {
     const tko_owner = await tko_actor();
