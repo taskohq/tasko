@@ -13,6 +13,7 @@ import type {
   WorkflowStatus,
 } from "../../../packages/contracts/src/work";
 import type { Capability, PlatformActor, TenantResource } from "../../../packages/contracts/src/platform";
+import { getPlatformStore } from "../../../packages/database/src/platform-store";
 import { getWorkStore } from "../../../packages/database/src/work-store";
 import { getTenantAttachmentDownloadUrl, uploadTenantAttachment } from "../../attachments/src/attachment-storage";
 import { requireCapability } from "../../permissions/src/authorization";
@@ -53,10 +54,28 @@ export async function createProject(tko_input: CreateProjectInput) {
 export async function board(tko_actor: PlatformActor, tko_projectId: string) {
   const tko_project = await tko_projectFor(tko_actor, tko_projectId);
   tko_require(tko_actor, "work.project.read", tko_project);
+  const tko_items = await getWorkStore().listWorkItems(tko_actor.tenantId, tko_project.id);
+  const tko_members = await getPlatformStore().listTenantMembers(tko_actor.tenantId);
+  const tko_memberNameById = new Map(tko_members.map(tko_member => [tko_member.id, tko_member.displayName]));
+  const tko_latestStatusChangeByWorkItemId: Record<string, { actorMemberId: string; actorDisplayName: string; changedAt: Date }> = {};
+
+  await Promise.all(tko_items.map(async tko_item => {
+    const tko_transition = (await getWorkStore().listHistory(tko_actor.tenantId, tko_item.id))
+      .filter(tko_history => tko_history.field === "status_id")
+      .sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime())[0];
+    if (!tko_transition) return;
+    tko_latestStatusChangeByWorkItemId[tko_item.id] = {
+      actorMemberId: tko_transition.actorMemberId,
+      actorDisplayName: tko_memberNameById.get(tko_transition.actorMemberId) ?? "Former member",
+      changedAt: tko_transition.createdAt,
+    };
+  }));
+
   return {
     project: tko_project,
     statuses: await getWorkStore().listStatuses(tko_actor.tenantId, tko_project.workflowId),
-    items: await getWorkStore().listWorkItems(tko_actor.tenantId, tko_project.id),
+    items: tko_items,
+    latestStatusChangeByWorkItemId: tko_latestStatusChangeByWorkItemId,
     sprints: await getWorkStore().listSprints(tko_actor.tenantId, tko_project.id),
     views: await getWorkStore().listViews(tko_actor.tenantId, tko_project.id, tko_actor.memberId),
   };

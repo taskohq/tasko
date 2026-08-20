@@ -51,6 +51,8 @@ type TkoBoardItem = {
   detail: string;
   assignee: string;
   dueLabel: string;
+  statusChangedBy?: string;
+  statusChangedAt?: Date;
   optimistic?: boolean;
 };
 
@@ -105,6 +107,11 @@ function tko_dueLabel(tko_dueAt: Date | null | undefined) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(tko_dueAt));
 }
 
+function tko_statusChangeLabel(tko_changedAt: Date | undefined) {
+  if (!tko_changedAt) return "";
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(tko_changedAt));
+}
+
 function tko_dateInputValue(tko_dueAt: Date | null | undefined) {
   if (!tko_dueAt) return "";
   const tko_date = new Date(tko_dueAt);
@@ -151,7 +158,7 @@ function TkoKanbanCard({ tko_item, tko_canDrag, tko_isDragging, tko_isSelected, 
 }) {
   return <article draggable={tko_canDrag && !tko_item.optimistic} aria-busy={tko_item.optimistic || undefined} onDragStart={tko_onDragStart} onDragEnd={tko_onDragEnd} onDragOver={tko_event => { tko_event.preventDefault(); tko_event.stopPropagation(); }} onDrop={tko_onDrop} className={`relative rounded-lg border bg-white shadow-[0_1px_2px_rgba(16,24,40,.04)] transition ${tko_isSelected ? "border-[#0c66e4] ring-1 ring-[#0c66e4]" : "border-[#eaecf0]"} ${tko_item.optimistic ? "border-dashed bg-[#f7fbff] opacity-80" : tko_isDragging ? "opacity-45" : "hover:border-[#c7c3ff] hover:shadow-[0_7px_18px_rgba(91,81,232,.09)]"}`}>
     {tko_canSelect ? <label className="absolute left-3 top-3 z-10 flex h-4 w-4 cursor-pointer items-center justify-center rounded bg-white/90"><span className="sr-only">Select {tko_item.title}</span><input type="checkbox" checked={tko_isSelected} onChange={tko_onToggleSelection} className="h-3.5 w-3.5 accent-[#0c66e4]" /></label> : null}
-    <button type="button" disabled={tko_item.optimistic} onClick={tko_onOpen} className={`block w-full p-3 text-left disabled:cursor-wait ${tko_canSelect ? "pl-9" : ""}`}><div className="flex items-start justify-between gap-2"><span className="flex items-center gap-1 font-mono text-[10px] text-[#98a2b3]"><GripVertical className="h-3 w-3 text-[#c5cbd5]" />{tko_item.key}</span><TkoPriority priority={tko_item.priority} compact /></div><p className="mt-2 text-[13px] font-semibold leading-5 text-[#344054]">{tko_item.title}</p><div className="mt-3 flex items-center justify-between text-[11px] text-[#667085]"><span className="flex items-center gap-1"><CalendarDays className="h-3 w-3 text-[#98a2b3]" />{tko_item.dueLabel}</span><span className="flex items-center gap-2"><span className="grid h-5 w-5 place-items-center rounded-full bg-[#e7e5ff] text-[8px] font-bold text-[#5146d9]">{tko_item.assignee}</span><span className="flex items-center gap-0.5"><MessageCircle className="h-3 w-3" />0</span></span></div><p className="mt-2 flex items-center gap-1 text-[10px] text-[#5b51e8]"><FolderKanban className="h-3 w-3" />{tko_item.optimistic ? "Creating task…" : tko_item.detail}</p></button>
+    <button type="button" disabled={tko_item.optimistic} onClick={tko_onOpen} className={`block w-full p-3 text-left disabled:cursor-wait ${tko_canSelect ? "pl-9" : ""}`}><div className="flex items-start justify-between gap-2"><span className="flex items-center gap-1 font-mono text-[10px] text-[#98a2b3]"><GripVertical className="h-3 w-3 text-[#c5cbd5]" />{tko_item.key}</span><TkoPriority priority={tko_item.priority} compact /></div><p className="mt-2 text-[13px] font-semibold leading-5 text-[#344054]">{tko_item.title}</p><div className="mt-3 flex items-center justify-between text-[11px] text-[#667085]"><span className="flex items-center gap-1"><CalendarDays className="h-3 w-3 text-[#98a2b3]" />{tko_item.dueLabel}</span><span className="flex items-center gap-2"><span className="grid h-5 w-5 place-items-center rounded-full bg-[#e7e5ff] text-[8px] font-bold text-[#5146d9]">{tko_item.assignee}</span><span className="flex items-center gap-0.5"><MessageCircle className="h-3 w-3" />0</span></span></div>{tko_item.statusChangedBy ? <p className="mt-2 truncate text-[10px] text-[#667085]" title={`Last moved by ${tko_item.statusChangedBy} on ${tko_statusChangeLabel(tko_item.statusChangedAt)}`}>Moved by <span className="font-semibold text-[#344054]">{tko_item.statusChangedBy}</span><span className="text-[#98a2b3]"> · {tko_statusChangeLabel(tko_item.statusChangedAt)}</span></p> : null}<p className="mt-2 flex items-center gap-1 text-[10px] text-[#5b51e8]"><FolderKanban className="h-3 w-3" />{tko_item.optimistic ? "Creating task…" : tko_item.detail}</p></button>
   </article>;
 }
 
@@ -472,6 +479,8 @@ export default function Work() {
       detail: tko_item.estimateMinutes ? `${Math.round(tko_item.estimateMinutes / 60)}h estimate` : "Work item",
       assignee: tko_item.assigneeMemberIds.length ? "ME" : "—",
       dueLabel: tko_dueLabel(tko_item.dueAt),
+      statusChangedBy: tko_board.data.latestStatusChangeByWorkItemId[tko_item.id]?.actorDisplayName,
+      statusChangedAt: tko_board.data.latestStatusChangeByWorkItemId[tko_item.id]?.changedAt,
     }));
     return [...tko_serverItems, ...tko_optimisticItems];
   }, [tko_board.data, tko_optimisticItems]);

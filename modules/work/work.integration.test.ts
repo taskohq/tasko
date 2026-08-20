@@ -73,6 +73,7 @@ describe("Work Alpha acceptance boundaries", () => {
     expect((await tko_workStore.listHistory(tko_owner.tenantId, tko_item.id)).map(tko_entry => tko_entry.field)).toEqual(["created", "status_id"]);
     expect((await tko_platformStore.listAuditLogs()).filter(tko_event => tko_event.action.startsWith("work."))).toHaveLength(6);
     expect((await work.board(tko_owner, tko_project.id)).items[0]?.sprintId).toBe(tko_sprint.id);
+    expect((await work.board(tko_owner, tko_project.id)).latestStatusChangeByWorkItemId[tko_item.id]).toEqual(expect.objectContaining({ actorMemberId: tko_owner.memberId, actorDisplayName: expect.any(String), changedAt: expect.any(Date) }));
   });
 
   it("does not expose another tenant's project or work item", async () => {
