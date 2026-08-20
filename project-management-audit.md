@@ -23,7 +23,7 @@ _Cập nhật lần đầu: 2026-08-19. Phạm vi audit này đối chiếu canv
 | Chat | Channel, message, attachment, thread, reaction, saved item, presence/typing | Chat service/store, router mutations/queries, canvas Chat, read-state guard và PostgreSQL read cursor regression | **Real** | `chat.markRead` JSONB UUID coercion đã được sửa; full regression và Docker tests đã pass. |
 | Chat | Search và link Message–Work | `chat.search`, `chat.linkWorkItem`, `workspace.search(kind=work)`; inspector UI, audit/outbox test | **Real** | Các link được refresh theo server-authoritative state. |
 | CRM | Pipeline board, create lead, move deal | `crm.overview/pipelines/board/createLead/moveDeal`; CRM UI và service/store | **Real** cho workflow cơ bản | Cần audit detail, company/contact, conversion, handoff, follow-up và entity link. |
-| CRM | Sales-to-delivery handoff | `requestDealHandoff`, `createFollowUp`, `linkEntity`, conversion paths có trong router/service | **Partial** | UI cần chứng minh được full flow và trạng thái worker/outbox. |
+| CRM | Sales-to-delivery handoff | `crm.deal` detail read model, `requestDealHandoff`, outbox consumer, delivery project/channel links, CRM inspector state/polling, memory + PostgreSQL regressions | **Real** | Handoff chỉ được mở cho deal won; UI hiển thị pending/completed từ server, không còn project/channel minh hoạ. Nhãn delivery được resolve tenant-scoped và kiểm tra quyền Work/Chat trước khi trả về. |
 | Workspace | Search, inbox, documents | Workspace router/service + Workspace canvas mutations/queries | **Real** cho thao tác hiển thị | Cần kiểm tra edit document, entity links và permission filtering trên từng surface. |
 | Workspace | Forms & automations | API create/activate/submit form và create rule/executions có thật; canvas tạo/activate cơ bản | **Partial** | Thiếu đường cấu hình đầy đủ, public/run experience và observability UI cần audit. |
 | Imports | Create, preview, stage, map, queue, execute batch | Ecosystem import service/router, Imports canvas | **Real** cho workflow staged | Cần kiểm tra upload/source ingestion có thật, thay vì chỉ input record thủ công. |
@@ -39,7 +39,7 @@ _Cập nhật lần đầu: 2026-08-19. Phạm vi audit này đối chiếu canv
 |---|---|---|
 | **P0 — Closed** | `chat.markRead` trả HTTP 500 trên PostgreSQL do UUID truyền vào toán tử JSONB cần text coercion. | Đã sửa store PostgreSQL, thêm Docker read cursor regression/audit-outbox coverage, và guard UI chỉ thử một lần trên một channel/sequence. |
 | **P1 — Partially closed** | Work planning API (sprint, custom field, saved view, dependency) hiện không được chứng minh đầy đủ qua workflow UI. | Sprint và dependencies đã có workflow UI thật, domain regression và persistence proof; custom field/saved view vẫn là phần audit tiếp theo. |
-| **P1** | CRM delivery handoff, Workspace forms/automation và Ecosystem connection cần phân biệt rõ execution thật với registration/UI. | Audit từng full flow và hoàn thiện/giới hạn phần chưa vận hành trước khi coi là production-ready. |
+| **P1 — Partially closed** | CRM delivery handoff, Workspace forms/automation và Ecosystem connection cần phân biệt rõ execution thật với registration/UI. | CRM handoff đã closed với full flow, detail UI và PostgreSQL proof. Forms/automation và Ecosystem connection vẫn cần audit/remediation. |
 
 ## Nguyên tắc remediation
 
@@ -56,3 +56,5 @@ _Cập nhật lần đầu: 2026-08-19. Phạm vi audit này đối chiếu canv
 | Production build | `pnpm build`: Vite client bundle và Express server bundle hoàn tất thành công. Cảnh báo chunk JavaScript lớn hơn 500 kB được giữ lại như một workstream hiệu năng riêng, không phải lỗi build. |
 | PostgreSQL Docker | `TASKO_RUN_POSTGRES_INTEGRATION_TESTS=1 pnpm vitest run modules/work/work.postgres.integration.test.ts modules/chat/chat.postgres.integration.test.ts`: 2 files, 3 tests pass. |
 | Work canvas desktop | Canvas tải ổn định theo app shell; inspector dependency đã nằm trên read/write path tRPC và được production build kiểm tra type/bundle. |
+| CRM handoff regression | `pnpm vitest run modules/crm/crm.integration.test.ts`: 5 tests pass, gồm manual request, worker materialization, idempotency, detail read model và guest denial. |
+| CRM handoff PostgreSQL | `TASKO_RUN_POSTGRES_INTEGRATION_TESTS=1 pnpm vitest run modules/crm/crm.postgres.integration.test.ts`: 2 tests pass, gồm delivery project/channel durable và detail read model tenant-scoped. |

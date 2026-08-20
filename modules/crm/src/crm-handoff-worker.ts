@@ -46,4 +46,5 @@ async function tko_handleWonDeal(tko_record: OutboxRecord): Promise<void> {
 
 export function registerCRMHandoffWorker(): void {
   registerOutboxConsumer("crm.deal_won.v1", tko_handleWonDeal);
+  registerOutboxConsumer("crm.deal_handoff_requested.v1", tko_handleWonDeal);
 }

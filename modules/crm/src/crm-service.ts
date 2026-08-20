@@ -1,7 +1,9 @@
 import type { Capability, PlatformActor, TenantResource } from "../../../packages/contracts/src/platform";
 import type { CRMActivity, CRMEntityLink, ConvertLeadInput, CreateLeadInput } from "../../../packages/contracts/src/crm";
+import { getChatStore } from "../../../packages/database/src/chat-store";
 import { getCRMStore } from "../../../packages/database/src/crm-store";
-import { requireCapability } from "../../permissions/src/authorization";
+import { getWorkStore } from "../../../packages/database/src/work-store";
+import { can, requireCapability } from "../../permissions/src/authorization";
 import * as workService from "../../work/src/work-service";
 
 const tko_resource=(actor:PlatformActor,type:string,id:string):TenantResource=>({tenantId:actor.tenantId,type,id,visibility:"internal"});
@@ -15,6 +17,7 @@ export async function createCompany(actor:PlatformActor,input:Parameters<ReturnT
 export async function createContact(actor:PlatformActor,input:Parameters<ReturnType<typeof getCRMStore>["createContact"]>[1]){tko_require(actor,"crm.contact.manage","crm_contact","new");return getCRMStore().createContact(actor,input);}
 export async function createPipeline(actor:PlatformActor,input:Parameters<ReturnType<typeof getCRMStore>["createPipeline"]>[1]){tko_require(actor,"crm.pipeline.manage","crm_pipeline","new");return getCRMStore().createPipeline(actor,input);}
 export async function board(actor:PlatformActor,pipelineId:string){tko_require(actor,"crm.read","crm_pipeline",pipelineId);return getCRMStore().dealBoard(actor.tenantId,pipelineId);}
+export async function dealDetails(actor:PlatformActor,dealId:string){const store=getCRMStore();const deal=await store.getDeal(actor.tenantId,dealId);if(!deal)throw new Error("CRM_DEAL_NOT_FOUND");tko_require(actor,"crm.read","crm_deal",dealId);const handoff=await store.getDealHandoff(actor.tenantId,dealId);const project=handoff?.deliveryProjectId?await getWorkStore().getProject(actor.tenantId,handoff.deliveryProjectId):null;const channel=handoff?.deliveryChannelId?await getChatStore().getChannel(actor.tenantId,handoff.deliveryChannelId):null;const deliveryProject=project&&can(actor,"work.project.read",project).allowed?{id:project.id,name:project.name,key:project.key}:null;const deliveryChannel=channel&&can(actor,"chat.channel.read",channel).allowed?{id:channel.id,name:channel.name}:null;return {deal,handoff,deliveryProject,deliveryChannel};}
 export async function createDeal(actor:PlatformActor,input:Parameters<ReturnType<typeof getCRMStore>["createDeal"]>[1]){tko_require(actor,"crm.deal.manage","crm_deal","new");return getCRMStore().createDeal(actor,input);}
 export async function moveDeal(actor:PlatformActor,input:Parameters<ReturnType<typeof getCRMStore>["moveDeal"]>[1]){tko_require(actor,"crm.deal.manage","crm_deal",input.dealId);return getCRMStore().moveDeal(actor,input);}
 export async function requestDealHandoff(actor:PlatformActor,input:{dealId:string;correlationId:string}){tko_require(actor,"crm.deal.handoff","crm_deal",input.dealId);return getCRMStore().ensureDealHandoff(actor,input);}

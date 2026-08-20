@@ -62,9 +62,11 @@ tko_describe("Slim CRM Alpha M3 on PostgreSQL", () => {
         from crm_deal_handoffs h where h.tenant_id=$1 and h.deal_id=$2
       `, [tko_tenantId, tko_first.deal!.id]);
       const tko_handoffOutbox = await tko_pool.query("select count(*) from outbox where tenant_id=$1 and event_type='crm.deal_won.v1' and status='processed'", [tko_tenantId]);
+      const tko_detail = await crm.dealDetails(tko_actor, tko_first.deal!.id);
 
       expect(tko_handoff.rows[0]).toMatchObject({ status: "completed", delivery_project_id: expect.any(String), delivery_channel_id: expect.any(String), project_exists: "1", channel_exists: "1", links: "2" });
       expect(tko_handoffOutbox.rows[0].count).toBe("1");
+      expect(tko_detail).toMatchObject({ deal: { id: tko_first.deal!.id, tenantId: tko_tenantId }, handoff: { status: "completed" }, deliveryProject: { name: "Delivery — Analytical Engines delivery" }, deliveryChannel: { name: expect.stringMatching(/^delivery-/) } });
     } finally {
       await tko_cleanupTenant(tko_pool, tko_tenantId, [tko_userId]);
       await tko_store.close();

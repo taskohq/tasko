@@ -94,9 +94,14 @@ describe("Slim CRM Alpha M3", () => {
     expect(tko_wonStage).toBeDefined();
     await crm.moveDeal(tko_owner, { dealId: tko_deal.id, stageId: tko_wonStage!.id, correlationId: "won" });
 
+    const tko_requested = await crm.requestDealHandoff(tko_owner, { dealId: tko_deal.id, correlationId: "manual-handoff-request" });
+    expect(tko_requested).toMatchObject({ dealId: tko_deal.id, status: "pending", deliveryProjectId: null, deliveryChannelId: null });
+    await expect(crm.requestDealHandoff(tko_actor({ authSubject: "crm-guest", memberId: "crm-guest-member", role: "guest" }), { dealId: tko_deal.id, correlationId: "guest-handoff-request" })).rejects.toThrow("AUTHORIZATION_DENIED");
     await processOutboxOnce(100);
     const tko_handoff = await getCRMStore().getDealHandoff(tko_owner.tenantId, tko_deal.id);
     expect(tko_handoff).toEqual(expect.objectContaining({ status: "completed", deliveryProjectId: expect.any(String), deliveryChannelId: expect.any(String) }));
+    const tko_detail = await crm.dealDetails(tko_owner, tko_deal.id);
+    expect(tko_detail).toMatchObject({ handoff: { status: "completed" }, deliveryProject: { name: "Delivery — Delivery handoff", key: expect.any(String) }, deliveryChannel: { name: expect.stringMatching(/^delivery-/) } });
     await processOutboxOnce(100);
     expect((await getWorkStore().listProjects(tko_owner.tenantId)).filter(tko_project => tko_project.name === "Delivery — Delivery handoff")).toHaveLength(1);
     expect((await getCRMStore().listLinks(tko_owner.tenantId, "deal", tko_deal.id)).map(tko_link => tko_link.relationType)).toEqual(expect.arrayContaining(["delivery_project", "delivery_channel"]));
