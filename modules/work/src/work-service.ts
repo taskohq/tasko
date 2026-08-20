@@ -132,6 +132,19 @@ export async function searchProject(tko_actor: PlatformActor, tko_input: { proje
   return [...tko_items, ...tko_sprints, ...tko_memberResults, ...tko_fileResults].slice(0, tko_limit);
 }
 
+/** Central project file library: attachment bytes remain in S3; only authorized metadata is projected here. */
+export async function projectFiles(tko_actor: PlatformActor, tko_projectId: string) {
+  const tko_data = await board(tko_actor, tko_projectId);
+  const tko_files = (await Promise.all(tko_data.items.map(async tko_item =>
+    (await getWorkStore().listAttachments(tko_actor.tenantId, tko_item.id)).map(tko_attachment => ({
+      ...tko_attachment,
+      workItemKey: tko_item.key,
+      workItemTitle: tko_item.title,
+    })),
+  ))).flat();
+  return tko_files.sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime());
+}
+
 export async function itemDetails(tko_actor: PlatformActor, tko_workItemId: string) {
   const tko_item = await tko_itemFor(tko_actor, tko_workItemId);
   tko_require(tko_actor, "work.item.read", tko_item);
@@ -201,6 +214,9 @@ export async function moveWorkItem(tko_input: MoveWorkItemInput) {
 export async function updateWorkItem(tko_input: UpdateWorkItemInput) {
   const tko_item = await tko_itemFor(tko_input.actor, tko_input.workItemId);
   tko_require(tko_input.actor, "work.item.update", tko_item);
+  const tko_startAt = tko_input.startAt === undefined ? tko_item.startAt : tko_input.startAt;
+  const tko_dueAt = tko_input.dueAt === undefined ? tko_item.dueAt : tko_input.dueAt;
+  if (tko_startAt && tko_dueAt && tko_startAt.getTime() > tko_dueAt.getTime()) throw new Error("WORK_ITEM_DATE_RANGE_INVALID");
   return getWorkStore().updateWorkItem(tko_input);
 }
 

@@ -190,6 +190,7 @@ export const appRouter = router({
     board: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.board(ctx.platform.actor, input.projectId)),
     overview: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.overview(ctx.platform.actor, input.projectId)),
     searchProject: tenantProcedure.input(z.object({ projectId: z.string().uuid(), query: z.string().trim().max(240).default(""), statusId: z.string().uuid().optional(), sprintId: z.string().uuid().optional(), assigneeMemberId: z.string().uuid().optional(), limit: z.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => workService.searchProject(ctx.platform.actor, input)),
+    projectFiles: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.projectFiles(ctx.platform.actor, input.projectId)),
     item: tenantProcedure.input(z.object({ workItemId: z.string().uuid() })).query(async ({ ctx, input }) => {
       return workService.itemDetails(ctx.platform.actor, input.workItemId);
     }),

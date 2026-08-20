@@ -195,7 +195,7 @@
 - [x] Project Management Sprint: hoàn thiện planning, start/complete, carry-over, capacity và work item scope bằng dữ liệu bền vững, quyền tập trung và regression.
 - [x] Project Management Overview: hoàn thiện dashboard project với tiến độ, sức khỏe, workload, rủi ro và activity từ dữ liệu Work thật.
 - [x] Project Management Backlog: hoàn thiện triage, priority, grouping, bulk actions, đưa task vào sprint và realtime reconciliation từ workflow authoritative.
-- [ ] Project Management Timeline: hoàn thiện timeline/Gantt có lịch, dependency, chỉnh sửa thời lượng/dates và kiểm tra xung đột theo quyền project.
-- [ ] Project Management Files: hoàn thiện không gian file của project với S3 metadata, upload/download, liên kết task và quyền truy cập tenant/project.
+- [x] Project Management Timeline: hoàn thiện timeline/Gantt có lịch, dependency, chỉnh sửa thời lượng/dates và kiểm tra xung đột theo quyền project.
+- [x] Project Management Files: hoàn thiện không gian file của project với S3 metadata, upload/download, liên kết task và quyền truy cập tenant/project.
 - [ ] Project Management Members & sharing: hoàn thiện danh sách thành viên project, mời/gỡ, project role, quyền chia sẻ và audit/outbox/negative authorization tests.
 - [x] Project Management custom search: tìm kiếm theo phạm vi project với bộ lọc Work/Sprint/Member/File/trạng thái, kết quả server-authoritative tenant-safe và saved query khi phù hợp.

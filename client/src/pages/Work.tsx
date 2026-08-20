@@ -284,7 +284,7 @@ function TkoRichTaskComposer({
 export default function Work() {
   const { isAuthenticated, loading: tko_authLoading } = useAuth();
   const tko_utils = trpc.useUtils();
-  const [tko_view, setTkoView] = useState<"overview" | "board" | "list">("board");
+  const [tko_view, setTkoView] = useState<"overview" | "board" | "list" | "timeline" | "files">("board");
   const [tko_selectedItem, setTkoSelectedItem] = useState<TkoBoardItem | null>(null);
   const [tko_editor, setTkoEditor] = useState<TkoItemEditor | null>(null);
   const [tko_commentDraft, setTkoCommentDraft] = useState("");
@@ -314,6 +314,7 @@ export default function Work() {
   const [tko_columnsOpen, setTkoColumnsOpen] = useState(false);
   const [tko_newColumn, setTkoNewColumn] = useState({ name: "", description: "", category: "todo" as TkoCategory, colorToken: "blue" });
   const [tko_projectSearch, setTkoProjectSearch] = useState("");
+  const [tko_downloadRequest, setTkoDownloadRequest] = useState<{ workItemId: string; attachmentId: string } | null>(null);
 
   const tko_projects = trpc.work.projects.useQuery(undefined, { enabled: isAuthenticated });
   const tko_assignees = trpc.work.assignees.useQuery(undefined, { enabled: isAuthenticated });
@@ -331,6 +332,14 @@ export default function Work() {
     { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000", query: tko_projectSearch },
     { enabled: Boolean(tko_selectedProject && isAuthenticated && tko_projectSearch.trim().length >= 2) },
   );
+  const tko_projectFiles = trpc.work.projectFiles.useQuery(
+    { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(tko_selectedProject && isAuthenticated) },
+  );
+  const tko_fileDownload = trpc.work.attachmentDownloadUrl.useQuery(
+    { workItemId: tko_downloadRequest?.workItemId ?? "00000000-0000-0000-0000-000000000000", attachmentId: tko_downloadRequest?.attachmentId ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(tko_downloadRequest) },
+  );
   const tko_itemDetails = trpc.work.item.useQuery(
     { workItemId: tko_selectedItem?.id ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(tko_selectedItem && isAuthenticated && tko_selectedProject) },
@@ -340,6 +349,7 @@ export default function Work() {
     tko_utils.work.item.invalidate(),
     tko_utils.work.overview.invalidate(),
     tko_utils.work.searchProject.invalidate(),
+    tko_utils.work.projectFiles.invalidate(),
   ]), [tko_utils]);
   useWorkBoardRealtime({
     enabled: Boolean(isAuthenticated && tko_selectedProject),
@@ -350,6 +360,11 @@ export default function Work() {
       void tko_utils.workspace.inbox.invalidate();
     },
   });
+  useEffect(() => {
+    if (!tko_fileDownload.data?.url) return;
+    window.open(tko_fileDownload.data.url, "_blank", "noopener,noreferrer");
+    setTkoDownloadRequest(null);
+  }, [tko_fileDownload.data?.url]);
   const tko_seed = trpc.work.seedDemo.useMutation({
     onSuccess: async () => { await tko_utils.work.projects.invalidate(); },
   });
@@ -829,11 +844,11 @@ export default function Work() {
           ) : <Button onClick={startLogin} className="h-9 rounded-lg bg-[#5b51e8] px-3.5 text-xs font-semibold hover:bg-[#4d43da]">Sign in</Button>}
         </div>
         <nav className="mt-5 flex items-center gap-5 overflow-x-auto border-t border-[#f2f4f7] pt-3 text-[13px] whitespace-nowrap" aria-label="Project views">
-          <button onClick={() => setTkoView("overview")} className={`border-b-2 pb-2 ${tko_view === "overview" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Overview</button>
-          <button onClick={() => setTkoView("board")} className={`border-b-2 pb-2 ${tko_view === "board" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Board</button>
-          <button onClick={() => setTkoView("list")} className={`border-b-2 pb-2 ${tko_view === "list" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Backlog</button>
-          <button className="text-[#667085]">Timeline</button>
-          <button className="text-[#667085]">Files</button>
+	          <button onClick={() => setTkoView("overview")} className={`border-b-2 pb-2 ${tko_view === "overview" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Overview</button>
+	          <button onClick={() => setTkoView("board")} className={`border-b-2 pb-2 ${tko_view === "board" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Board</button>
+	          <button onClick={() => setTkoView("list")} className={`border-b-2 pb-2 ${tko_view === "list" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Backlog</button>
+	          <button onClick={() => setTkoView("timeline")} className={`border-b-2 pb-2 ${tko_view === "timeline" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Timeline</button>
+	          <button onClick={() => setTkoView("files")} className={`border-b-2 pb-2 ${tko_view === "files" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Files</button>
         </nav>
       </header>
 
@@ -871,7 +886,9 @@ export default function Work() {
           ["At risk", String(tko_overview.data?.overdueItems ?? 0), "Past their due date", "text-[#b42318]"],
           ["Backlog", String(tko_overview.data?.backlogItems ?? 0), `${tko_overview.data?.unestimatedItems ?? 0} without estimate`, "text-[#344054]"],
         ].map(([tko_label, tko_value, tko_detail, tko_color]) => <article key={tko_label} className="border border-[#dfe1e6] bg-white p-4 shadow-[0_1px_2px_rgba(9,30,66,.08)]"><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">{tko_label}</p><p className={`mt-2 text-2xl font-bold ${tko_color}`}>{tko_value}</p><p className="mt-1 text-xs text-[#667085]">{tko_detail}</p></article>)}</div><div className="grid gap-4 lg:grid-cols-[1.15fr_.85fr]"><section className="border border-[#dfe1e6] bg-white"><div className="border-b border-[#eaecf0] px-4 py-3"><h2 className="text-sm font-semibold text-[#172b4d]">Workload</h2><p className="mt-0.5 text-xs text-[#667085]">Assigned scope and estimated effort by project member.</p></div><div className="divide-y divide-[#f2f4f7]">{tko_overview.data?.workload.length ? tko_overview.data.workload.map(tko_member => <div key={tko_member.memberId} className="flex items-center justify-between gap-3 px-4 py-3"><div><p className="text-xs font-semibold text-[#344054]">{tko_member.displayName}</p><p className="text-[11px] text-[#667085]">{tko_member.assignedItems} assigned task{tko_member.assignedItems === 1 ? "" : "s"}</p></div><span className="text-xs font-semibold text-[#475467]">{Math.round(tko_member.estimatedMinutes / 60 * 10) / 10}h</span></div>) : <p className="px-4 py-6 text-xs text-[#667085]">No assigned work in this project yet.</p>}</div></section><section className="border border-[#dfe1e6] bg-white p-4"><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">Sprint health</p><p className="mt-2 text-sm font-semibold text-[#172b4d]">{tko_overview.data?.activeSprint ? tko_overview.data.activeSprint.name : "No active sprint"}</p><p className="mt-1 text-xs leading-5 text-[#667085]">{tko_overview.data?.activeSprint ? `${tko_overview.data.completedItems} completed of ${tko_overview.data.totalItems} project tasks.` : `${tko_overview.data?.plannedSprintCount ?? 0} planned sprint${(tko_overview.data?.plannedSprintCount ?? 0) === 1 ? "" : "s"} available to start.`}</p><button type="button" onClick={() => { setTkoSprintPlannerOpen(true); setTkoView("board"); }} className="mt-4 text-xs font-semibold text-[#0c66e4] hover:underline">Open sprint planning</button></section></div></section> : null}
-        {tko_view === "board" ? (
+	        {tko_view === "timeline" ? <section aria-label="Project timeline" className="border border-[#dfe1e6] bg-white shadow-[0_1px_2px_rgba(9,30,66,.08)]"><div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#eaecf0] px-4 py-3"><div><h2 className="text-sm font-semibold text-[#172b4d]">Timeline</h2><p className="mt-0.5 text-xs text-[#667085]">Plan start and due dates from the same versioned task state used by Board and Backlog.</p></div><span className="border border-[#dfe1e6] bg-[#f7f8fa] px-2 py-1 text-[11px] font-semibold text-[#44546f]">{tko_board.data?.items.filter(tko_item => tko_item.startAt || tko_item.dueAt).length ?? 0} scheduled</span></div><div className="divide-y divide-[#f2f4f7]">{tko_board.data?.items.filter(tko_item => tko_item.startAt || tko_item.dueAt).sort((tko_left, tko_right) => (tko_left.startAt ?? tko_left.dueAt ?? new Date(8640000000000000)).getTime() - (tko_right.startAt ?? tko_right.dueAt ?? new Date(8640000000000000)).getTime()).map(tko_item => <article key={tko_item.id} className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(14rem,1fr)_9rem_9rem_auto]"><button type="button" onClick={() => { const tko_card = tko_items.find(tko_entry => tko_entry.id === tko_item.id); if (tko_card) tko_openItem(tko_card); }} className="min-w-0 text-left"><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">{tko_item.key}</p><p className="truncate text-xs font-semibold text-[#172b4d]">{tko_item.title}</p></button><label className="text-[10px] font-bold uppercase tracking-[.06em] text-[#667085]">Start<input type="date" value={tko_dateInputValue(tko_item.startAt)} disabled={tko_isPreview || tko_update.isPending} onChange={tko_event => tko_update.mutate({ workItemId: tko_item.id, expectedVersion: tko_item.version, startAt: tko_event.target.value ? new Date(`${tko_event.target.value}T12:00:00`) : null })} className="mt-1 block h-8 w-full border border-[#dfe1e6] px-1.5 text-xs font-normal text-[#344054] outline-none focus:border-[#0c66e4]" /></label><label className="text-[10px] font-bold uppercase tracking-[.06em] text-[#667085]">Due<input type="date" value={tko_dateInputValue(tko_item.dueAt)} disabled={tko_isPreview || tko_update.isPending} onChange={tko_event => tko_update.mutate({ workItemId: tko_item.id, expectedVersion: tko_item.version, dueAt: tko_event.target.value ? new Date(`${tko_event.target.value}T12:00:00`) : null })} className="mt-1 block h-8 w-full border border-[#dfe1e6] px-1.5 text-xs font-normal text-[#344054] outline-none focus:border-[#0c66e4]" /></label><span className="self-end text-[11px] text-[#667085]">{tko_displayWorkflowStatus(tko_item.statusId, tko_board.data?.statuses ?? [], "Unknown")}</span></article>) ?? <p className="px-4 py-8 text-sm text-[#667085]">No scheduled work yet. Add a due date in a task, then plan its start here.</p>}</div></section> : null}
+	        {tko_view === "files" ? <section aria-label="Project files" className="border border-[#dfe1e6] bg-white shadow-[0_1px_2px_rgba(9,30,66,.08)]"><div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#eaecf0] px-4 py-3"><div><h2 className="text-sm font-semibold text-[#172b4d]">Files</h2><p className="mt-0.5 text-xs text-[#667085]">Authorized project library of S3 attachments, each kept linked to the source task.</p></div><span className="border border-[#dfe1e6] bg-[#f7f8fa] px-2 py-1 text-[11px] font-semibold text-[#44546f]">{tko_projectFiles.data?.length ?? 0} file{(tko_projectFiles.data?.length ?? 0) === 1 ? "" : "s"}</span></div><div className="divide-y divide-[#f2f4f7]">{tko_projectFiles.isLoading ? <p className="px-4 py-8 text-sm text-[#667085]">Loading authorized project files…</p> : tko_projectFiles.data?.length ? tko_projectFiles.data.map(tko_file => <article key={tko_file.id} className="flex flex-wrap items-center gap-3 px-4 py-3"><Paperclip className="h-4 w-4 text-[#5b51e8]" /><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-[#172b4d]">{tko_file.filename}</p><p className="text-[11px] text-[#667085]">{tko_file.workItemKey} · {tko_file.workItemTitle} · {Math.ceil(tko_file.byteSize / 1024)} KB</p></div><span className="text-[11px] text-[#667085]">{new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(tko_file.createdAt))}</span><button type="button" onClick={() => setTkoDownloadRequest({ workItemId: tko_file.workItemId, attachmentId: tko_file.id })} className="h-8 border border-[#0c66e4] px-2.5 text-xs font-semibold text-[#0c66e4] hover:bg-[#deebff]">Download</button></article>) : <p className="px-4 py-8 text-sm text-[#667085]">No files are attached to this project yet. Upload an attachment from a task to add it here.</p>}</div></section> : null}
+	        {tko_view === "board" ? (
           <div className="overflow-x-auto pb-4"><div className="grid min-w-[900px] grid-flow-col auto-cols-[minmax(280px,1fr)] gap-3">
             {tko_columns.map(tko_column => {
               const tko_columnItems = tko_filteredItems.filter(tko_item => tko_column.statusId ? tko_item.statusId === tko_column.statusId : tko_item.status === tko_column.id).sort((tko_left, tko_right) => (tko_left.tkoOptimisticOrder ?? Number.MAX_SAFE_INTEGER) - (tko_right.tkoOptimisticOrder ?? Number.MAX_SAFE_INTEGER) || (tko_left.rank ?? "").localeCompare(tko_right.rank ?? ""));
