@@ -191,4 +191,4 @@
 - [x] Work board notifications: phát notification tenant-safe và có ngữ cảnh cho các thay đổi board liên quan đến người dùng.
 - [x] Work Backlog/Board consistency: dùng cùng server-authoritative workflow status và realtime reconciliation cho mọi task view; loại bỏ trường hợp một task hiển thị hai cột/trạng thái khác nhau, kèm regression cross-view.
 - [x] Work status attribution: hiển thị thành viên và thời điểm thực hiện workflow transition gần nhất trên task card, lấy từ durable server-side history và cập nhật qua realtime.
-- [ ] Kanban drag-drop responsiveness: dùng optimistic move/reorder, drop feedback tức thời, rollback an toàn khi version conflict và server-authoritative realtime reconciliation.
+- [x] Kanban drag-drop responsiveness: dùng optimistic move/reorder, drop feedback tức thời, rollback an toàn khi version conflict và server-authoritative realtime reconciliation.
