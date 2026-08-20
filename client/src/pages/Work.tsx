@@ -281,10 +281,46 @@ function TkoRichTaskComposer({
   </form>;
 }
 
+type TkoProjectMemberRow = {
+  id: string;
+  displayName: string;
+  tenantRole: string;
+  projectRole: "viewer" | "editor" | null;
+  isProjectMember: boolean;
+  isOwner: boolean;
+};
+
+function TkoProjectMembersPanel({
+  tko_projectId,
+  tko_visibility,
+  tko_members,
+  tko_loading,
+  tko_pending,
+  tko_onVisibilityChange,
+  tko_onRoleChange,
+}: {
+  tko_projectId: string | undefined;
+  tko_visibility: "internal" | "private" | "guest_shared";
+  tko_members: TkoProjectMemberRow[] | undefined;
+  tko_loading: boolean;
+  tko_pending: boolean;
+  tko_onVisibilityChange: (tko_visibility: "internal" | "private" | "guest_shared") => void;
+  tko_onRoleChange: (tko_member: TkoProjectMemberRow, tko_projectRole: "none" | "viewer" | "editor") => void;
+}) {
+  return <section aria-label="Project members and sharing" className="border border-[#dfe1e6] bg-white shadow-[0_1px_2px_rgba(9,30,66,.08)]">
+    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#eaecf0] px-4 py-3">
+      <div><h2 className="text-sm font-semibold text-[#172b4d]">Members & sharing</h2><p className="mt-0.5 max-w-2xl text-xs text-[#667085]">Set project exposure, then grant active tenant members a read-only or editor role. Every change is re-authorized on the server.</p></div>
+      <label className="block text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">Project visibility<select aria-label="Project visibility" value={tko_visibility} disabled={!tko_projectId || tko_pending} onChange={tko_event => tko_onVisibilityChange(tko_event.target.value as "internal" | "private" | "guest_shared")} className="mt-1 block h-9 min-w-40 border border-[#d0d5dd] bg-white px-2 text-xs font-semibold normal-case tracking-normal text-[#344054] outline-none focus:border-[#0c66e4]"><option value="internal">Internal</option><option value="private">Private</option><option value="guest_shared">Guest shared</option></select></label>
+    </div>
+    <div className="border-b border-[#eaecf0] bg-[#f7f8fa] px-4 py-2 text-[11px] leading-5 text-[#667085]"><span className="font-semibold text-[#344054]">Internal:</span> active tenant members can collaborate. <span className="font-semibold text-[#344054]">Private:</span> owner/admin and explicitly assigned project members can access. <span className="font-semibold text-[#344054]">Guest shared:</span> explicit project members can access within tenant policy.</div>
+    <div className="divide-y divide-[#f2f4f7]">{tko_loading ? <p className="px-4 py-8 text-sm text-[#667085]">Loading authorized tenant members…</p> : tko_members?.length ? tko_members.map(tko_member => <article key={tko_member.id} className="flex flex-wrap items-center gap-3 px-4 py-3"><div className="grid h-8 w-8 place-items-center bg-[#deebff] text-xs font-bold text-[#0c66e4]">{tko_member.displayName.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-[#172b4d]">{tko_member.displayName}</p><p className="text-[11px] text-[#667085]">Tenant {tko_member.tenantRole}{tko_member.isOwner ? " · Project owner" : tko_member.isProjectMember ? " · Explicit project member" : " · No explicit project role"}</p></div>{tko_member.isOwner ? <span className="border border-[#b7dfc2] bg-[#ecfdf3] px-2 py-1 text-[11px] font-semibold text-[#067647]">Owner · editor</span> : <select aria-label={`Project role for ${tko_member.displayName}`} value={tko_member.projectRole ?? "none"} disabled={!tko_projectId || tko_pending} onChange={tko_event => tko_onRoleChange(tko_member, tko_event.target.value as "none" | "viewer" | "editor")} className="h-8 min-w-32 border border-[#d0d5dd] bg-white px-2 text-xs text-[#344054] outline-none focus:border-[#0c66e4]"><option value="none">Not shared</option><option value="viewer">Viewer</option><option value="editor">Editor</option></select>}</article>) : <p className="px-4 py-8 text-sm text-[#667085]">No active tenant members are available to share with.</p>}</div>
+  </section>;
+}
+
 export default function Work() {
   const { isAuthenticated, loading: tko_authLoading } = useAuth();
   const tko_utils = trpc.useUtils();
-  const [tko_view, setTkoView] = useState<"overview" | "board" | "list" | "timeline" | "files">("board");
+  const [tko_view, setTkoView] = useState<"overview" | "board" | "list" | "timeline" | "files" | "members">("board");
   const [tko_selectedItem, setTkoSelectedItem] = useState<TkoBoardItem | null>(null);
   const [tko_editor, setTkoEditor] = useState<TkoItemEditor | null>(null);
   const [tko_commentDraft, setTkoCommentDraft] = useState("");
@@ -336,6 +372,10 @@ export default function Work() {
     { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(tko_selectedProject && isAuthenticated) },
   );
+  const tko_projectMembers = trpc.work.projectMembers.useQuery(
+    { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(tko_selectedProject && isAuthenticated) },
+  );
   const tko_fileDownload = trpc.work.attachmentDownloadUrl.useQuery(
     { workItemId: tko_downloadRequest?.workItemId ?? "00000000-0000-0000-0000-000000000000", attachmentId: tko_downloadRequest?.attachmentId ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(tko_downloadRequest) },
@@ -350,6 +390,8 @@ export default function Work() {
     tko_utils.work.overview.invalidate(),
     tko_utils.work.searchProject.invalidate(),
     tko_utils.work.projectFiles.invalidate(),
+    tko_utils.work.projectMembers.invalidate(),
+    tko_utils.work.projects.invalidate(),
   ]), [tko_utils]);
   useWorkBoardRealtime({
     enabled: Boolean(isAuthenticated && tko_selectedProject),
@@ -478,6 +520,27 @@ export default function Work() {
       await tko_refreshBoard();
       toast.error(tko_error.message.includes("VERSION_CONFLICT") ? "Task vừa thay đổi bởi người khác. Dữ liệu đã được làm mới." : tko_error.message.includes("AUTHORIZATION") ? "Bạn không có quyền xóa task này." : "Không thể xóa task. Hãy thử lại.");
     },
+  });
+  const tko_updateProjectVisibility = trpc.work.updateProjectVisibility.useMutation({
+    onSuccess: async () => {
+      await tko_refreshBoard();
+      toast.success("Đã cập nhật phạm vi chia sẻ project.");
+    },
+    onError: tko_error => toast.error(tko_error.message.includes("AUTHORIZATION") ? "Chỉ owner hoặc admin mới có thể thay đổi quyền chia sẻ project." : "Không thể cập nhật phạm vi chia sẻ project."),
+  });
+  const tko_upsertProjectMember = trpc.work.upsertProjectMember.useMutation({
+    onSuccess: async () => {
+      await tko_refreshBoard();
+      toast.success("Đã cập nhật quyền thành viên project.");
+    },
+    onError: tko_error => toast.error(tko_error.message.includes("AUTHORIZATION") ? "Chỉ owner hoặc admin mới có thể thay đổi thành viên project." : "Không thể cập nhật thành viên project."),
+  });
+  const tko_removeProjectMember = trpc.work.removeProjectMember.useMutation({
+    onSuccess: async () => {
+      await tko_refreshBoard();
+      toast.success("Đã gỡ quyền truy cập project.");
+    },
+    onError: tko_error => toast.error(tko_error.message.includes("OWNER_MEMBER_REQUIRED") ? "Owner phải luôn giữ quyền editor trong project." : tko_error.message.includes("AUTHORIZATION") ? "Chỉ owner hoặc admin mới có thể gỡ thành viên project." : "Không thể gỡ thành viên project."),
   });
   const tko_update = trpc.work.updateItem.useMutation({
     onMutate: tko_input => {
@@ -878,13 +941,15 @@ export default function Work() {
 	          <button onClick={() => setTkoView("list")} className={`border-b-2 pb-2 ${tko_view === "list" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Backlog</button>
 	          <button onClick={() => setTkoView("timeline")} className={`border-b-2 pb-2 ${tko_view === "timeline" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Timeline</button>
 	          <button onClick={() => setTkoView("files")} className={`border-b-2 pb-2 ${tko_view === "files" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Files</button>
-        </nav>
+	          <button onClick={() => setTkoView("members")} className={`border-b-2 pb-2 ${tko_view === "members" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Members</button>
+	        </nav>
       </header>
 
       <main className="px-5 py-5 lg:px-7">
         {tko_view === "board" && isAuthenticated && tko_selectedProject ? <div className="mb-4 flex justify-end"><button type="button" onClick={() => setTkoColumnsOpen(true)} className="inline-flex h-8 items-center gap-1.5 border border-[#d0d5dd] bg-white px-3 text-xs font-semibold text-[#344054] hover:border-[#0c66e4] hover:bg-[#deebff] hover:text-[#0c66e4]"><Columns3 className="h-3.5 w-3.5" />Manage columns</button></div> : null}
         {tko_columnsOpen && tko_selectedProject ? <aside className="fixed right-4 top-4 z-[66] w-[min(19rem,calc(100vw-2rem))] border border-[#dfe1e6] bg-white p-3 shadow-[0_10px_28px_rgba(9,30,66,.24)]" aria-label="Reorder workflow columns"><div className="mb-2 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">Column order</p><p className="text-xs text-[#344054]">Move columns without losing their rules.</p></div><button type="button" onClick={() => setTkoColumnsOpen(false)} aria-label="Close column tools" className="grid h-7 w-7 place-items-center text-[#667085] hover:bg-[#f1f2f4]"><X className="h-4 w-4" /></button></div><div className="space-y-1">{tko_columns.filter(tko_column => tko_column.statusId).map((tko_column, tko_index, tko_managedColumns) => <div key={tko_column.statusId} className="flex items-center gap-2 border border-[#eaecf0] bg-[#fcfcfd] px-2 py-1.5"><span className={`h-2 w-2 shrink-0 rounded-full ${tko_column.accent}`} /><span className="min-w-0 flex-1 truncate text-xs font-medium text-[#344054]">{tko_column.label}</span><button type="button" aria-label={`Move ${tko_column.label} earlier`} disabled={tko_index === 0 || tko_reorderStatus.isPending} onClick={() => tko_column.statusId && tko_reorderStatus.mutate({ projectId: tko_selectedProject.id, statusId: tko_column.statusId, beforeStatusId: tko_managedColumns[tko_index - 1]?.statusId ?? null })} className="grid h-6 w-6 place-items-center border border-[#d0d5dd] text-[#44546f] hover:border-[#0c66e4] hover:text-[#0c66e4] disabled:cursor-not-allowed disabled:opacity-35"><ChevronUp className="h-3.5 w-3.5" /></button><button type="button" aria-label={`Move ${tko_column.label} later`} disabled={tko_index === tko_managedColumns.length - 1 || tko_reorderStatus.isPending} onClick={() => tko_column.statusId && tko_reorderStatus.mutate({ projectId: tko_selectedProject.id, statusId: tko_column.statusId, beforeStatusId: tko_managedColumns[tko_index + 2]?.statusId ?? null })} className="grid h-6 w-6 place-items-center border border-[#d0d5dd] text-[#44546f] hover:border-[#0c66e4] hover:text-[#0c66e4] disabled:cursor-not-allowed disabled:opacity-35"><ChevronDownIcon className="h-3.5 w-3.5" /></button></div>)}</div></aside> : null}
         {tko_isPreview && !tko_authLoading ? <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#fedf89] bg-[#fffaeb] px-3 py-2.5 text-xs text-[#93370d]"><Sparkles className="h-4 w-4" /><span>Work preview. Sign in to update your tenant-scoped project.</span><button onClick={startLogin} className="ml-auto font-semibold underline">Sign in</button></div> : null}
+        {tko_view === "members" ? <TkoProjectMembersPanel tko_projectId={tko_selectedProject?.id} tko_visibility={tko_board.data?.project.visibility ?? tko_selectedProject?.visibility ?? "internal"} tko_members={tko_projectMembers.data} tko_loading={tko_projectMembers.isLoading} tko_pending={tko_updateProjectVisibility.isPending || tko_upsertProjectMember.isPending || tko_removeProjectMember.isPending} tko_onVisibilityChange={tko_visibility => { if (tko_selectedProject) tko_updateProjectVisibility.mutate({ projectId: tko_selectedProject.id, visibility: tko_visibility }); }} tko_onRoleChange={(tko_member, tko_projectRole) => { if (!tko_selectedProject) return; if (tko_projectRole === "none") { if (tko_member.isProjectMember) tko_removeProjectMember.mutate({ projectId: tko_selectedProject.id, memberId: tko_member.id }); return; } tko_upsertProjectMember.mutate({ projectId: tko_selectedProject.id, memberId: tko_member.id, projectRole: tko_projectRole }); }} /> : null}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2">
             <div className="relative">

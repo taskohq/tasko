@@ -171,7 +171,7 @@ export const appRouter = router({
 
   work: router({
     spaces: tenantProcedure.query(({ ctx }) => getWorkStore().listSpaces(ctx.platform.actor.tenantId)),
-    projects: tenantProcedure.query(({ ctx }) => getWorkStore().listProjects(ctx.platform.actor.tenantId)),
+    projects: tenantProcedure.query(({ ctx }) => workService.projects(ctx.platform.actor)),
     assignees: tenantProcedure.query(async ({ ctx }) => {
       const tko_decision = can(ctx.platform.actor, "work.item.read", {
         tenantId: ctx.platform.actor.tenantId,
@@ -191,12 +191,16 @@ export const appRouter = router({
     overview: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.overview(ctx.platform.actor, input.projectId)),
     searchProject: tenantProcedure.input(z.object({ projectId: z.string().uuid(), query: z.string().trim().max(240).default(""), statusId: z.string().uuid().optional(), sprintId: z.string().uuid().optional(), assigneeMemberId: z.string().uuid().optional(), limit: z.number().int().min(1).max(100).optional() })).query(({ ctx, input }) => workService.searchProject(ctx.platform.actor, input)),
     projectFiles: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.projectFiles(ctx.platform.actor, input.projectId)),
+    projectMembers: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.projectMembers(ctx.platform.actor, input.projectId)),
     item: tenantProcedure.input(z.object({ workItemId: z.string().uuid() })).query(async ({ ctx, input }) => {
       return workService.itemDetails(ctx.platform.actor, input.workItemId);
     }),
     customFields: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.customFields(ctx.platform.actor, input.projectId)),
     createSpace: tenantProcedure.input(z.object({ name: z.string().trim().min(2).max(120), slug: z.string().trim().min(2).max(80), visibility: z.enum(["internal", "private", "guest_shared"]).default("internal") })).mutation(({ ctx, input }) => workService.createSpace(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     createProject: tenantProcedure.input(z.object({ spaceId: z.string().uuid(), name: z.string().trim().min(2).max(160), key: z.string().trim().min(2).max(10), description: z.string().max(10_000).optional(), methodology: z.enum(["kanban", "scrum", "simple"]).default("kanban"), visibility: z.enum(["internal", "private", "guest_shared"]).default("internal") })).mutation(({ ctx, input }) => workService.createProject({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
+    updateProjectVisibility: tenantProcedure.input(z.object({ projectId: z.string().uuid(), visibility: z.enum(["internal", "private", "guest_shared"]) })).mutation(({ ctx, input }) => workService.updateProjectVisibility(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    upsertProjectMember: tenantProcedure.input(z.object({ projectId: z.string().uuid(), memberId: z.string().uuid(), projectRole: z.enum(["viewer", "editor"]) })).mutation(({ ctx, input }) => workService.upsertProjectMember(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
+    removeProjectMember: tenantProcedure.input(z.object({ projectId: z.string().uuid(), memberId: z.string().uuid() })).mutation(({ ctx, input }) => workService.removeProjectMember(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     createItem: tenantProcedure.input(z.object({ projectId: z.string().uuid(), workTypeId: z.string().uuid().optional(), parentId: z.string().uuid().nullable().optional(), title: z.string().trim().min(1).max(500), description: z.string().max(50_000).optional(), checklistItems: z.array(z.string().trim().min(1).max(1_000)).max(100).optional(), priority: z.enum(["none", "low", "medium", "high", "urgent"]).default("none"), assigneeMemberIds: z.array(z.string().uuid()).max(50).default([]), startAt: z.date().nullable().optional(), dueAt: z.date().nullable().optional(), estimateMinutes: z.number().int().min(0).max(1_000_000).nullable().optional(), rank: z.string().min(1).max(80).optional() })).mutation(({ ctx, input }) => workService.createWorkItem({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
     transitionItem: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), targetStatusId: z.string().uuid(), expectedVersion: z.number().int().positive() })).mutation(({ ctx, input }) => workService.transitionWorkItem({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
     moveItem: tenantProcedure.input(z.object({ workItemId: z.string().uuid(), targetStatusId: z.string().uuid(), beforeWorkItemId: z.string().uuid().nullable().optional(), expectedVersion: z.number().int().positive() })).mutation(({ ctx, input }) => workService.moveWorkItem({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),

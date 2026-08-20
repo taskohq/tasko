@@ -113,6 +113,7 @@ export interface TenantResource {
   id: string;
   visibility?: "internal" | "private" | "guest_shared";
   explicitMemberIds?: readonly string[];
+  projectMemberRole?: "viewer" | "editor";
 }
 
 export interface AuthorizationDecision {
@@ -123,7 +124,8 @@ export interface AuthorizationDecision {
     | "tenant_mismatch"
     | "capability_missing"
     | "private_resource"
-    | "guest_scope_missing";
+    | "guest_scope_missing"
+    | "project_role_read_only";
 }
 
 export interface OutboxRecord {

@@ -346,4 +346,36 @@ describe("Work Alpha acceptance boundaries", () => {
     expect((await tko_platformStore.listAuditLogs()).some(tko_event => tko_event.action === "work.work_item.archived" && tko_event.resourceId === tko_item.id)).toBe(true);
     expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.work_item_archived.v1" && tko_event.payload.workItemId === tko_item.id)).toBe(true);
   });
+
+  it("shares private projects through explicit project roles while preserving viewer limits, admin control, audit/outbox and tenant isolation", async () => {
+    const tko_owner = await tko_actor();
+    const tko_member = await tko_actor("demo-member:tasko-demo");
+    const tko_admin = await tko_actor("demo-admin:tasko-demo");
+    const tko_otherTenant = { ...tko_owner, authSubject: tko_otherSubject, tenantId: "tko-tenant-other-workspace", tenantSlug: "other-workspace", memberId: "tko-member-other-workspace-owner", correlationId: "test:project-sharing-other-tenant" };
+    const tko_space = await work.createSpace(tko_owner, { name: "Secure delivery", slug: "secure-delivery", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Private launch", key: "PRIV", methodology: "kanban", visibility: "private", correlationId: tko_owner.correlationId });
+    const tko_item = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Owner-only initial task", correlationId: tko_owner.correlationId });
+
+    expect((await work.projects(tko_member)).map(tko_entry => tko_entry.id)).not.toContain(tko_project.id);
+    await expect(work.board(tko_member, tko_project.id)).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:private_resource");
+    await expect(work.updateProjectVisibility(tko_member, { projectId: tko_project.id, visibility: "internal", correlationId: tko_member.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+    await expect(work.upsertProjectMember(tko_otherTenant, { projectId: tko_project.id, memberId: tko_member.memberId, projectRole: "viewer", correlationId: tko_otherTenant.correlationId })).rejects.toThrow("WORK_PROJECT_NOT_FOUND");
+
+    await work.upsertProjectMember(tko_owner, { projectId: tko_project.id, memberId: tko_member.memberId, projectRole: "viewer", correlationId: tko_owner.correlationId });
+    const tko_roster = await work.projectMembers(tko_owner, tko_project.id);
+    expect(tko_roster).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_owner.memberId, isOwner: true, projectRole: "editor" }), expect.objectContaining({ id: tko_member.memberId, isProjectMember: true, projectRole: "viewer" })]));
+    expect((await work.projects(tko_member)).map(tko_entry => tko_entry.id)).toContain(tko_project.id);
+    expect((await work.board(tko_member, tko_project.id)).project.id).toBe(tko_project.id);
+    await expect(work.updateWorkItem({ actor: tko_member, workItemId: tko_item.id, expectedVersion: tko_item.version, title: "Viewer must not edit", correlationId: tko_member.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:project_role_read_only");
+
+    await work.upsertProjectMember(tko_owner, { projectId: tko_project.id, memberId: tko_member.memberId, projectRole: "editor", correlationId: tko_owner.correlationId });
+    const tko_updated = await work.updateWorkItem({ actor: tko_member, workItemId: tko_item.id, expectedVersion: tko_item.version, title: "Editor can update", correlationId: tko_member.correlationId });
+    expect(tko_updated.title).toBe("Editor can update");
+    await work.updateProjectVisibility(tko_admin, { projectId: tko_project.id, visibility: "guest_shared", correlationId: tko_admin.correlationId });
+    await work.removeProjectMember(tko_owner, { projectId: tko_project.id, memberId: tko_member.memberId, correlationId: tko_owner.correlationId });
+    expect((await work.projectMembers(tko_owner, tko_project.id)).find(tko_entry => tko_entry.id === tko_member.memberId)).toEqual(expect.objectContaining({ isProjectMember: false, projectRole: null }));
+    await expect(work.removeProjectMember(tko_owner, { projectId: tko_project.id, memberId: tko_owner.memberId, correlationId: tko_owner.correlationId })).rejects.toThrow("WORK_PROJECT_OWNER_MEMBER_REQUIRED");
+    expect((await tko_platformStore.listAuditLogs()).filter(tko_event => ["work.project.member_upserted", "work.project.visibility_updated", "work.project.member_removed"].includes(tko_event.action))).toHaveLength(4);
+    expect((await tko_platformStore.listOutbox()).filter(tko_event => ["work.project_member_upserted.v1", "work.project_visibility_updated.v1", "work.project_member_removed.v1"].includes(tko_event.eventType))).toHaveLength(4);
+  });
 });

@@ -8,6 +8,7 @@ export type WorkflowStatusCategory = "todo" | "in_progress" | "done";
 export type WorkItemRelationType = "blocks" | "blocked_by" | "relates_to" | "duplicates" | "duplicated_by";
 export type SprintState = "planned" | "active" | "completed";
 export type SavedViewRenderer = "list" | "board" | "calendar" | "timeline";
+export type ProjectMemberRole = "viewer" | "editor";
 export const tko_customFieldTypes = ["text", "long_text", "number", "boolean", "date", "datetime", "single_select", "multi_select", "user", "url", "email"] as const;
 export type WorkCustomFieldType = (typeof tko_customFieldTypes)[number];
 
@@ -26,10 +27,21 @@ export interface WorkProject extends TenantResource {
   description: string;
   ownerMemberId: string;
   visibility: "internal" | "private" | "guest_shared";
+  explicitMemberIds: string[];
+  projectMemberRoles: Record<string, ProjectMemberRole>;
   methodology: ProjectMethodology;
   workflowId: string;
   sequenceCounter: number;
   archivedAt: Date | null;
+}
+
+export interface ProjectMember extends TenantResource {
+  type: "project_member";
+  projectId: string;
+  memberId: string;
+  projectRole: ProjectMemberRole;
+  addedByMemberId: string;
+  createdAt: Date;
 }
 
 export interface WorkflowStatus extends TenantResource {
@@ -170,6 +182,28 @@ export interface CreateProjectInput {
   description?: string;
   methodology: ProjectMethodology;
   visibility: WorkProject["visibility"];
+  correlationId: string;
+}
+
+export interface UpdateProjectVisibilityInput {
+  actor: PlatformActor;
+  projectId: string;
+  visibility: WorkProject["visibility"];
+  correlationId: string;
+}
+
+export interface UpsertProjectMemberInput {
+  actor: PlatformActor;
+  projectId: string;
+  memberId: string;
+  projectRole: ProjectMemberRole;
+  correlationId: string;
+}
+
+export interface RemoveProjectMemberInput {
+  actor: PlatformActor;
+  projectId: string;
+  memberId: string;
   correlationId: string;
 }
 

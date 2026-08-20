@@ -74,6 +74,16 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
   ],
 };
 
+const tko_viewerRestrictedCapabilities = new Set<Capability>([
+  "work.project.manage",
+  "work.item.create",
+  "work.item.update",
+  "work.item.transition",
+  "work.item.archive",
+  "work.sprint.manage",
+  "work.custom_field.manage",
+]);
+
 function denied(tko_reason: AuthorizationDecision["reason"]): AuthorizationDecision {
   return { allowed: false, reason: tko_reason };
 }
@@ -84,11 +94,15 @@ export function can(tko_actor: PlatformActor, tko_action: Capability, tko_resour
   if (!tko_roleCapabilities[tko_actor.role].includes(tko_action)) return denied("capability_missing");
   if (tko_resource.visibility === "private") {
     const tko_explicitMembers = tko_resource.explicitMemberIds ?? [];
-    if (!tko_explicitMembers.includes(tko_actor.memberId) && tko_actor.role !== "owner") return denied("private_resource");
+    const tko_privateManagementOverride = tko_action === "work.project.manage" && (tko_actor.role === "owner" || tko_actor.role === "admin");
+    if (!tko_explicitMembers.includes(tko_actor.memberId) && tko_actor.role !== "owner" && !tko_privateManagementOverride) return denied("private_resource");
   }
   if (tko_actor.role === "guest") {
     const tko_granted = tko_resource.visibility === "guest_shared" || (tko_resource.explicitMemberIds ?? []).includes(tko_actor.memberId);
     if (!tko_granted) return denied("guest_scope_missing");
+  }
+  if (tko_resource.projectMemberRole === "viewer" && tko_actor.role !== "owner" && tko_actor.role !== "admin" && tko_viewerRestrictedCapabilities.has(tko_action)) {
+    return denied("project_role_read_only");
   }
   return { allowed: true, reason: "allowed" };
 }

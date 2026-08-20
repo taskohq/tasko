@@ -19,10 +19,15 @@ import type { Capability, PlatformActor, TenantResource } from "../../../package
 import { getPlatformStore } from "../../../packages/database/src/platform-store";
 import { getWorkStore } from "../../../packages/database/src/work-store";
 import { getTenantAttachmentDownloadUrl, uploadTenantAttachment } from "../../attachments/src/attachment-storage";
-import { requireCapability } from "../../permissions/src/authorization";
+import { can, requireCapability } from "../../permissions/src/authorization";
 
 function tko_workResource(tko_actor: PlatformActor, tko_resource: Omit<TenantResource, "tenantId">): TenantResource {
-  return { ...tko_resource, tenantId: tko_actor.tenantId };
+  const tko_project = tko_resource as Partial<WorkProject>;
+  return {
+    ...tko_resource,
+    tenantId: tko_actor.tenantId,
+    projectMemberRole: tko_resource.projectMemberRole ?? tko_project.projectMemberRoles?.[tko_actor.memberId],
+  };
 }
 
 function tko_require(tko_actor: PlatformActor, tko_capability: Capability, tko_resource: Omit<TenantResource, "tenantId">): void {
@@ -32,13 +37,23 @@ function tko_require(tko_actor: PlatformActor, tko_capability: Capability, tko_r
 async function tko_projectFor(tko_actor: PlatformActor, tko_projectId: string): Promise<WorkProject> {
   const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_projectId);
   if (!tko_project || tko_project.archivedAt) throw new Error("WORK_PROJECT_NOT_FOUND");
-  return tko_project;
+  const tko_projectMembers = await getWorkStore().listProjectMembers(tko_actor.tenantId, tko_project.id);
+  return {
+    ...tko_project,
+    projectMemberRoles: Object.fromEntries(tko_projectMembers.map(tko_member => [tko_member.memberId, tko_member.projectRole])),
+  };
 }
 
-async function tko_itemFor(tko_actor: PlatformActor, tko_workItemId: string): Promise<WorkItem> {
+async function tko_itemFor(tko_actor: PlatformActor, tko_workItemId: string): Promise<WorkItem & Pick<TenantResource, "visibility" | "explicitMemberIds" | "projectMemberRole">> {
   const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_workItemId);
   if (!tko_item || tko_item.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
-  return tko_item;
+  const tko_project = await tko_projectFor(tko_actor, tko_item.projectId);
+  return {
+    ...tko_item,
+    visibility: tko_project.visibility,
+    explicitMemberIds: Object.keys(tko_project.projectMemberRoles ?? {}),
+    projectMemberRole: tko_project.projectMemberRoles?.[tko_actor.memberId],
+  };
 }
 
 export async function createSpace(tko_actor: PlatformActor, tko_input: { name: string; slug: string; visibility: "internal" | "private" | "guest_shared"; correlationId: string }) {
@@ -52,6 +67,55 @@ export async function createProject(tko_input: CreateProjectInput) {
   if (!tko_space) throw new Error("WORK_SPACE_NOT_FOUND");
   tko_require(tko_input.actor, "work.project.manage", tko_space);
   return getWorkStore().createProject(tko_input);
+}
+
+export async function projects(tko_actor: PlatformActor) {
+  const tko_projects = await getWorkStore().listProjects(tko_actor.tenantId);
+  return tko_projects.filter(tko_project => can(tko_actor, "work.project.read", tko_workResource(tko_actor, tko_project)).allowed);
+}
+
+export async function projectMembers(tko_actor: PlatformActor, tko_projectId: string) {
+  const tko_project = await tko_projectFor(tko_actor, tko_projectId);
+  tko_require(tko_actor, "work.project.read", tko_project);
+  const [tko_tenantMembers, tko_projectMembers] = await Promise.all([
+    getPlatformStore().listTenantMembers(tko_actor.tenantId),
+    getWorkStore().listProjectMembers(tko_actor.tenantId, tko_project.id),
+  ]);
+  const tko_projectMemberByMemberId = new Map(tko_projectMembers.map(tko_member => [tko_member.memberId, tko_member]));
+  return tko_tenantMembers
+    .filter(tko_member => tko_member.status === "active")
+    .map(tko_member => {
+      const tko_assignment = tko_projectMemberByMemberId.get(tko_member.id);
+      return {
+        id: tko_member.id,
+        displayName: tko_member.displayName,
+        tenantRole: tko_member.role,
+        projectRole: tko_assignment?.projectRole ?? null,
+        isProjectMember: !!tko_assignment,
+        isOwner: tko_member.id === tko_project.ownerMemberId,
+      };
+    });
+}
+
+export async function updateProjectVisibility(tko_actor: PlatformActor, tko_input: { projectId: string; visibility: WorkProject["visibility"]; correlationId: string }) {
+  const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  return getWorkStore().updateProjectVisibility({ actor: tko_actor, ...tko_input });
+}
+
+export async function upsertProjectMember(tko_actor: PlatformActor, tko_input: { projectId: string; memberId: string; projectRole: "viewer" | "editor"; correlationId: string }) {
+  const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  const tko_member = (await getPlatformStore().listTenantMembers(tko_actor.tenantId)).find(tko_entry => tko_entry.id === tko_input.memberId && tko_entry.status === "active");
+  if (!tko_member) throw new Error("WORK_PROJECT_MEMBER_INVALID");
+  if (tko_project.ownerMemberId === tko_input.memberId && tko_input.projectRole !== "editor") throw new Error("WORK_PROJECT_OWNER_EDITOR_REQUIRED");
+  return getWorkStore().upsertProjectMember({ actor: tko_actor, ...tko_input });
+}
+
+export async function removeProjectMember(tko_actor: PlatformActor, tko_input: { projectId: string; memberId: string; correlationId: string }) {
+  const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  return getWorkStore().removeProjectMember({ actor: tko_actor, ...tko_input });
 }
 
 export async function board(tko_actor: PlatformActor, tko_projectId: string) {

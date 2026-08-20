@@ -7,7 +7,12 @@ import type {
   CreateSprintInput,
   CreateWorkItemInput,
   MoveWorkItemInput,
+  ProjectMember,
+  ProjectMemberRole,
+  RemoveProjectMemberInput,
+  UpdateProjectVisibilityInput,
   UpdateWorkItemInput,
+  UpsertProjectMemberInput,
   ProjectMethodology,
   TransitionWorkItemInput,
   WorkComment,
@@ -55,6 +60,10 @@ export interface WorkStore {
   createProject(tko_input: CreateProjectInput): Promise<WorkProject>;
   listProjects(tko_tenantId: string): Promise<WorkProject[]>;
   getProject(tko_tenantId: string, tko_projectId: string): Promise<WorkProject | null>;
+  listProjectMembers(tko_tenantId: string, tko_projectId: string): Promise<ProjectMember[]>;
+  updateProjectVisibility(tko_input: UpdateProjectVisibilityInput): Promise<WorkProject>;
+  upsertProjectMember(tko_input: UpsertProjectMemberInput): Promise<ProjectMember>;
+  removeProjectMember(tko_input: RemoveProjectMemberInput): Promise<void>;
   listStatuses(tko_tenantId: string, tko_workflowId: string): Promise<WorkflowStatus[]>;
   createStatus(tko_actor: PlatformActor, tko_input: { projectId: string; name: string; category: WorkflowStatus["category"]; colorToken: string; description?: string; correlationId: string }): Promise<WorkflowStatus>;
   updateStatus(tko_actor: PlatformActor, tko_input: { projectId: string; statusId: string; name?: string; category?: WorkflowStatus["category"]; colorToken?: string; description?: string; correlationId: string }): Promise<WorkflowStatus>;
@@ -133,6 +142,7 @@ function tko_now(): Date {
 export class MemoryWorkStore implements WorkStore {
   private readonly tko_spaces = new Map<string, WorkSpace>();
   private readonly tko_projects = new Map<string, WorkProject>();
+  private readonly tko_projectMembers = new Map<string, ProjectMember>();
   private readonly tko_statuses = new Map<string, WorkflowStatus>();
   private readonly tko_workTypes = new Map<string, WorkType>();
   private readonly tko_items = new Map<string, WorkItem>();
@@ -184,9 +194,16 @@ export class MemoryWorkStore implements WorkStore {
       id: tko_projectId, tenantId: tko_input.actor.tenantId, type: "project", spaceId: tko_space.id,
       key: tko_key, name: tko_input.name.trim(), description: tko_input.description?.trim() ?? "",
       ownerMemberId: tko_input.actor.memberId, visibility: tko_input.visibility, methodology: tko_input.methodology,
+      explicitMemberIds: [tko_input.actor.memberId], projectMemberRoles: { [tko_input.actor.memberId]: "editor" },
       workflowId: tko_workflowId, sequenceCounter: 0, archivedAt: null,
     };
     this.tko_projects.set(tko_project.id, tko_project);
+    const tko_ownerMembership: ProjectMember = {
+      id: `${tko_project.id}:${tko_input.actor.memberId}`, tenantId: tko_project.tenantId, type: "project_member",
+      projectId: tko_project.id, memberId: tko_input.actor.memberId, projectRole: "editor",
+      addedByMemberId: tko_input.actor.memberId, createdAt: tko_now(),
+    };
+    this.tko_projectMembers.set(tko_ownerMembership.id, tko_ownerMembership);
     await this.tko_emit(tko_input.actor, "work.project_created.v1", "work.project", { projectId: tko_project.id, key: tko_project.key, methodology: tko_project.methodology }, "work.project.created", "project", tko_project.id, tko_input.correlationId);
     return tko_clone(tko_project);
   }
@@ -198,6 +215,56 @@ export class MemoryWorkStore implements WorkStore {
   async getProject(tko_tenantId: string, tko_projectId: string): Promise<WorkProject | null> {
     const tko_project = this.tko_projects.get(tko_projectId);
     return tko_project?.tenantId === tko_tenantId ? tko_clone(tko_project) : null;
+  }
+
+  async listProjectMembers(tko_tenantId: string, tko_projectId: string): Promise<ProjectMember[]> {
+    return Array.from(this.tko_projectMembers.values())
+      .filter(tko_member => tko_member.tenantId === tko_tenantId && tko_member.projectId === tko_projectId)
+      .sort((tko_left, tko_right) => tko_left.createdAt.getTime() - tko_right.createdAt.getTime())
+      .map(tko_clone);
+  }
+
+  async updateProjectVisibility(tko_input: UpdateProjectVisibilityInput): Promise<WorkProject> {
+    const tko_project = this.tko_projects.get(tko_input.projectId);
+    if (!tko_project || tko_project.tenantId !== tko_input.actor.tenantId || tko_project.archivedAt) throw new Error("WORK_PROJECT_NOT_FOUND");
+    const tko_before = tko_project.visibility;
+    tko_project.visibility = tko_input.visibility;
+    this.tko_projects.set(tko_project.id, tko_project);
+    await this.tko_emit(tko_input.actor, "work.project_visibility_updated.v1", "work.project", { projectId: tko_project.id, before: tko_before, after: tko_project.visibility }, "work.project.visibility_updated", "project", tko_project.id, tko_input.correlationId);
+    return tko_clone(tko_project);
+  }
+
+  async upsertProjectMember(tko_input: UpsertProjectMemberInput): Promise<ProjectMember> {
+    const tko_project = this.tko_projects.get(tko_input.projectId);
+    if (!tko_project || tko_project.tenantId !== tko_input.actor.tenantId || tko_project.archivedAt) throw new Error("WORK_PROJECT_NOT_FOUND");
+    const tko_id = `${tko_project.id}:${tko_input.memberId}`;
+    const tko_existing = this.tko_projectMembers.get(tko_id);
+    const tko_member: ProjectMember = {
+      id: tko_id, tenantId: tko_project.tenantId, type: "project_member", projectId: tko_project.id,
+      memberId: tko_input.memberId, projectRole: tko_input.projectRole,
+      addedByMemberId: tko_existing?.addedByMemberId ?? tko_input.actor.memberId,
+      createdAt: tko_existing?.createdAt ?? tko_now(),
+    };
+    this.tko_projectMembers.set(tko_id, tko_member);
+    tko_project.explicitMemberIds = Array.from(new Set([...tko_project.explicitMemberIds, tko_member.memberId]));
+    tko_project.projectMemberRoles[tko_member.memberId] = tko_member.projectRole;
+    this.tko_projects.set(tko_project.id, tko_project);
+    await this.tko_emit(tko_input.actor, "work.project_member_upserted.v1", "work.project", { projectId: tko_project.id, memberId: tko_member.memberId, beforeRole: tko_existing?.projectRole ?? null, projectRole: tko_member.projectRole }, "work.project.member_upserted", "project", tko_project.id, tko_input.correlationId);
+    return tko_clone(tko_member);
+  }
+
+  async removeProjectMember(tko_input: RemoveProjectMemberInput): Promise<void> {
+    const tko_project = this.tko_projects.get(tko_input.projectId);
+    if (!tko_project || tko_project.tenantId !== tko_input.actor.tenantId || tko_project.archivedAt) throw new Error("WORK_PROJECT_NOT_FOUND");
+    if (tko_project.ownerMemberId === tko_input.memberId) throw new Error("WORK_PROJECT_OWNER_MEMBER_REQUIRED");
+    const tko_id = `${tko_project.id}:${tko_input.memberId}`;
+    const tko_existing = this.tko_projectMembers.get(tko_id);
+    if (!tko_existing) throw new Error("WORK_PROJECT_MEMBER_NOT_FOUND");
+    this.tko_projectMembers.delete(tko_id);
+    tko_project.explicitMemberIds = tko_project.explicitMemberIds.filter(tko_memberId => tko_memberId !== tko_input.memberId);
+    delete tko_project.projectMemberRoles[tko_input.memberId];
+    this.tko_projects.set(tko_project.id, tko_project);
+    await this.tko_emit(tko_input.actor, "work.project_member_removed.v1", "work.project", { projectId: tko_project.id, memberId: tko_input.memberId, projectRole: tko_existing.projectRole }, "work.project.member_removed", "project", tko_project.id, tko_input.correlationId);
   }
 
   async listStatuses(tko_tenantId: string, tko_workflowId: string): Promise<WorkflowStatus[]> {
