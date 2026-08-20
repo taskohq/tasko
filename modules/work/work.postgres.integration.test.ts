@@ -9,6 +9,8 @@ const tko_describe = tko_postgresUrl && process.env.TASKO_RUN_POSTGRES_INTEGRATI
 
 async function tko_cleanupTenant(tko_pool: Pool, tko_tenantId: string, tko_userId: string): Promise<void> {
   for (const tko_table of [
+    "work_item_attachments",
+    "work_item_checklist_items",
     "work_item_assignees",
     "work_item_labels",
     "work_item_history",
@@ -81,6 +83,93 @@ tko_describe("Work Sprint planning on PostgreSQL", () => {
 
       expect(tko_sprintByWorkItem.get(tko_doneItem.id)).toBe(tko_current.id);
       expect(tko_sprintByWorkItem.get(tko_openItem.id)).toBe(tko_next.id);
+      expect(tko_effects.rows[0]).toMatchObject({ audits: "1", events: "1" });
+    } finally {
+      await tko_cleanupTenant(tko_pool, tko_tenantId, tko_userId);
+      await tko_pool.end();
+    }
+  });
+
+  it("persists rich task checklist, attachment metadata and configured workflow columns tenant-safely", async () => {
+    const tko_pool = new Pool({ connectionString: tko_postgresUrl });
+    const tko_store = new PostgresWorkStore(tko_postgresUrl!);
+    const tko_tenantId = randomUUID();
+    const tko_userId = randomUUID();
+    const tko_memberId = randomUUID();
+    const tko_actor: PlatformActor = {
+      authSubject: `postgres-rich-work-test:${tko_tenantId}`,
+      tenantId: tko_tenantId,
+      tenantSlug: `postgres-rich-work-${tko_tenantId.slice(0, 8)}`,
+      memberId: tko_memberId,
+      role: "owner",
+      membershipStatus: "active",
+      correlationId: `postgres-rich-work-${tko_tenantId}`,
+    };
+
+    try {
+      await tko_pool.query("insert into tenants (id,slug,name,status,deployment_profile) values ($1,$2,$3,'active','single_tenant')", [tko_tenantId, tko_actor.tenantSlug, "PostgreSQL Rich Work Acceptance"]);
+      await tko_pool.query("insert into users (id,auth_subject,status) values ($1,$2,'active')", [tko_userId, tko_actor.authSubject]);
+      await tko_pool.query("insert into tenant_members (id,tenant_id,user_id,role,status,display_name) values ($1,$2,$3,'owner','active','PostgreSQL Rich Work Owner')", [tko_memberId, tko_tenantId, tko_userId]);
+
+      const tko_space = await tko_store.createSpace(tko_actor, { name: "Delivery", slug: `delivery-${tko_tenantId.slice(0, 6)}`, visibility: "internal", correlationId: tko_actor.correlationId });
+      const tko_project = await tko_store.createProject({ actor: tko_actor, spaceId: tko_space.id, name: "Rich delivery", key: `R${tko_tenantId.replaceAll("-", "").slice(0, 7)}`, methodology: "kanban", visibility: "internal", correlationId: tko_actor.correlationId });
+      const tko_item = await tko_store.createWorkItem({ actor: tko_actor, projectId: tko_project.id, title: "Publish release notes", description: "Include approvals and source evidence.", checklistItems: ["Collect approvals", "Link source"], correlationId: tko_actor.correlationId });
+      const tko_status = await tko_store.createStatus(tko_actor, { projectId: tko_project.id, name: "Security review", description: "Security sign-off is required.", category: "in_progress", colorToken: "purple", correlationId: tko_actor.correlationId });
+      const tko_attachment = await tko_store.createAttachment(tko_actor, { workItemId: tko_item.id, objectKey: `tenants/${tko_tenantId}/attachments/release-notes.pdf`, filename: "release-notes.pdf", contentType: "application/pdf", byteSize: 2048, correlationId: tko_actor.correlationId });
+      const tko_checklist = await tko_store.listChecklistItems(tko_tenantId, tko_item.id);
+      await tko_store.toggleChecklistItem(tko_actor, { workItemId: tko_item.id, checklistItemId: tko_checklist[0].id, completed: true, correlationId: tko_actor.correlationId });
+
+      const tko_rows = await tko_pool.query(
+        "select (select count(*) from work_item_checklist_items where tenant_id=$1 and work_item_id=$2 and completed_at is not null) as completed, (select count(*) from work_item_attachments where tenant_id=$1 and work_item_id=$2 and id=$3) as attachments, (select count(*) from workflow_statuses where tenant_id=$1 and workflow_id=$4 and id=$5 and description=$6 and color_token='purple') as columns, (select count(*) from audit_logs where tenant_id=$1 and action='work.workflow_status.created') as audits, (select count(*) from outbox where tenant_id=$1 and event_type='work.workflow_status_created.v1') as events",
+        [tko_tenantId, tko_item.id, tko_attachment.id, tko_project.workflowId, tko_status.id, "Security sign-off is required."],
+      );
+
+      expect(tko_rows.rows[0]).toMatchObject({ completed: "1", attachments: "1", columns: "1", audits: "1", events: "1" });
+      expect(await tko_store.listAttachments(randomUUID(), tko_item.id)).toEqual([]);
+    } finally {
+      await tko_cleanupTenant(tko_pool, tko_tenantId, tko_userId);
+      await tko_pool.end();
+    }
+  });
+
+  it("persists reordered workflow column sort order with transactional audit and outbox evidence", async () => {
+    const tko_pool = new Pool({ connectionString: tko_postgresUrl });
+    const tko_store = new PostgresWorkStore(tko_postgresUrl!);
+    const tko_tenantId = randomUUID();
+    const tko_userId = randomUUID();
+    const tko_memberId = randomUUID();
+    const tko_actor: PlatformActor = {
+      authSubject: `postgres-workflow-order-test:${tko_tenantId}`,
+      tenantId: tko_tenantId,
+      tenantSlug: `postgres-workflow-order-${tko_tenantId.slice(0, 8)}`,
+      memberId: tko_memberId,
+      role: "owner",
+      membershipStatus: "active",
+      correlationId: `postgres-workflow-order-${tko_tenantId}`,
+    };
+
+    try {
+      await tko_pool.query("insert into tenants (id,slug,name,status,deployment_profile) values ($1,$2,$3,'active','single_tenant')", [tko_tenantId, tko_actor.tenantSlug, "PostgreSQL Workflow Order Acceptance"]);
+      await tko_pool.query("insert into users (id,auth_subject,status) values ($1,$2,'active')", [tko_userId, tko_actor.authSubject]);
+      await tko_pool.query("insert into tenant_members (id,tenant_id,user_id,role,status,display_name) values ($1,$2,$3,'owner','active','PostgreSQL Workflow Order Owner')", [tko_memberId, tko_tenantId, tko_userId]);
+
+      const tko_space = await tko_store.createSpace(tko_actor, { name: "Workflow ordering", slug: `workflow-order-${tko_tenantId.slice(0, 6)}`, visibility: "internal", correlationId: tko_actor.correlationId });
+      const tko_project = await tko_store.createProject({ actor: tko_actor, spaceId: tko_space.id, name: "Workflow ordering", key: `O${tko_tenantId.replaceAll("-", "").slice(0, 7)}`, methodology: "kanban", visibility: "internal", correlationId: tko_actor.correlationId });
+      const tko_before = await tko_store.listStatuses(tko_tenantId, tko_project.workflowId);
+      const tko_todo = tko_before.find(tko_status => tko_status.category === "todo");
+      if (!tko_todo) throw new Error("TEST_TODO_STATUS_MISSING");
+      const tko_security = await tko_store.createStatus(tko_actor, { projectId: tko_project.id, name: "Security review", category: "in_progress", colorToken: "purple", correlationId: tko_actor.correlationId });
+
+      const tko_reordered = await tko_store.reorderStatus({ actor: tko_actor, projectId: tko_project.id, statusId: tko_security.id, beforeStatusId: tko_todo.id, correlationId: tko_actor.correlationId });
+      const tko_persisted = await tko_pool.query("select id,sort_order from workflow_statuses where tenant_id=$1 and workflow_id=$2 order by sort_order", [tko_tenantId, tko_project.workflowId]);
+      const tko_effects = await tko_pool.query(
+        "select (select count(*) from audit_logs where tenant_id=$1 and action='work.workflow_status.reordered' and metadata_json->>'statusId'=$2) as audits, (select count(*) from outbox where tenant_id=$1 and event_type='work.workflow_status_reordered.v1' and payload_json->>'statusId'=$2) as events",
+        [tko_tenantId, tko_security.id],
+      );
+
+      expect(tko_reordered.map(tko_status => tko_status.id)[0]).toBe(tko_security.id);
+      expect(tko_persisted.rows.map(tko_row => String(tko_row.id))).toEqual(tko_reordered.map(tko_status => tko_status.id));
+      expect(tko_persisted.rows.map(tko_row => Number(tko_row.sort_order))).toEqual([100, 200, 300, 400]);
       expect(tko_effects.rows[0]).toMatchObject({ audits: "1", events: "1" });
     } finally {
       await tko_cleanupTenant(tko_pool, tko_tenantId, tko_userId);

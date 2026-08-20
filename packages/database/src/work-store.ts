@@ -2,6 +2,7 @@ import type {
   CreateCommentInput,
   CompleteSprintInput,
   CreateProjectInput,
+  ReorderWorkflowStatusInput,
   CreateSprintInput,
   CreateWorkItemInput,
   MoveWorkItemInput,
@@ -9,6 +10,8 @@ import type {
   ProjectMethodology,
   TransitionWorkItemInput,
   WorkComment,
+  WorkChecklistItem,
+  WorkAttachment,
   WorkCustomFieldDefinition,
   WorkCustomFieldType,
   WorkCustomFieldValue,
@@ -52,6 +55,9 @@ export interface WorkStore {
   listProjects(tko_tenantId: string): Promise<WorkProject[]>;
   getProject(tko_tenantId: string, tko_projectId: string): Promise<WorkProject | null>;
   listStatuses(tko_tenantId: string, tko_workflowId: string): Promise<WorkflowStatus[]>;
+  createStatus(tko_actor: PlatformActor, tko_input: { projectId: string; name: string; category: WorkflowStatus["category"]; colorToken: string; description?: string; correlationId: string }): Promise<WorkflowStatus>;
+  updateStatus(tko_actor: PlatformActor, tko_input: { projectId: string; statusId: string; name?: string; category?: WorkflowStatus["category"]; colorToken?: string; description?: string; correlationId: string }): Promise<WorkflowStatus>;
+  reorderStatus(tko_input: ReorderWorkflowStatusInput): Promise<WorkflowStatus[]>;
   listWorkTypes(tko_tenantId: string, tko_projectId: string): Promise<WorkType[]>;
   createCustomField(tko_actor: PlatformActor, tko_input: { projectId: string; name: string; fieldType: WorkCustomFieldType; config?: Record<string, unknown>; correlationId: string }): Promise<WorkCustomFieldDefinition>;
   listCustomFields(tko_tenantId: string, tko_projectId: string): Promise<WorkCustomFieldDefinition[]>;
@@ -65,6 +71,11 @@ export interface WorkStore {
   updateWorkItem(tko_input: UpdateWorkItemInput): Promise<WorkItem>;
   createComment(tko_input: CreateCommentInput): Promise<WorkComment>;
   listComments(tko_tenantId: string, tko_workItemId: string): Promise<WorkComment[]>;
+  listChecklistItems(tko_tenantId: string, tko_workItemId: string): Promise<WorkChecklistItem[]>;
+  createChecklistItem(tko_actor: PlatformActor, tko_input: { workItemId: string; body: string; correlationId: string }): Promise<WorkChecklistItem>;
+  toggleChecklistItem(tko_actor: PlatformActor, tko_input: { workItemId: string; checklistItemId: string; completed: boolean; correlationId: string }): Promise<WorkChecklistItem>;
+  createAttachment(tko_actor: PlatformActor, tko_input: Omit<WorkAttachment, "id" | "tenantId" | "type" | "uploadedByMemberId" | "createdAt"> & { correlationId: string }): Promise<WorkAttachment>;
+  listAttachments(tko_tenantId: string, tko_workItemId: string): Promise<WorkAttachment[]>;
   addDependency(tko_actor: PlatformActor, tko_input: { sourceWorkItemId: string; targetWorkItemId: string; relationType: WorkItemRelationType; correlationId: string }): Promise<void>;
   listDependencies(tko_tenantId: string, tko_workItemId: string): Promise<WorkItemRelation[]>;
   removeDependency(tko_actor: PlatformActor, tko_input: { workItemId: string; relationId: string; correlationId: string }): Promise<void>;
@@ -123,6 +134,8 @@ export class MemoryWorkStore implements WorkStore {
   private readonly tko_workTypes = new Map<string, WorkType>();
   private readonly tko_items = new Map<string, WorkItem>();
   private readonly tko_comments = new Map<string, WorkComment>();
+  private readonly tko_checklistItems = new Map<string, WorkChecklistItem>();
+  private readonly tko_attachments = new Map<string, WorkAttachment>();
   private readonly tko_sprints = new Map<string, WorkSprint>();
   private readonly tko_sprintItems = new Map<string, Set<string>>();
   private readonly tko_views = new Map<string, WorkSavedView>();
@@ -157,7 +170,7 @@ export class MemoryWorkStore implements WorkStore {
     const tko_workflowId = crypto.randomUUID();
     const tko_projectId = crypto.randomUUID();
     for (const tko_status of tko_defaultStatuses) {
-      const tko_record: WorkflowStatus = { id: crypto.randomUUID(), tenantId: tko_input.actor.tenantId, type: "workflow_status", workflowId: tko_workflowId, ...tko_status };
+      const tko_record: WorkflowStatus = { id: crypto.randomUUID(), tenantId: tko_input.actor.tenantId, type: "workflow_status", workflowId: tko_workflowId, description: "", ...tko_status };
       this.tko_statuses.set(tko_record.id, tko_record);
     }
     for (const tko_type of tko_builtinTypes) {
@@ -186,6 +199,51 @@ export class MemoryWorkStore implements WorkStore {
 
   async listStatuses(tko_tenantId: string, tko_workflowId: string): Promise<WorkflowStatus[]> {
     return Array.from(this.tko_statuses.values()).filter(tko_status => tko_status.tenantId === tko_tenantId && tko_status.workflowId === tko_workflowId).sort((tko_left, tko_right) => tko_left.sortOrder - tko_right.sortOrder).map(tko_clone);
+  }
+
+  async createStatus(tko_actor: PlatformActor, tko_input: { projectId: string; name: string; category: WorkflowStatus["category"]; colorToken: string; description?: string; correlationId: string }): Promise<WorkflowStatus> {
+    const tko_project = await this.getProject(tko_actor.tenantId, tko_input.projectId);
+    if (!tko_project) throw new Error("WORK_PROJECT_NOT_FOUND");
+    const tko_existing = await this.listStatuses(tko_actor.tenantId, tko_project.workflowId);
+    const tko_name = tko_input.name.trim();
+    if (!tko_name) throw new Error("WORK_STATUS_NAME_INVALID");
+    if (tko_existing.some(tko_status => tko_status.name.toLocaleLowerCase() === tko_name.toLocaleLowerCase())) throw new Error("WORK_STATUS_NAME_TAKEN");
+    const tko_status: WorkflowStatus = { id: crypto.randomUUID(), tenantId: tko_actor.tenantId, type: "workflow_status", workflowId: tko_project.workflowId, name: tko_name, category: tko_input.category, colorToken: tko_input.colorToken, description: tko_input.description?.trim() ?? "", sortOrder: (tko_existing.at(-1)?.sortOrder ?? 0) + 100 };
+    this.tko_statuses.set(tko_status.id, tko_status);
+    await this.tko_emit(tko_actor, "work.workflow_status_created.v1", "work.project", { projectId: tko_project.id, statusId: tko_status.id, name: tko_status.name }, "work.workflow_status.created", "workflow_status", tko_status.id, tko_input.correlationId);
+    return tko_clone(tko_status);
+  }
+
+  async updateStatus(tko_actor: PlatformActor, tko_input: { projectId: string; statusId: string; name?: string; category?: WorkflowStatus["category"]; colorToken?: string; description?: string; correlationId: string }): Promise<WorkflowStatus> {
+    const tko_project = await this.getProject(tko_actor.tenantId, tko_input.projectId);
+    const tko_status = this.tko_statuses.get(tko_input.statusId);
+    if (!tko_project || !tko_status || tko_status.tenantId !== tko_actor.tenantId || tko_status.workflowId !== tko_project.workflowId) throw new Error("WORK_STATUS_NOT_FOUND");
+    const tko_before = tko_clone(tko_status);
+    if (tko_input.name !== undefined) tko_status.name = tko_input.name.trim();
+    if (tko_input.category !== undefined) tko_status.category = tko_input.category;
+    if (tko_input.colorToken !== undefined) tko_status.colorToken = tko_input.colorToken;
+    if (tko_input.description !== undefined) tko_status.description = tko_input.description.trim();
+    this.tko_statuses.set(tko_status.id, tko_status);
+    await this.tko_emit(tko_actor, "work.workflow_status_updated.v1", "work.project", { projectId: tko_project.id, statusId: tko_status.id, before: tko_before, after: tko_status }, "work.workflow_status.updated", "workflow_status", tko_status.id, tko_input.correlationId);
+    return tko_clone(tko_status);
+  }
+
+  async reorderStatus(tko_input: ReorderWorkflowStatusInput): Promise<WorkflowStatus[]> {
+    const tko_project = await this.getProject(tko_input.actor.tenantId, tko_input.projectId);
+    if (!tko_project) throw new Error("WORK_PROJECT_NOT_FOUND");
+    const tko_current = await this.listStatuses(tko_input.actor.tenantId, tko_project.workflowId);
+    const tko_moved = tko_current.find(tko_status => tko_status.id === tko_input.statusId);
+    if (!tko_moved) throw new Error("WORK_STATUS_NOT_FOUND");
+    if (tko_input.beforeStatusId === tko_moved.id) throw new Error("WORK_STATUS_REORDER_INVALID");
+    const tko_remaining = tko_current.filter(tko_status => tko_status.id !== tko_moved.id);
+    const tko_index = tko_input.beforeStatusId === undefined || tko_input.beforeStatusId === null
+      ? tko_remaining.length
+      : tko_remaining.findIndex(tko_status => tko_status.id === tko_input.beforeStatusId);
+    if (tko_index < 0) throw new Error("WORK_STATUS_REORDER_TARGET_NOT_FOUND");
+    const tko_ordered = [...tko_remaining.slice(0, tko_index), tko_moved, ...tko_remaining.slice(tko_index)].map((tko_status, tko_index) => ({ ...tko_status, sortOrder: (tko_index + 1) * 100 }));
+    for (const tko_status of tko_ordered) this.tko_statuses.set(tko_status.id, tko_status);
+    await this.tko_emit(tko_input.actor, "work.workflow_status_reordered.v1", "work.project", { projectId: tko_project.id, statusId: tko_moved.id, beforeStatusId: tko_input.beforeStatusId ?? null, orderedStatusIds: tko_ordered.map(tko_status => tko_status.id) }, "work.workflow_status.reordered", "workflow_status", tko_moved.id, tko_input.correlationId);
+    return tko_ordered.map(tko_clone);
   }
 
   async listWorkTypes(tko_tenantId: string, tko_projectId: string): Promise<WorkType[]> {
@@ -248,6 +306,10 @@ export class MemoryWorkStore implements WorkStore {
       sprintId: null, version: 1, completedAt: null, archivedAt: null, createdAt: tko_now(), updatedAt: tko_now(),
     };
     this.tko_items.set(tko_record.id, tko_record);
+    for (const [tko_index, tko_body] of Array.from((tko_input.checklistItems ?? []).map(tko_value => tko_value.trim()).filter(Boolean).entries())) {
+      const tko_checklist: WorkChecklistItem = { id: crypto.randomUUID(), tenantId: tko_record.tenantId, type: "work_checklist_item", workItemId: tko_record.id, body: tko_body, completedAt: null, completedByMemberId: null, sortOrder: (tko_index + 1) * 100, createdByMemberId: tko_input.actor.memberId, createdAt: tko_now() };
+      this.tko_checklistItems.set(tko_checklist.id, tko_checklist);
+    }
     await this.tko_historyEntry(tko_input.actor, tko_record, "created", null, { key: tko_record.key, title: tko_record.title });
     await this.tko_emit(tko_input.actor, "work.work_item_created.v1", "work.item", { workItemId: tko_record.id, key: tko_record.key, projectId: tko_record.projectId }, "work.work_item.created", "work_item", tko_record.id, tko_input.correlationId);
     return tko_clone(tko_record);
@@ -350,6 +412,12 @@ export class MemoryWorkStore implements WorkStore {
   async listComments(tko_tenantId: string, tko_workItemId: string): Promise<WorkComment[]> {
     return Array.from(this.tko_comments.values()).filter(tko_comment => tko_comment.tenantId === tko_tenantId && tko_comment.workItemId === tko_workItemId && !tko_comment.deletedAt).sort((tko_left, tko_right) => tko_left.createdAt.getTime() - tko_right.createdAt.getTime()).map(tko_clone);
   }
+
+  async listChecklistItems(tko_tenantId: string, tko_workItemId: string): Promise<WorkChecklistItem[]> { return Array.from(this.tko_checklistItems.values()).filter(tko_item => tko_item.tenantId === tko_tenantId && tko_item.workItemId === tko_workItemId).sort((tko_left, tko_right) => tko_left.sortOrder - tko_right.sortOrder).map(tko_clone); }
+  async createChecklistItem(tko_actor: PlatformActor, tko_input: { workItemId: string; body: string; correlationId: string }): Promise<WorkChecklistItem> { const tko_workItem = await this.getWorkItem(tko_actor.tenantId, tko_input.workItemId); if (!tko_workItem) throw new Error("WORK_ITEM_NOT_FOUND"); const tko_existing = await this.listChecklistItems(tko_actor.tenantId, tko_workItem.id); const tko_item: WorkChecklistItem = { id: crypto.randomUUID(), tenantId: tko_actor.tenantId, type: "work_checklist_item", workItemId: tko_workItem.id, body: tko_input.body.trim(), completedAt: null, completedByMemberId: null, sortOrder: (tko_existing.at(-1)?.sortOrder ?? 0) + 100, createdByMemberId: tko_actor.memberId, createdAt: tko_now() }; this.tko_checklistItems.set(tko_item.id, tko_item); await this.tko_emit(tko_actor, "work.checklist_item_created.v1", "work.item", { workItemId: tko_workItem.id, checklistItemId: tko_item.id }, "work.checklist_item.created", "work_checklist_item", tko_item.id, tko_input.correlationId); return tko_clone(tko_item); }
+  async toggleChecklistItem(tko_actor: PlatformActor, tko_input: { workItemId: string; checklistItemId: string; completed: boolean; correlationId: string }): Promise<WorkChecklistItem> { const tko_item = this.tko_checklistItems.get(tko_input.checklistItemId); if (!tko_item || tko_item.tenantId !== tko_actor.tenantId || tko_item.workItemId !== tko_input.workItemId) throw new Error("WORK_CHECKLIST_ITEM_NOT_FOUND"); tko_item.completedAt = tko_input.completed ? tko_now() : null; tko_item.completedByMemberId = tko_input.completed ? tko_actor.memberId : null; this.tko_checklistItems.set(tko_item.id, tko_item); await this.tko_emit(tko_actor, "work.checklist_item_toggled.v1", "work.item", { workItemId: tko_item.workItemId, checklistItemId: tko_item.id, completed: tko_input.completed }, "work.checklist_item.toggled", "work_checklist_item", tko_item.id, tko_input.correlationId); return tko_clone(tko_item); }
+  async createAttachment(tko_actor: PlatformActor, tko_input: Omit<WorkAttachment, "id" | "tenantId" | "type" | "uploadedByMemberId" | "createdAt"> & { correlationId: string }): Promise<WorkAttachment> { const tko_workItem = await this.getWorkItem(tko_actor.tenantId, tko_input.workItemId); if (!tko_workItem) throw new Error("WORK_ITEM_NOT_FOUND"); const tko_attachment: WorkAttachment = { id: crypto.randomUUID(), tenantId: tko_actor.tenantId, type: "work_attachment", workItemId: tko_workItem.id, objectKey: tko_input.objectKey, filename: tko_input.filename, contentType: tko_input.contentType, byteSize: tko_input.byteSize, uploadedByMemberId: tko_actor.memberId, createdAt: tko_now() }; this.tko_attachments.set(tko_attachment.id, tko_attachment); await this.tko_emit(tko_actor, "work.attachment_created.v1", "work.item", { workItemId: tko_attachment.workItemId, attachmentId: tko_attachment.id }, "work.attachment.created", "work_attachment", tko_attachment.id, tko_input.correlationId); return tko_clone(tko_attachment); }
+  async listAttachments(tko_tenantId: string, tko_workItemId: string): Promise<WorkAttachment[]> { return Array.from(this.tko_attachments.values()).filter(tko_attachment => tko_attachment.tenantId === tko_tenantId && tko_attachment.workItemId === tko_workItemId).map(tko_clone); }
 
   private tko_hasBlockingPath(tko_tenantId: string, tko_fromWorkItemId: string, tko_targetWorkItemId: string): boolean {
     const tko_pending = [tko_fromWorkItemId];

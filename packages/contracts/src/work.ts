@@ -38,7 +38,17 @@ export interface WorkflowStatus extends TenantResource {
   name: string;
   category: WorkflowStatusCategory;
   colorToken: string;
+  description: string;
   sortOrder: number;
+}
+
+export interface ReorderWorkflowStatusInput {
+  actor: PlatformActor;
+  projectId: string;
+  statusId: string;
+  /** Insert immediately before this workflow column; null appends. */
+  beforeStatusId?: string | null;
+  correlationId: string;
 }
 
 export interface WorkType extends TenantResource {
@@ -83,6 +93,28 @@ export interface WorkComment extends TenantResource {
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
+}
+
+export interface WorkChecklistItem extends TenantResource {
+  type: "work_checklist_item";
+  workItemId: string;
+  body: string;
+  completedAt: Date | null;
+  completedByMemberId: string | null;
+  sortOrder: number;
+  createdByMemberId: string;
+  createdAt: Date;
+}
+
+export interface WorkAttachment extends TenantResource {
+  type: "work_attachment";
+  workItemId: string;
+  objectKey: string;
+  filename: string;
+  contentType: string;
+  byteSize: number;
+  uploadedByMemberId: string;
+  createdAt: Date;
 }
 
 export interface WorkItemRelation extends TenantResource {
@@ -153,6 +185,7 @@ export interface CreateWorkItemInput {
   startAt?: Date | null;
   dueAt?: Date | null;
   estimateMinutes?: number | null;
+  checklistItems?: string[];
   rank?: string;
   correlationId: string;
 }

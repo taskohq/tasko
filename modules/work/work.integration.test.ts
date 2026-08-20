@@ -185,6 +185,30 @@ describe("Work Alpha acceptance boundaries", () => {
     expect((await tko_platformStore.listAuditLogs()).filter(tko_event => ["work.work_item.created", "work.work_item.moved"].includes(tko_event.action))).toHaveLength(2);
   });
 
+  it("creates rich tasks with checklist metadata and supports unlimited configured workflow columns", async () => {
+    const tko_owner = await tko_actor();
+    const tko_guest = { ...tko_owner, authSubject: "rich-work-guest", memberId: "guest-member", role: "guest" as const };
+    const tko_space = await work.createSpace(tko_owner, { name: "Rich work", slug: "rich-work", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Configurable board", key: "RCB", methodology: "kanban", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_item = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Prepare complex delivery", description: "Scope, files and acceptance criteria.", checklistItems: ["Confirm brief", "Attach source file", "", "Review acceptance"], correlationId: tko_owner.correlationId });
+    const tko_statuses = await Promise.all(["Ready for review", "Blocked", "Customer validation", "Release window"].map((tko_name, tko_index) => work.createWorkflowStatus(tko_owner, { projectId: tko_project.id, name: tko_name, description: `Rule for ${tko_name}`, category: tko_index === 3 ? "done" : "in_progress", colorToken: ["purple", "red", "amber", "green"][tko_index], correlationId: tko_owner.correlationId })));
+    const tko_updated = await work.updateWorkflowStatus(tko_owner, { projectId: tko_project.id, statusId: tko_statuses[0].id, name: "Ready for product review", description: "Move only when evidence is linked.", category: "in_progress", colorToken: "indigo", correlationId: tko_owner.correlationId });
+    const tko_attachment = await tko_workStore.createAttachment(tko_owner, { workItemId: tko_item.id, objectKey: `tenants/${tko_owner.tenantId}/attachments/demo/spec.pdf`, filename: "spec.pdf", contentType: "application/pdf", byteSize: 1024, correlationId: tko_owner.correlationId });
+    const tko_detail = await work.itemDetails(tko_owner, tko_item.id);
+    const tko_afterToggle = await work.toggleChecklistItem(tko_owner, { workItemId: tko_item.id, checklistItemId: tko_detail.checklistItems[0].id, completed: true, correlationId: tko_owner.correlationId });
+    const tko_board = await work.board(tko_owner, tko_project.id);
+
+    expect(tko_detail.item.description).toBe("Scope, files and acceptance criteria.");
+    expect(tko_detail.checklistItems.map(tko_entry => tko_entry.body)).toEqual(["Confirm brief", "Attach source file", "Review acceptance"]);
+    expect(tko_afterToggle.completedAt).not.toBeNull();
+    expect(tko_detail.attachments).toMatchObject([{ id: tko_attachment.id, filename: "spec.pdf", byteSize: 1024 }]);
+    expect(tko_board.statuses).toHaveLength(7);
+    expect(tko_board.statuses).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_updated.id, name: "Ready for product review", description: "Move only when evidence is linked.", colorToken: "indigo" })]));
+    await expect(work.createWorkflowStatus(tko_guest, { projectId: tko_project.id, name: "Guest column", category: "todo", colorToken: "blue", correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+    await expect(work.toggleChecklistItem(tko_guest, { workItemId: tko_item.id, checklistItemId: tko_detail.checklistItems[1].id, completed: true, correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+    expect(await tko_workStore.listAttachments("tko-tenant-other-workspace", tko_item.id)).toEqual([]);
+  });
+
   it("keeps custom fields tenant and project scoped while rejecting guest administration", async () => {
     const tko_owner = await tko_actor();
     const tko_guest = { ...tko_owner, authSubject: "demo-guest:tasko-demo", memberId: "guest-member", role: "guest" as const };
@@ -222,5 +246,24 @@ describe("Work Alpha acceptance boundaries", () => {
     const tko_actions = (await tko_platformStore.listAuditLogs()).map(tko_entry => tko_entry.action);
     expect(tko_actions).toContain("work.work_item.relation_created");
     expect(tko_actions).toContain("work.work_item.relation_removed");
+  });
+
+  it("reorders configured workflow columns deterministically with authorization and durable evidence", async () => {
+    const tko_owner = await tko_actor();
+    const tko_guest = { ...tko_owner, authSubject: "workflow-order-guest", memberId: "guest-member", role: "guest" as const };
+    const tko_space = await work.createSpace(tko_owner, { name: "Workflow ordering", slug: "workflow-ordering", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Ordered workflow", key: "ORD", methodology: "kanban", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_initial = await work.board(tko_owner, tko_project.id);
+    const tko_extra = await work.createWorkflowStatus(tko_owner, { projectId: tko_project.id, name: "Security review", description: "Evidence must be attached.", category: "in_progress", colorToken: "purple", correlationId: tko_owner.correlationId });
+    const tko_done = tko_initial.statuses.find(tko_status => tko_status.category === "done");
+    if (!tko_done) throw new Error("TEST_DONE_STATUS_MISSING");
+
+    const tko_reordered = await work.reorderWorkflowStatus({ actor: tko_owner, projectId: tko_project.id, statusId: tko_extra.id, beforeStatusId: tko_done.id, correlationId: tko_owner.correlationId });
+
+    expect(tko_reordered.map(tko_status => tko_status.id)).toEqual([...tko_initial.statuses.filter(tko_status => tko_status.id !== tko_extra.id && tko_status.id !== tko_done.id).map(tko_status => tko_status.id), tko_extra.id, tko_done.id]);
+    expect(tko_reordered.map(tko_status => tko_status.sortOrder)).toEqual([100, 200, 300, 400]);
+    expect((await work.board(tko_owner, tko_project.id)).statuses.map(tko_status => tko_status.id)).toEqual(tko_reordered.map(tko_status => tko_status.id));
+    await expect(work.reorderWorkflowStatus({ actor: tko_guest, projectId: tko_project.id, statusId: tko_extra.id, beforeStatusId: null, correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+    expect((await tko_platformStore.listAuditLogs()).some(tko_event => tko_event.action === "work.workflow_status.reordered" && tko_event.metadata.statusId === tko_extra.id)).toBe(true);
   });
 });

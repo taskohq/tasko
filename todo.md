@@ -108,6 +108,11 @@
 - [x] OAuth callback regression: điều tra lỗi callback sau Google login, sửa nguyên nhân cấu hình/validation và thêm test cho success/failure contract trước khi tiếp tục visual verification M4.
 - [x] Deferred OAuth/browser follow-up: được chuyển sang kiểm tra tự động theo yêu cầu người dùng; không yêu cầu xác nhận hoặc thông tin đăng nhập thủ công nữa.
 - [x] OAuth auto-verification: đã khởi động Google OAuth bằng phiên browser sẵn có. Cổng xác thực sandbox trở về `about:blank` và không tạo request `/api/oauth/callback`; cookie first-party HTTPS hoạt động và `server/oauth.callback.test.ts` pass 5/5. Cần tái xác minh trên profile browser được kết nối khi runtime có callback provider, không hỏi lại người dùng.
+- [x] Work task creation bug: tái hiện, xác định và sửa nguyên nhân task không được tạo từ composer/board trên phiên tenant thật, kèm regression success và failure recovery.
+- [x] Work three-mode task composer: cung cấp chuyển đổi giữa quick-create trên board, panel phải và full-screen editor; dùng một draft thống nhất, keyboard-accessible, không mất dữ liệu khi đổi chế độ.
+- [x] Work rich task content: mở rộng task composer cho description chi tiết, checklist và đính kèm S3 có validation, tenant isolation, authorization, audit/outbox và regression thực.
+- [x] Work configurable board columns: cho phép tạo không giới hạn cột workflow với tên, description/quy tắc, màu và thứ tự; giữ kéo-thả, validation transition, tenant isolation, authorization, audit/outbox và regression.
+- [x] Work workflow column ordering: bổ sung API/UI sắp xếp cột workflow bằng thao tác move/reorder, với authorization, tenant isolation, audit/outbox, memory/PostgreSQL regression và kiểm tra trực quan.
 - [x] Kanban task creation refinement: đối chiếu demo ClickUp đính kèm, rồi thay quick-create tối giản bằng flow tạo task trên board có trường lõi, trạng thái/cột đích, phản hồi lạc quan, keyboard support và kiểm thử.
 - [x] Kanban optimistic create: chèn thẻ tạm vào cột đích ngay khi submit composer, rollback khi create/move lỗi và reconcile lại dữ liệu server-authoritative.
 - [x] Kanban optimistic create verification: bổ sung coverage cho optimistic create, rollback và reconcile khi create/move thất bại, rồi chạy regression/build trước checkpoint.

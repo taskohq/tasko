@@ -9,9 +9,12 @@ import type {
   WorkCustomFieldType,
   WorkItem,
   WorkProject,
+  ReorderWorkflowStatusInput,
+  WorkflowStatus,
 } from "../../../packages/contracts/src/work";
 import type { Capability, PlatformActor, TenantResource } from "../../../packages/contracts/src/platform";
 import { getWorkStore } from "../../../packages/database/src/work-store";
+import { getTenantAttachmentDownloadUrl, uploadTenantAttachment } from "../../attachments/src/attachment-storage";
 import { requireCapability } from "../../permissions/src/authorization";
 
 function tko_workResource(tko_actor: PlatformActor, tko_resource: Omit<TenantResource, "tenantId">): TenantResource {
@@ -62,7 +65,25 @@ export async function board(tko_actor: PlatformActor, tko_projectId: string) {
 export async function itemDetails(tko_actor: PlatformActor, tko_workItemId: string) {
   const tko_item = await tko_itemFor(tko_actor, tko_workItemId);
   tko_require(tko_actor, "work.item.read", tko_item);
-  return { item: tko_item, comments: await getWorkStore().listComments(tko_actor.tenantId, tko_item.id), dependencies: await getWorkStore().listDependencies(tko_actor.tenantId, tko_item.id), history: await getWorkStore().listHistory(tko_actor.tenantId, tko_item.id), customValues: await getWorkStore().listCustomFieldValues(tko_actor.tenantId, tko_item.id) };
+  return { item: tko_item, comments: await getWorkStore().listComments(tko_actor.tenantId, tko_item.id), dependencies: await getWorkStore().listDependencies(tko_actor.tenantId, tko_item.id), checklistItems: await getWorkStore().listChecklistItems(tko_actor.tenantId, tko_item.id), attachments: await getWorkStore().listAttachments(tko_actor.tenantId, tko_item.id), history: await getWorkStore().listHistory(tko_actor.tenantId, tko_item.id), customValues: await getWorkStore().listCustomFieldValues(tko_actor.tenantId, tko_item.id) };
+}
+
+export async function createWorkflowStatus(tko_actor: PlatformActor, tko_input: { projectId: string; name: string; category: WorkflowStatus["category"]; colorToken: string; description?: string; correlationId: string }) {
+  const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  return getWorkStore().createStatus(tko_actor, tko_input);
+}
+
+export async function updateWorkflowStatus(tko_actor: PlatformActor, tko_input: { projectId: string; statusId: string; name?: string; category?: WorkflowStatus["category"]; colorToken?: string; description?: string; correlationId: string }) {
+  const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  return getWorkStore().updateStatus(tko_actor, tko_input);
+}
+
+export async function reorderWorkflowStatus(tko_input: ReorderWorkflowStatusInput) {
+  const tko_project = await tko_projectFor(tko_input.actor, tko_input.projectId);
+  tko_require(tko_input.actor, "work.project.manage", tko_project);
+  return getWorkStore().reorderStatus(tko_input);
 }
 
 export async function customFields(tko_actor: PlatformActor, tko_projectId: string) {
@@ -117,6 +138,36 @@ export async function createComment(tko_input: CreateCommentInput) {
   const tko_item = await tko_itemFor(tko_input.actor, tko_input.workItemId);
   tko_require(tko_input.actor, "work.comment.create", tko_item);
   return getWorkStore().createComment(tko_input);
+}
+
+export async function createChecklistItem(tko_actor: PlatformActor, tko_input: { workItemId: string; body: string; correlationId: string }) {
+  const tko_item = await tko_itemFor(tko_actor, tko_input.workItemId);
+  tko_require(tko_actor, "work.item.update", tko_item);
+  return getWorkStore().createChecklistItem(tko_actor, tko_input);
+}
+
+export async function toggleChecklistItem(tko_actor: PlatformActor, tko_input: { workItemId: string; checklistItemId: string; completed: boolean; correlationId: string }) {
+  const tko_item = await tko_itemFor(tko_actor, tko_input.workItemId);
+  tko_require(tko_actor, "work.item.update", tko_item);
+  return getWorkStore().toggleChecklistItem(tko_actor, tko_input);
+}
+
+export async function uploadWorkAttachment(tko_actor: PlatformActor, tko_input: { workItemId: string; filename: string; contentType: string; base64: string; correlationId: string }) {
+  const tko_item = await tko_itemFor(tko_actor, tko_input.workItemId);
+  tko_require(tko_actor, "work.item.update", tko_item);
+  if (!/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i.test(tko_input.contentType)) throw new Error("WORK_ATTACHMENT_CONTENT_TYPE_INVALID");
+  const tko_bytes = Buffer.from(tko_input.base64, "base64");
+  if (!tko_bytes.byteLength || tko_bytes.byteLength > 10 * 1024 * 1024) throw new Error("WORK_ATTACHMENT_SIZE_INVALID");
+  const tko_stored = await uploadTenantAttachment({ actor: tko_actor, filename: tko_input.filename, contentType: tko_input.contentType, bytes: tko_bytes });
+  return getWorkStore().createAttachment(tko_actor, { workItemId: tko_item.id, objectKey: tko_stored.objectKey, filename: tko_stored.filename, contentType: tko_stored.contentType, byteSize: tko_bytes.byteLength, correlationId: tko_input.correlationId });
+}
+
+export async function attachmentDownloadUrl(tko_actor: PlatformActor, tko_input: { workItemId: string; attachmentId: string }) {
+  const tko_item = await tko_itemFor(tko_actor, tko_input.workItemId);
+  tko_require(tko_actor, "work.item.read", tko_item);
+  const tko_attachment = (await getWorkStore().listAttachments(tko_actor.tenantId, tko_item.id)).find(tko_entry => tko_entry.id === tko_input.attachmentId);
+  if (!tko_attachment) throw new Error("WORK_ATTACHMENT_NOT_FOUND");
+  return { url: await getTenantAttachmentDownloadUrl(tko_actor, tko_attachment) };
 }
 
 export async function addDependency(tko_actor: PlatformActor, tko_input: { sourceWorkItemId: string; targetWorkItemId: string; relationType: "blocks" | "blocked_by" | "relates_to" | "duplicates" | "duplicated_by"; correlationId: string }) {
