@@ -26,6 +26,7 @@ import {
   PanelRight,
   Paperclip,
   Plus,
+  Search,
   Save,
   Send,
   SlidersHorizontal,
@@ -283,7 +284,7 @@ function TkoRichTaskComposer({
 export default function Work() {
   const { isAuthenticated, loading: tko_authLoading } = useAuth();
   const tko_utils = trpc.useUtils();
-  const [tko_view, setTkoView] = useState<"board" | "list">("board");
+  const [tko_view, setTkoView] = useState<"overview" | "board" | "list">("board");
   const [tko_selectedItem, setTkoSelectedItem] = useState<TkoBoardItem | null>(null);
   const [tko_editor, setTkoEditor] = useState<TkoItemEditor | null>(null);
   const [tko_commentDraft, setTkoCommentDraft] = useState("");
@@ -299,6 +300,7 @@ export default function Work() {
   const [tko_optimisticItems, setTkoOptimisticItems] = useState<TkoBoardItem[]>([]);
   const [tko_selectedItemIds, setTkoSelectedItemIds] = useState<Set<string>>(() => new Set());
   const [tko_bulkTargetStatusId, setTkoBulkTargetStatusId] = useState("");
+  const [tko_bulkPriorityValue, setTkoBulkPriorityValue] = useState<TkoPriority | "">("");
   const [tko_sprintPlannerOpen, setTkoSprintPlannerOpen] = useState(false);
   const [tko_sprintName, setTkoSprintName] = useState("");
   const [tko_sprintGoal, setTkoSprintGoal] = useState("");
@@ -311,6 +313,7 @@ export default function Work() {
   const [tko_dependencyRelationType, setTkoDependencyRelationType] = useState<"blocks" | "blocked_by" | "relates_to" | "duplicates" | "duplicated_by">("blocks");
   const [tko_columnsOpen, setTkoColumnsOpen] = useState(false);
   const [tko_newColumn, setTkoNewColumn] = useState({ name: "", description: "", category: "todo" as TkoCategory, colorToken: "blue" });
+  const [tko_projectSearch, setTkoProjectSearch] = useState("");
 
   const tko_projects = trpc.work.projects.useQuery(undefined, { enabled: isAuthenticated });
   const tko_assignees = trpc.work.assignees.useQuery(undefined, { enabled: isAuthenticated });
@@ -320,6 +323,14 @@ export default function Work() {
     { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(tko_selectedProject) },
   );
+  const tko_overview = trpc.work.overview.useQuery(
+    { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(tko_selectedProject && isAuthenticated) },
+  );
+  const tko_projectSearchResults = trpc.work.searchProject.useQuery(
+    { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000", query: tko_projectSearch },
+    { enabled: Boolean(tko_selectedProject && isAuthenticated && tko_projectSearch.trim().length >= 2) },
+  );
   const tko_itemDetails = trpc.work.item.useQuery(
     { workItemId: tko_selectedItem?.id ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(tko_selectedItem && isAuthenticated && tko_selectedProject) },
@@ -327,6 +338,8 @@ export default function Work() {
   const tko_refreshBoard = useCallback(async () => Promise.all([
     tko_utils.work.board.invalidate(),
     tko_utils.work.item.invalidate(),
+    tko_utils.work.overview.invalidate(),
+    tko_utils.work.searchProject.invalidate(),
   ]), [tko_utils]);
   useWorkBoardRealtime({
     enabled: Boolean(isAuthenticated && tko_selectedProject),
@@ -355,6 +368,7 @@ export default function Work() {
     onError: async () => { await tko_refreshBoard(); toast.error("Board vừa thay đổi. Dữ liệu đã được làm mới, hãy thử lại."); },
   });
   const tko_bulkMove = trpc.work.moveItem.useMutation();
+  const tko_bulkPriority = trpc.work.updateItem.useMutation();
   const tko_create = trpc.work.createItem.useMutation();
   const tko_uploadAttachment = trpc.work.uploadAttachment.useMutation();
   const tko_createStatus = trpc.work.createStatus.useMutation({
@@ -402,6 +416,16 @@ export default function Work() {
     onError: async () => {
       await tko_refreshBoard();
       toast.error("Không thể hoàn tất sprint. Dữ liệu planning đã được làm mới.");
+    },
+  });
+  const tko_startSprint = trpc.work.startSprint.useMutation({
+    onSuccess: async () => {
+      await tko_refreshBoard();
+      toast.success("Sprint đã bắt đầu.");
+    },
+    onError: async tko_error => {
+      await tko_refreshBoard();
+      toast.error(tko_error.message.includes("ACTIVE_EXISTS") ? "Project đã có sprint đang chạy." : "Không thể bắt đầu sprint. Dữ liệu đã được làm mới.");
     },
   });
   const tko_comment = trpc.work.createComment.useMutation({
@@ -660,6 +684,16 @@ export default function Work() {
     else toast("Các task đã ở trạng thái đích hoặc đang được đồng bộ.");
   }
 
+  async function tko_updateSelectedPriority() {
+    if (tko_isPreview || !tko_bulkPriorityValue || !tko_selectedBoardItems.length || tko_bulkPriority.isPending) return;
+    const tko_results = await Promise.allSettled(tko_selectedBoardItems.filter(tko_item => !tko_item.optimistic && Boolean(tko_item.version)).map(tko_item => tko_bulkPriority.mutateAsync({ workItemId: tko_item.id, expectedVersion: tko_item.version!, priority: tko_bulkPriorityValue })));
+    const tko_failed = tko_results.filter(tko_result => tko_result.status === "rejected").length;
+    await tko_refreshBoard();
+    setTkoBulkPriorityValue("");
+    if (tko_failed) toast.error(`${tko_results.length - tko_failed} task đã được triage. ${tko_failed} task cần làm mới trước khi thử lại.`);
+    else toast.success(`Đã đặt priority cho ${tko_results.length} task.`);
+  }
+
   function tko_dropOnColumn(tko_event: DragEvent<HTMLElement>, tko_statusId: string | undefined, tko_beforeWorkItemId: string | null = null) {
     tko_event.preventDefault();
     const tko_item = tko_items.find(tko_candidate => tko_candidate.id === tko_draggedId);
@@ -795,7 +829,7 @@ export default function Work() {
           ) : <Button onClick={startLogin} className="h-9 rounded-lg bg-[#5b51e8] px-3.5 text-xs font-semibold hover:bg-[#4d43da]">Sign in</Button>}
         </div>
         <nav className="mt-5 flex items-center gap-5 overflow-x-auto border-t border-[#f2f4f7] pt-3 text-[13px] whitespace-nowrap" aria-label="Project views">
-          <button className="text-[#667085]">Overview</button>
+          <button onClick={() => setTkoView("overview")} className={`border-b-2 pb-2 ${tko_view === "overview" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Overview</button>
           <button onClick={() => setTkoView("board")} className={`border-b-2 pb-2 ${tko_view === "board" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Board</button>
           <button onClick={() => setTkoView("list")} className={`border-b-2 pb-2 ${tko_view === "list" ? "border-[#5b51e8] font-semibold text-[#5b51e8]" : "border-transparent text-[#667085]"}`}>Backlog</button>
           <button className="text-[#667085]">Timeline</button>
@@ -809,6 +843,10 @@ export default function Work() {
         {tko_isPreview && !tko_authLoading ? <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#fedf89] bg-[#fffaeb] px-3 py-2.5 text-xs text-[#93370d]"><Sparkles className="h-4 w-4" /><span>Work preview. Sign in to update your tenant-scoped project.</span><button onClick={startLogin} className="ml-auto font-semibold underline">Sign in</button></div> : null}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2">
+            <div className="relative">
+              <label className="flex h-9 w-[min(20rem,70vw)] items-center gap-2 border border-[#dfe1e6] bg-white px-2.5 text-xs text-[#667085] focus-within:border-[#0c66e4] focus-within:ring-1 focus-within:ring-[#0c66e4]"><Search className="h-3.5 w-3.5 shrink-0" /><input aria-label="Search this project" value={tko_projectSearch} onChange={tko_event => setTkoProjectSearch(tko_event.target.value)} placeholder="Search tasks and sprints" className="min-w-0 flex-1 bg-transparent outline-none" />{tko_projectSearch ? <button type="button" onClick={() => setTkoProjectSearch("")} aria-label="Clear project search" className="text-[#667085] hover:text-[#172b4d]"><X className="h-3.5 w-3.5" /></button> : null}</label>
+              {tko_projectSearch.trim().length >= 2 ? <div className="absolute z-40 mt-1 max-h-72 w-full overflow-y-auto border border-[#dfe1e6] bg-white py-1 shadow-[0_8px_20px_rgba(9,30,66,.18)]">{tko_projectSearchResults.isLoading ? <p className="px-3 py-2 text-xs text-[#667085]">Searching project…</p> : tko_projectSearchResults.data?.length ? tko_projectSearchResults.data.map(tko_result => <button key={`${tko_result.kind}-${tko_result.id}`} type="button" onClick={() => { if (tko_result.kind === "work_item") { const tko_item = tko_items.find(tko_entry => tko_entry.id === tko_result.id); if (tko_item) setTkoSelectedItem(tko_item); } else { setTkoSelectedSprintId(tko_result.id); setTkoSprintPlannerOpen(true); } setTkoProjectSearch(""); }} className="block w-full border-b border-[#f2f4f7] px-3 py-2 text-left last:border-0 hover:bg-[#deebff]"><span className="block text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">{tko_result.kind === "work_item" ? tko_result.summary : "Sprint"}</span><span className="block truncate text-xs font-semibold text-[#172b4d]">{tko_result.title}</span></button>) : <p className="px-3 py-2 text-xs text-[#667085]">No matching tasks or sprints in this project.</p>}</div> : null}
+            </div>
             <button type="button" aria-expanded={tko_sprintPlannerOpen} onClick={() => setTkoSprintPlannerOpen(tko_open => !tko_open)} className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467] hover:border-[#85b8ff] hover:text-[#0c66e4]"><CalendarDays className="h-3.5 w-3.5" />{tko_selectedSprint ? tko_selectedSprint.name : "Sprint planning"} <ChevronDown className="h-3.5 w-3.5" /></button>
             <div className="relative">
               <button onClick={() => setTkoFilterOpen(!tko_filterOpen)} className="flex h-9 items-center gap-2 rounded-lg border border-[#eaecf0] bg-white px-3 text-xs font-medium text-[#475467]"><ListFilter className="h-3.5 w-3.5" />{tko_filter === "all" ? "Filters" : tko_filterLabel} <ChevronDown className="h-3.5 w-3.5" /></button>
@@ -822,8 +860,17 @@ export default function Work() {
           </div>
         </div>
         {tko_sprintPlannerOpen ? <section aria-label="Sprint planning" className="mb-4 border border-[#dfe1e6] bg-white shadow-[0_1px_2px_rgba(9,30,66,.12)]"><div className="flex items-start justify-between gap-3 border-b border-[#eaecf0] px-4 py-3"><div><h2 className="text-sm font-semibold text-[#172b4d]">Sprint planning</h2><p className="mt-0.5 text-xs text-[#626f86]">Create a timebox, assign selected work, then make an explicit decision for unfinished work.</p></div><button type="button" onClick={() => setTkoSprintPlannerOpen(false)} aria-label="Close sprint planning" className="grid h-7 w-7 place-items-center text-[#626f86] hover:bg-[#f1f2f4]"><X className="h-4 w-4" /></button></div><div className="grid gap-4 p-4 lg:grid-cols-2"><form onSubmit={tko_submitSprint} className="space-y-2 border-b border-[#eaecf0] pb-4 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4"><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#44546f]">New sprint</p><label className="block text-xs font-medium text-[#344054]">Name<input value={tko_sprintName} onChange={tko_event => setTkoSprintName(tko_event.target.value)} placeholder="Sprint 3 — Delivery" className="mt-1 h-9 w-full border border-[#dfe1e6] px-2.5 text-xs outline-none focus:border-[#0c66e4] focus:ring-1 focus:ring-[#0c66e4]" /></label><label className="block text-xs font-medium text-[#344054]">Goal<textarea value={tko_sprintGoal} onChange={tko_event => setTkoSprintGoal(tko_event.target.value)} placeholder="What outcome should this sprint achieve?" className="mt-1 min-h-16 w-full border border-[#dfe1e6] px-2.5 py-2 text-xs outline-none focus:border-[#0c66e4] focus:ring-1 focus:ring-[#0c66e4]" /></label><div className="grid grid-cols-2 gap-2"><label className="text-xs font-medium text-[#344054]">Start<input type="date" value={tko_sprintStartAt} onChange={tko_event => setTkoSprintStartAt(tko_event.target.value)} className="mt-1 h-9 w-full border border-[#dfe1e6] px-2 text-xs outline-none focus:border-[#0c66e4]" /></label><label className="text-xs font-medium text-[#344054]">End<input type="date" value={tko_sprintEndAt} onChange={tko_event => setTkoSprintEndAt(tko_event.target.value)} className="mt-1 h-9 w-full border border-[#dfe1e6] px-2 text-xs outline-none focus:border-[#0c66e4]" /></label></div><Button type="submit" disabled={tko_isPreview || tko_createSprint.isPending} className="h-8 rounded-sm bg-[#0c66e4] px-3 text-xs font-semibold hover:bg-[#0055cc]">{tko_createSprint.isPending ? "Creating…" : "Create sprint"}</Button></form><div className="space-y-3"><label className="block text-xs font-medium text-[#344054]">Current sprint<select value={tko_selectedSprint?.id ?? ""} onChange={tko_event => setTkoSelectedSprintId(tko_event.target.value)} className="mt-1 h-9 w-full border border-[#dfe1e6] bg-white px-2 text-xs outline-none focus:border-[#0c66e4]"><option value="">Choose a sprint</option>{tko_sprints.map(tko_sprint => <option key={tko_sprint.id} value={tko_sprint.id}>{tko_sprint.name} · {tko_sprint.state}</option>)}</select></label><div className="flex flex-wrap items-center gap-2"><Button type="button" onClick={tko_addSelectionToSprint} disabled={tko_isPreview || !tko_selectedSprint || !tko_selectedBoardItems.length || tko_addItemsToSprint.isPending} className="h-8 rounded-sm bg-[#0055cc] px-3 text-xs font-semibold hover:bg-[#0747a6]">{tko_addItemsToSprint.isPending ? "Adding…" : `Add ${tko_selectedBoardItems.length || "selected"} task${tko_selectedBoardItems.length === 1 ? "" : "s"}`}</Button><span className="text-[11px] text-[#626f86]">Select work using board/backlog checkboxes.</span></div>{tko_selectedSprint ? <div className="border-t border-[#eaecf0] pt-3"><p className="text-xs font-semibold text-[#172b4d]">Complete {tko_selectedSprint.name}</p><div className="mt-2 flex flex-wrap items-center gap-3"><label className="flex items-center gap-1.5 text-xs text-[#344054]"><input type="radio" checked={tko_incompleteDisposition === "backlog"} onChange={() => setTkoIncompleteDisposition("backlog")} className="accent-[#0c66e4]" />Move unfinished to backlog</label><label className="flex items-center gap-1.5 text-xs text-[#344054]"><input type="radio" checked={tko_incompleteDisposition === "next_sprint"} onChange={() => setTkoIncompleteDisposition("next_sprint")} disabled={!tko_carryOverSprints.length} className="accent-[#0c66e4]" />Carry over</label>{tko_incompleteDisposition === "next_sprint" ? <select aria-label="Carry-over target sprint" value={tko_nextSprintId} onChange={tko_event => setTkoNextSprintId(tko_event.target.value)} className="h-8 border border-[#dfe1e6] bg-white px-2 text-xs outline-none focus:border-[#0c66e4]"><option value="">Choose sprint</option>{tko_carryOverSprints.map(tko_sprint => <option key={tko_sprint.id} value={tko_sprint.id}>{tko_sprint.name}</option>)}</select> : null}<button type="button" onClick={tko_finishSelectedSprint} disabled={tko_isPreview || tko_selectedSprint.state === "completed" || tko_completeSprint.isPending} className="ml-auto h-8 border border-[#d92d20] px-3 text-xs font-semibold text-[#b42318] hover:bg-[#fef3f2] disabled:cursor-not-allowed disabled:border-[#d0d5dd] disabled:text-[#98a2b3]">{tko_completeSprint.isPending ? "Completing…" : tko_selectedSprint.state === "completed" ? "Completed" : "Complete sprint"}</button></div></div> : <p className="border-t border-[#eaecf0] pt-3 text-xs text-[#626f86]">Create a sprint, then select work items to add.</p>}</div></div></section> : null}
+        {tko_selectedSprint?.state === "planned" ? <div className="mb-4 flex flex-wrap items-center gap-3 border border-[#b9d4ff] bg-[#f0f7ff] px-3 py-2.5"><div className="min-w-0 flex-1"><p className="text-xs font-semibold text-[#0747a6]">{tko_selectedSprint.name} is ready to start</p><p className="mt-0.5 text-[11px] text-[#44546f]">Starting a sprint is an explicit project action; only one sprint can be active at a time.</p></div><Button type="button" onClick={() => tko_selectedProject && tko_startSprint.mutate({ projectId: tko_selectedProject.id, sprintId: tko_selectedSprint.id })} disabled={tko_isPreview || tko_startSprint.isPending} className="h-8 rounded-sm bg-[#0055cc] px-3 text-xs font-semibold hover:bg-[#0747a6]">{tko_startSprint.isPending ? "Starting…" : "Start sprint"}</Button></div> : null}
         {tko_selectedItemIds.size ? <div aria-live="polite" className="mb-4 flex flex-wrap items-center gap-2 border border-[#85b8ff] bg-[#deebff] px-3 py-2"><span className="text-xs font-semibold text-[#0747a6]">{tko_selectedItemIds.size} selected</span><button type="button" onClick={tko_toggleVisibleSelection} className="text-xs font-medium text-[#0c66e4] underline underline-offset-2">{tko_allVisibleSelected ? "Clear visible" : "Select visible"}</button><label className="ml-auto flex items-center gap-2 text-xs font-medium text-[#172b4d]">Move to<select aria-label="Target status for selected tasks" value={tko_bulkTargetStatusId} onChange={tko_event => setTkoBulkTargetStatusId(tko_event.target.value)} className="h-8 min-w-32 border border-[#dfe1e6] bg-white px-2 text-xs outline-none focus:border-[#0c66e4]"><option value="">Choose status</option>{tko_columns.map(tko_column => tko_column.statusId ? <option key={tko_column.statusId} value={tko_column.statusId}>{tko_column.label}</option> : null)}</select></label><Button type="button" onClick={tko_moveSelectedItems} disabled={!tko_bulkTargetStatusId || tko_bulkMove.isPending || tko_isPreview} className="h-8 rounded-sm bg-[#0c66e4] px-3 text-xs font-semibold hover:bg-[#0055cc]">{tko_bulkMove.isPending ? "Moving…" : "Move tasks"}</Button><button type="button" onClick={() => setTkoSelectedItemIds(new Set())} className="grid h-7 w-7 place-items-center text-[#44546f] hover:bg-white" aria-label="Clear selected tasks"><X className="h-4 w-4" /></button></div> : <div className="mb-4 flex items-center gap-2"><button type="button" onClick={tko_toggleVisibleSelection} disabled={!tko_selectableItems.length || tko_isPreview} className="text-xs font-medium text-[#44546f] hover:text-[#0c66e4] disabled:cursor-not-allowed disabled:text-[#98a2b3]">Select all visible</button><span className="text-[11px] text-[#6b778c]">Use checkboxes to move selected tasks together.</span></div>}
 
+        {tko_selectedItemIds.size ? <div className="-mt-2 mb-3 flex flex-wrap items-center justify-end gap-2 text-xs"><label className="flex items-center gap-2 font-medium text-[#172b4d]">Set priority<select aria-label="Priority for selected tasks" value={tko_bulkPriorityValue} onChange={tko_event => setTkoBulkPriorityValue(tko_event.target.value as TkoPriority | "")} className="h-8 border border-[#dfe1e6] bg-white px-2 text-xs outline-none focus:border-[#0c66e4]"><option value="">Choose priority</option><option value="none">None</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></label><Button type="button" onClick={tko_updateSelectedPriority} disabled={!tko_bulkPriorityValue || tko_bulkPriority.isPending || tko_isPreview} className="h-8 rounded-sm border border-[#0c66e4] bg-white px-3 text-xs font-semibold text-[#0c66e4] hover:bg-[#deebff]">{tko_bulkPriority.isPending ? "Triaging…" : "Apply priority"}</Button></div> : null}
+
+        {tko_view === "overview" ? <section aria-label="Project overview" className="space-y-4"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[
+          ["Completion", `${tko_overview.data?.completionPercent ?? 0}%`, `${tko_overview.data?.completedItems ?? 0} of ${tko_overview.data?.totalItems ?? 0} tasks complete`, "text-[#067647]"],
+          ["In progress", String(tko_overview.data?.inProgressItems ?? 0), "Tasks currently in delivery", "text-[#5b51e8]"],
+          ["At risk", String(tko_overview.data?.overdueItems ?? 0), "Past their due date", "text-[#b42318]"],
+          ["Backlog", String(tko_overview.data?.backlogItems ?? 0), `${tko_overview.data?.unestimatedItems ?? 0} without estimate`, "text-[#344054]"],
+        ].map(([tko_label, tko_value, tko_detail, tko_color]) => <article key={tko_label} className="border border-[#dfe1e6] bg-white p-4 shadow-[0_1px_2px_rgba(9,30,66,.08)]"><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">{tko_label}</p><p className={`mt-2 text-2xl font-bold ${tko_color}`}>{tko_value}</p><p className="mt-1 text-xs text-[#667085]">{tko_detail}</p></article>)}</div><div className="grid gap-4 lg:grid-cols-[1.15fr_.85fr]"><section className="border border-[#dfe1e6] bg-white"><div className="border-b border-[#eaecf0] px-4 py-3"><h2 className="text-sm font-semibold text-[#172b4d]">Workload</h2><p className="mt-0.5 text-xs text-[#667085]">Assigned scope and estimated effort by project member.</p></div><div className="divide-y divide-[#f2f4f7]">{tko_overview.data?.workload.length ? tko_overview.data.workload.map(tko_member => <div key={tko_member.memberId} className="flex items-center justify-between gap-3 px-4 py-3"><div><p className="text-xs font-semibold text-[#344054]">{tko_member.displayName}</p><p className="text-[11px] text-[#667085]">{tko_member.assignedItems} assigned task{tko_member.assignedItems === 1 ? "" : "s"}</p></div><span className="text-xs font-semibold text-[#475467]">{Math.round(tko_member.estimatedMinutes / 60 * 10) / 10}h</span></div>) : <p className="px-4 py-6 text-xs text-[#667085]">No assigned work in this project yet.</p>}</div></section><section className="border border-[#dfe1e6] bg-white p-4"><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">Sprint health</p><p className="mt-2 text-sm font-semibold text-[#172b4d]">{tko_overview.data?.activeSprint ? tko_overview.data.activeSprint.name : "No active sprint"}</p><p className="mt-1 text-xs leading-5 text-[#667085]">{tko_overview.data?.activeSprint ? `${tko_overview.data.completedItems} completed of ${tko_overview.data.totalItems} project tasks.` : `${tko_overview.data?.plannedSprintCount ?? 0} planned sprint${(tko_overview.data?.plannedSprintCount ?? 0) === 1 ? "" : "s"} available to start.`}</p><button type="button" onClick={() => { setTkoSprintPlannerOpen(true); setTkoView("board"); }} className="mt-4 text-xs font-semibold text-[#0c66e4] hover:underline">Open sprint planning</button></section></div></section> : null}
         {tko_view === "board" ? (
           <div className="overflow-x-auto pb-4"><div className="grid min-w-[900px] grid-flow-col auto-cols-[minmax(280px,1fr)] gap-3">
             {tko_columns.map(tko_column => {
@@ -838,7 +885,7 @@ export default function Work() {
             })}
           </div></div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-[#eaecf0] bg-white"><div className="grid grid-cols-[34px_90px_minmax(260px,1fr)_130px_130px] border-b border-[#eaecf0] bg-[#fcfcfd] px-4 py-2.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#98a2b3]"><label className="flex items-center"><span className="sr-only">Select all visible tasks</span><input type="checkbox" checked={tko_allVisibleSelected} onChange={tko_toggleVisibleSelection} disabled={!tko_selectableItems.length || tko_isPreview} className="h-3.5 w-3.5 accent-[#0c66e4]" /></label><span>Key</span><span>Work item</span><span>Priority</span><span>Status</span></div>{tko_filteredItems.map(tko_item => <div key={tko_item.id} className="grid grid-cols-[34px_1fr] items-center border-b border-[#f2f4f7] px-4 py-3 text-left text-xs last:border-b-0 hover:bg-[#fcfcff]"><label className="flex items-center"><span className="sr-only">Select {tko_item.title}</span><input type="checkbox" checked={tko_selectedItemIds.has(tko_item.id)} onChange={() => tko_toggleItemSelection(tko_item.id)} disabled={tko_isPreview || tko_item.optimistic || !tko_item.version} className="h-3.5 w-3.5 accent-[#0c66e4]" /></label><button type="button" onClick={() => tko_openItem(tko_item)} className="grid grid-cols-[90px_minmax(260px,1fr)_130px_130px] items-center text-left"><span className="font-mono text-[#98a2b3]">{tko_item.key}</span><span className="font-semibold text-[#344054]">{tko_item.title}</span><span><TkoPriority priority={tko_item.priority} /></span><span className="capitalize text-[#667085]">{tko_item.status.replace("_", " ")}</span></button></div>)}</div>
+          <div className="overflow-hidden rounded-xl border border-[#eaecf0] bg-white"><div className="grid grid-cols-[34px_90px_minmax(260px,1fr)_130px_130px] border-b border-[#eaecf0] bg-[#fcfcfd] px-4 py-2.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#98a2b3]"><label className="flex items-center"><span className="sr-only">Select all visible tasks</span><input type="checkbox" checked={tko_allVisibleSelected} onChange={tko_toggleVisibleSelection} disabled={!tko_selectableItems.length || tko_isPreview} className="h-3.5 w-3.5 accent-[#0c66e4]" /></label><span>Key</span><span>Work item</span><span>Priority</span><span>Status</span></div>{tko_groupKanbanItems(tko_filteredItems, tko_grouping).map(tko_group => <div key={tko_group.key}>{tko_grouping !== "none" ? <div className="border-b border-[#dfe1e6] bg-[#f7f8fa] px-4 py-2 text-[10px] font-bold uppercase tracking-[.08em] text-[#44546f]">{tko_group.label}<span className="ml-1.5 font-normal text-[#667085]">{tko_group.items.length}</span></div> : null}{tko_group.items.map(tko_item => <div key={tko_item.id} className="grid grid-cols-[34px_1fr] items-center border-b border-[#f2f4f7] px-4 py-3 text-left text-xs last:border-b-0 hover:bg-[#fcfcff]"><label className="flex items-center"><span className="sr-only">Select {tko_item.title}</span><input type="checkbox" checked={tko_selectedItemIds.has(tko_item.id)} onChange={() => tko_toggleItemSelection(tko_item.id)} disabled={tko_isPreview || tko_item.optimistic || !tko_item.version} className="h-3.5 w-3.5 accent-[#0c66e4]" /></label><button type="button" onClick={() => tko_openItem(tko_item)} className="grid grid-cols-[90px_minmax(260px,1fr)_130px_130px] items-center text-left"><span className="font-mono text-[#98a2b3]">{tko_item.key}</span><span className="font-semibold text-[#344054]">{tko_item.title}</span><span><TkoPriority priority={tko_item.priority} /></span><span className="capitalize text-[#667085]">{tko_item.status.replace("_", " ")}</span></button></div>)}</div>)}</div>
         )}
       </main>
 

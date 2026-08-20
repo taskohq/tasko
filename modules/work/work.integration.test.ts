@@ -289,4 +289,31 @@ describe("Work Alpha acceptance boundaries", () => {
     await expect(work.reorderWorkflowStatus({ actor: tko_guest, projectId: tko_project.id, statusId: tko_extra.id, beforeStatusId: null, correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
     expect((await tko_platformStore.listAuditLogs()).some(tko_event => tko_event.action === "work.workflow_status.reordered" && tko_event.metadata.statusId === tko_extra.id)).toBe(true);
   });
+
+  it("starts one durable sprint and exposes project-scoped overview and custom search", async () => {
+    const tko_owner = await tko_actor();
+    const tko_guest = { ...tko_owner, authSubject: "pm-guest", memberId: "guest-member", role: "guest" as const };
+    const tko_space = await work.createSpace(tko_owner, { name: "Project management", slug: "project-management", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Searchable delivery", key: "PM", methodology: "scrum", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_item = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Plan release discovery", description: "Find project-management acceptance evidence.", assigneeMemberIds: [tko_owner.memberId], estimateMinutes: 120, correlationId: tko_owner.correlationId });
+    const tko_attachment = await tko_workStore.createAttachment(tko_owner, { workItemId: tko_item.id, objectKey: `tenants/${tko_owner.tenantId}/attachments/release-notes.pdf`, filename: "release-notes.pdf", contentType: "application/pdf", byteSize: 512, correlationId: tko_owner.correlationId });
+    const tko_sprint = await work.createSprint({ actor: tko_owner, projectId: tko_project.id, name: "Release planning", goal: "Prove the project overview", correlationId: tko_owner.correlationId });
+    const tko_secondSprint = await work.createSprint({ actor: tko_owner, projectId: tko_project.id, name: "Follow-up", correlationId: tko_owner.correlationId });
+
+    const tko_started = await work.startSprint(tko_owner, { projectId: tko_project.id, sprintId: tko_sprint.id, correlationId: tko_owner.correlationId });
+    const tko_overview = await work.overview(tko_owner, tko_project.id);
+    const tko_results = await work.searchProject(tko_owner, { projectId: tko_project.id, query: "release" });
+    const tko_ownerDisplayName = (await tko_platformStore.listTenantMembers(tko_owner.tenantId)).find(tko_member => tko_member.id === tko_owner.memberId)?.displayName;
+    const tko_memberResults = await work.searchProject(tko_owner, { projectId: tko_project.id, query: tko_ownerDisplayName ?? "" });
+
+    expect(tko_started).toEqual(expect.objectContaining({ id: tko_sprint.id, state: "active", startAt: expect.any(Date) }));
+    expect(tko_overview).toEqual(expect.objectContaining({ projectId: tko_project.id, totalItems: 1, backlogItems: 1, activeSprint: expect.objectContaining({ id: tko_sprint.id }) }));
+    expect(tko_overview.workload).toEqual(expect.arrayContaining([expect.objectContaining({ memberId: tko_owner.memberId, assignedItems: 1, estimatedMinutes: 120 })]));
+    expect(tko_results).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "work_item", id: tko_item.id }), expect.objectContaining({ kind: "sprint", id: tko_sprint.id }), expect.objectContaining({ kind: "file", id: tko_attachment.id, workItemId: tko_item.id })]));
+    expect(tko_memberResults).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "member", id: tko_owner.memberId })]));
+    await expect(work.startSprint(tko_owner, { projectId: tko_project.id, sprintId: tko_secondSprint.id, correlationId: tko_owner.correlationId })).rejects.toThrow("WORK_SPRINT_ACTIVE_EXISTS");
+    await expect(work.startSprint(tko_guest, { projectId: tko_project.id, sprintId: tko_secondSprint.id, correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+    expect((await tko_platformStore.listAuditLogs()).some(tko_event => tko_event.action === "work.sprint.started" && tko_event.metadata.sprintId === tko_sprint.id)).toBe(true);
+    expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.sprint_started.v1" && tko_event.payload.sprintId === tko_sprint.id)).toBe(true);
+  });
 });

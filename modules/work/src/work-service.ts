@@ -2,6 +2,8 @@ import type {
   CreateCommentInput,
   CreateProjectInput,
   CreateSprintInput,
+  ProjectOverview,
+  ProjectSearchResult,
   CreateWorkItemInput,
   MoveWorkItemInput,
   TransitionWorkItemInput,
@@ -79,6 +81,55 @@ export async function board(tko_actor: PlatformActor, tko_projectId: string) {
     sprints: await getWorkStore().listSprints(tko_actor.tenantId, tko_project.id),
     views: await getWorkStore().listViews(tko_actor.tenantId, tko_project.id, tko_actor.memberId),
   };
+}
+
+export async function overview(tko_actor: PlatformActor, tko_projectId: string): Promise<ProjectOverview> {
+  const tko_data = await board(tko_actor, tko_projectId);
+  const tko_doneStatusIds = new Set(tko_data.statuses.filter(tko_status => tko_status.category === "done").map(tko_status => tko_status.id));
+  const tko_progressStatusIds = new Set(tko_data.statuses.filter(tko_status => tko_status.category === "in_progress").map(tko_status => tko_status.id));
+  const tko_members = await getPlatformStore().listTenantMembers(tko_actor.tenantId);
+  const tko_workload = new Map(tko_members.map(tko_member => [tko_member.id, { memberId: tko_member.id, displayName: tko_member.displayName, assignedItems: 0, estimatedMinutes: 0 }]));
+  for (const tko_item of tko_data.items) for (const tko_memberId of tko_item.assigneeMemberIds) {
+    const tko_entry = tko_workload.get(tko_memberId);
+    if (tko_entry) { tko_entry.assignedItems += 1; tko_entry.estimatedMinutes += tko_item.estimateMinutes ?? 0; }
+  }
+  const tko_completedItems = tko_data.items.filter(tko_item => tko_doneStatusIds.has(tko_item.statusId)).length;
+  return {
+    projectId: tko_data.project.id,
+    totalItems: tko_data.items.length,
+    completedItems: tko_completedItems,
+    inProgressItems: tko_data.items.filter(tko_item => tko_progressStatusIds.has(tko_item.statusId)).length,
+    backlogItems: tko_data.items.filter(tko_item => !tko_item.sprintId).length,
+    overdueItems: tko_data.items.filter(tko_item => !!tko_item.dueAt && tko_item.dueAt.getTime() < Date.now() && !tko_doneStatusIds.has(tko_item.statusId)).length,
+    unestimatedItems: tko_data.items.filter(tko_item => tko_item.estimateMinutes === null).length,
+    completionPercent: tko_data.items.length ? Math.round((tko_completedItems / tko_data.items.length) * 100) : 0,
+    activeSprint: tko_data.sprints.find(tko_sprint => tko_sprint.state === "active") ?? null,
+    plannedSprintCount: tko_data.sprints.filter(tko_sprint => tko_sprint.state === "planned").length,
+    workload: Array.from(tko_workload.values()).filter(tko_entry => tko_entry.assignedItems > 0).sort((tko_left, tko_right) => tko_right.assignedItems - tko_left.assignedItems),
+  };
+}
+
+export async function searchProject(tko_actor: PlatformActor, tko_input: { projectId: string; query: string; statusId?: string; sprintId?: string; assigneeMemberId?: string; limit?: number }): Promise<ProjectSearchResult[]> {
+  const tko_data = await board(tko_actor, tko_input.projectId);
+  const tko_query = tko_input.query.trim().toLocaleLowerCase();
+  const tko_limit = Math.min(Math.max(tko_input.limit ?? 30, 1), 100);
+  const tko_members = await getPlatformStore().listTenantMembers(tko_actor.tenantId);
+  const tko_memberById = new Map(tko_members.map(tko_member => [tko_member.id, tko_member]));
+  const tko_items = tko_data.items
+    .filter(tko_item => (!tko_input.statusId || tko_item.statusId === tko_input.statusId) && (!tko_input.sprintId || tko_item.sprintId === tko_input.sprintId) && (!tko_input.assigneeMemberId || tko_item.assigneeMemberIds.includes(tko_input.assigneeMemberId)))
+    .filter(tko_item => !tko_query || `${tko_item.key} ${tko_item.title} ${tko_item.description} ${tko_item.assigneeMemberIds.map(tko_memberId => tko_memberById.get(tko_memberId)?.displayName ?? "").join(" ")}`.toLocaleLowerCase().includes(tko_query))
+    .map(tko_item => ({ kind: "work_item" as const, id: tko_item.id, title: tko_item.title, summary: tko_item.key, statusId: tko_item.statusId, sprintId: tko_item.sprintId, updatedAt: tko_item.updatedAt }));
+  const tko_sprints = tko_data.sprints
+    .filter(tko_sprint => !tko_query || `${tko_sprint.name} ${tko_sprint.goal}`.toLocaleLowerCase().includes(tko_query))
+    .map(tko_sprint => ({ kind: "sprint" as const, id: tko_sprint.id, title: tko_sprint.name, summary: tko_sprint.goal || tko_sprint.state }));
+  const tko_projectMemberIds = new Set(tko_data.items.flatMap(tko_item => tko_item.assigneeMemberIds));
+  const tko_memberResults = tko_members
+    .filter(tko_member => tko_projectMemberIds.has(tko_member.id) && (!tko_query || tko_member.displayName.toLocaleLowerCase().includes(tko_query)))
+    .map(tko_member => ({ kind: "member" as const, id: tko_member.id, title: tko_member.displayName, summary: "Project assignee" }));
+  const tko_fileResults = (await Promise.all(tko_data.items.map(async tko_item => (await getWorkStore().listAttachments(tko_actor.tenantId, tko_item.id)).map(tko_attachment => ({ kind: "file" as const, id: tko_attachment.id, workItemId: tko_item.id, title: tko_attachment.filename, summary: tko_item.key, updatedAt: tko_attachment.createdAt })))))
+    .flat()
+    .filter(tko_attachment => !tko_query || `${tko_attachment.title} ${tko_attachment.summary}`.toLocaleLowerCase().includes(tko_query));
+  return [...tko_items, ...tko_sprints, ...tko_memberResults, ...tko_fileResults].slice(0, tko_limit);
 }
 
 export async function itemDetails(tko_actor: PlatformActor, tko_workItemId: string) {
@@ -207,6 +258,12 @@ export async function createSprint(tko_input: CreateSprintInput) {
   const tko_project = await tko_projectFor(tko_input.actor, tko_input.projectId);
   tko_require(tko_input.actor, "work.sprint.manage", tko_project);
   return getWorkStore().createSprint(tko_input);
+}
+
+export async function startSprint(tko_actor: PlatformActor, tko_input: { projectId: string; sprintId: string; correlationId: string }) {
+  const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
+  tko_require(tko_actor, "work.sprint.manage", tko_project);
+  return getWorkStore().startSprint({ actor: tko_actor, ...tko_input });
 }
 
 export async function addItemsToSprint(tko_actor: PlatformActor, tko_input: { sprintId: string; workItemIds: string[]; correlationId: string }) {

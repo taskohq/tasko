@@ -241,3 +241,35 @@ export interface CompleteSprintInput {
   nextSprintId?: string | null;
   correlationId: string;
 }
+
+export interface StartSprintInput {
+  actor: PlatformActor;
+  projectId: string;
+  sprintId: string;
+  correlationId: string;
+}
+
+export interface ProjectOverview {
+  projectId: string;
+  totalItems: number;
+  completedItems: number;
+  inProgressItems: number;
+  backlogItems: number;
+  overdueItems: number;
+  unestimatedItems: number;
+  completionPercent: number;
+  activeSprint: WorkSprint | null;
+  plannedSprintCount: number;
+  workload: Array<{ memberId: string; displayName: string; assignedItems: number; estimatedMinutes: number }>;
+}
+
+export interface ProjectSearchResult {
+  kind: "work_item" | "sprint" | "member" | "file";
+  id: string;
+  title: string;
+  summary: string;
+  statusId?: string;
+  sprintId?: string | null;
+  workItemId?: string;
+  updatedAt?: Date;
+}

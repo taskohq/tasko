@@ -80,6 +80,7 @@ export interface WorkStore {
   listDependencies(tko_tenantId: string, tko_workItemId: string): Promise<WorkItemRelation[]>;
   removeDependency(tko_actor: PlatformActor, tko_input: { workItemId: string; relationId: string; correlationId: string }): Promise<void>;
   createSprint(tko_input: CreateSprintInput): Promise<WorkSprint>;
+  startSprint(tko_input: { actor: PlatformActor; projectId: string; sprintId: string; correlationId: string }): Promise<WorkSprint>;
   addItemsToSprint(tko_actor: PlatformActor, tko_input: { sprintId: string; workItemIds: string[]; correlationId: string }): Promise<void>;
   completeSprint(tko_actor: PlatformActor, tko_input: CompleteSprintInput): Promise<WorkSprint>;
   listSprints(tko_tenantId: string, tko_projectId: string): Promise<WorkSprint[]>;
@@ -470,6 +471,17 @@ export class MemoryWorkStore implements WorkStore {
     this.tko_sprints.set(tko_sprint.id, tko_sprint);
     this.tko_sprintItems.set(tko_sprint.id, new Set());
     await this.tko_emit(tko_input.actor, "work.sprint_created.v1", "work.sprint", { sprintId: tko_sprint.id, projectId: tko_sprint.projectId }, "work.sprint.created", "sprint", tko_sprint.id, tko_input.correlationId);
+    return tko_clone(tko_sprint);
+  }
+
+  async startSprint(tko_input: { actor: PlatformActor; projectId: string; sprintId: string; correlationId: string }): Promise<WorkSprint> {
+    const tko_sprint = this.tko_sprints.get(tko_input.sprintId);
+    if (!tko_sprint || tko_sprint.tenantId !== tko_input.actor.tenantId || tko_sprint.projectId !== tko_input.projectId || tko_sprint.state !== "planned") throw new Error("WORK_SPRINT_NOT_FOUND");
+    if (Array.from(this.tko_sprints.values()).some(tko_entry => tko_entry.tenantId === tko_input.actor.tenantId && tko_entry.projectId === tko_sprint.projectId && tko_entry.id !== tko_sprint.id && tko_entry.state === "active")) throw new Error("WORK_SPRINT_ACTIVE_EXISTS");
+    tko_sprint.state = "active";
+    tko_sprint.startAt ??= tko_now();
+    this.tko_sprints.set(tko_sprint.id, tko_sprint);
+    await this.tko_emit(tko_input.actor, "work.sprint_started.v1", "work.sprint", { sprintId: tko_sprint.id, projectId: tko_sprint.projectId }, "work.sprint.started", "sprint", tko_sprint.id, tko_input.correlationId);
     return tko_clone(tko_sprint);
   }
 
