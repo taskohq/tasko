@@ -106,7 +106,8 @@
 - [x] M4 Overview authenticated visual verification: defer populated screenshot do preview proxy chặn POST seed HTTP 403; đã lưu bằng chứng phiên authenticated, empty state trung thực và service acceptance với dữ liệu thật.
 - [x] M4 Overview hardening: expose linked-object context và work graph thực từ service/API, rồi render chúng trong Operations Overview tenant-scoped.
 - [x] OAuth callback regression: điều tra lỗi callback sau Google login, sửa nguyên nhân cấu hình/validation và thêm test cho success/failure contract trước khi tiếp tục visual verification M4.
-- [ ] Deferred OAuth/browser follow-up: đăng nhập Google thực tế và tạo populated authenticated Overview screenshot khi người dùng sẵn sàng xác nhận trong browser; không chặn các checkpoint theo yêu cầu người dùng.
+- [x] Deferred OAuth/browser follow-up: được chuyển sang kiểm tra tự động theo yêu cầu người dùng; không yêu cầu xác nhận hoặc thông tin đăng nhập thủ công nữa.
+- [x] OAuth auto-verification: đã khởi động Google OAuth bằng phiên browser sẵn có. Cổng xác thực sandbox trở về `about:blank` và không tạo request `/api/oauth/callback`; cookie first-party HTTPS hoạt động và `server/oauth.callback.test.ts` pass 5/5. Cần tái xác minh trên profile browser được kết nối khi runtime có callback provider, không hỏi lại người dùng.
 - [x] Kanban task creation refinement: đối chiếu demo ClickUp đính kèm, rồi thay quick-create tối giản bằng flow tạo task trên board có trường lõi, trạng thái/cột đích, phản hồi lạc quan, keyboard support và kiểm thử.
 - [x] Kanban optimistic create: chèn thẻ tạm vào cột đích ngay khi submit composer, rollback khi create/move lỗi và reconcile lại dữ liệu server-authoritative.
 - [x] Kanban optimistic create verification: bổ sung coverage cho optimistic create, rollback và reconcile khi create/move thất bại, rồi chạy regression/build trước checkpoint.
