@@ -204,4 +204,20 @@ describe("Unified Workspace Beta M4", () => {
       setSaaSStoreForTests(null);
     }
   });
+
+  it("returns Form submission history only to authorized tenant readers and rejects untrusted Work targets at configuration time", async () => {
+    const tko_owner = tko_actor();
+    const tko_project = await tko_createProject(tko_owner);
+    const tko_form = await workspace.createForm(tko_owner, { name: "History intake", fields: [{ id: "title", label: "Title", fieldType: "text", required: true }], targetType: "work_item", targetConfig: { projectId: tko_project.id }, correlationId: "m8-history-form" });
+    await workspace.activateForm(tko_owner, { formId: tko_form.id, correlationId: "m8-history-active" });
+    const tko_submission = await workspace.submitForm(tko_owner, { formId: tko_form.id, values: { title: "Visible durable intake" }, idempotencyKey: "5ac43d15-fcc6-474f-974d-b9838a9db0a1", correlationId: "m8-history-submit" });
+    await expect(workspace.formSubmissions(tko_owner, tko_form.id)).resolves.toEqual([expect.objectContaining({ id: tko_submission.id, targetEntityId: tko_submission.targetEntityId })]);
+
+    const tko_guest = tko_actor({ authSubject: "workspace-guest", memberId: "workspace-guest-member", role: "guest" });
+    await expect(workspace.formSubmissions(tko_guest, tko_form.id)).rejects.toThrow("TASKO_AUTHORIZATION_DENIED");
+    const tko_otherOwner = tko_actor({ authSubject: "workspace-other-owner", tenantId: "tko-tenant-other", tenantSlug: "other", memberId: "tko-member-other-owner", role: "owner" });
+    const tko_otherProject = await tko_createProject(tko_otherOwner);
+    await expect(workspace.createForm(tko_owner, { name: "Cross tenant target", fields: [{ id: "title", label: "Title", fieldType: "text", required: true }], targetType: "work_item", targetConfig: { projectId: tko_otherProject.id }, correlationId: "m8-cross-form" })).rejects.toThrow("WORKSPACE_FORM_WORK_PROJECT_NOT_FOUND");
+    await expect(workspace.createAutomationRule(tko_owner, { name: "Missing target", triggerType: "crm.lead_created.v1", actions: [{ type: "create_work_item", config: {} }], correlationId: "m8-missing-target" })).rejects.toThrow("WORKSPACE_AUTOMATION_PROJECT_REQUIRED");
+  });
 });

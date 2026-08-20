@@ -73,9 +73,26 @@ export async function linkDocument(tko_actor: PlatformActor, tko_input: { docume
 export async function entityLinks(tko_actor: PlatformActor, tko_entityType: WorkspaceEntityType, tko_entityId: string) { await tko_entityExists(tko_actor, tko_entityType, tko_entityId); return getWorkspaceStore().listEntityLinks(tko_actor.tenantId, tko_entityType, tko_entityId); }
 export async function createEntityLink(tko_actor: PlatformActor, tko_input: { sourceType: WorkspaceEntityType; sourceId: string; targetType: WorkspaceEntityType; targetId: string; relationType: "context" | "reference" | "related" | "blocks"; correlationId: string }) { tko_require(tko_actor, "workspace.link.manage", "workspace_entity_link", `${tko_input.sourceId}:${tko_input.targetId}`); await tko_entityExists(tko_actor, tko_input.sourceType, tko_input.sourceId); await tko_entityExists(tko_actor, tko_input.targetType, tko_input.targetId); return getWorkspaceStore().createEntityLink(tko_actor, tko_input); }
 
-export async function createForm(tko_actor: PlatformActor, tko_input: { name: string; description?: string; fields: import("../../../packages/contracts/src/workspace").WorkspaceFormField[]; targetType: "work_item" | "crm_lead"; targetConfig: Record<string, unknown>; correlationId: string }) { tko_require(tko_actor, "workspace.form.manage", "workspace_form", "new"); if (!tko_input.fields.length) throw new Error("WORKSPACE_FORM_FIELDS_REQUIRED"); return getWorkspaceStore().createForm(tko_actor, { name: tko_input.name, description: tko_input.description ?? "", fields: tko_input.fields, targetType: tko_input.targetType, targetConfig: tko_input.targetConfig, correlationId: tko_input.correlationId }); }
+export async function createForm(tko_actor: PlatformActor, tko_input: { name: string; description?: string; fields: import("../../../packages/contracts/src/workspace").WorkspaceFormField[]; targetType: "work_item" | "crm_lead"; targetConfig: Record<string, unknown>; correlationId: string }) {
+  tko_require(tko_actor, "workspace.form.manage", "workspace_form", "new");
+  if (!tko_input.fields.length) throw new Error("WORKSPACE_FORM_FIELDS_REQUIRED");
+  if (tko_input.targetType === "work_item") {
+    const tko_projectId = tko_text(tko_input.targetConfig.projectId);
+    if (!tko_projectId) throw new Error("WORKSPACE_FORM_WORK_PROJECT_REQUIRED");
+    const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_projectId);
+    if (!tko_project) throw new Error("WORKSPACE_FORM_WORK_PROJECT_NOT_FOUND");
+    requireCapability(tko_actor, "work.item.create", tko_project);
+  }
+  return getWorkspaceStore().createForm(tko_actor, { name: tko_input.name, description: tko_input.description ?? "", fields: tko_input.fields, targetType: tko_input.targetType, targetConfig: tko_input.targetConfig, correlationId: tko_input.correlationId });
+}
 export async function forms(tko_actor: PlatformActor) { tko_require(tko_actor, "workspace.form.read", "workspace_form", "list"); return getWorkspaceStore().listForms(tko_actor.tenantId); }
 export async function activateForm(tko_actor: PlatformActor, tko_input: { formId: string; correlationId: string }) { tko_require(tko_actor, "workspace.form.manage", "workspace_form", tko_input.formId); return getWorkspaceStore().activateForm(tko_actor, tko_input); }
+export async function formSubmissions(tko_actor: PlatformActor, tko_formId: string) {
+  const tko_form = await getWorkspaceStore().getForm(tko_actor.tenantId, tko_formId);
+  if (!tko_form) throw new Error("WORKSPACE_FORM_NOT_FOUND");
+  tko_require(tko_actor, "workspace.form.read", "workspace_form", tko_form.id);
+  return getWorkspaceStore().listFormSubmissions(tko_actor.tenantId, tko_form.id);
+}
 export async function submitForm(tko_actor: PlatformActor, tko_input: { formId: string; values: Record<string, unknown>; idempotencyKey: string; correlationId: string }) {
   const tko_form = await getWorkspaceStore().getForm(tko_actor.tenantId, tko_input.formId); if (!tko_form) throw new Error("WORKSPACE_FORM_NOT_FOUND"); tko_require(tko_actor, "workspace.form.submit", "workspace_form", tko_form.id); if (tko_form.status !== "active") throw new Error("WORKSPACE_FORM_NOT_ACTIVE");
   for (const tko_field of tko_form.fields) if (tko_field.required && !tko_text(tko_input.values[tko_field.id])) throw new Error(`WORKSPACE_FORM_REQUIRED_FIELD:${tko_field.id}`);
@@ -92,7 +109,20 @@ export async function submitForm(tko_actor: PlatformActor, tko_input: { formId: 
   return getWorkspaceStore().recordFormSubmission(tko_actor, { formId: tko_form.id, values: tko_input.values, targetEntityType: "crm_lead", targetEntityId: tko_lead.id, idempotencyKey: tko_input.idempotencyKey, correlationId: tko_input.correlationId });
 }
 
-export async function createAutomationRule(tko_actor: PlatformActor, tko_input: { name: string; triggerType: AutomationTriggerType; condition?: Record<string, unknown>; actions: WorkspaceAutomationAction[]; correlationId: string }) { tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_rule", "new"); await getSaaSService().requireFeature(tko_actor, "automation"); if (!tko_input.actions.length) throw new Error("WORKSPACE_AUTOMATION_ACTION_REQUIRED"); return getWorkspaceStore().createAutomationRule(tko_actor, { name: tko_input.name, status: "active", triggerType: tko_input.triggerType, condition: tko_input.condition ?? {}, actions: tko_input.actions, correlationId: tko_input.correlationId }); }
+export async function createAutomationRule(tko_actor: PlatformActor, tko_input: { name: string; triggerType: AutomationTriggerType; condition?: Record<string, unknown>; actions: WorkspaceAutomationAction[]; correlationId: string }) {
+  tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_rule", "new");
+  await getSaaSService().requireFeature(tko_actor, "automation");
+  if (!tko_input.actions.length) throw new Error("WORKSPACE_AUTOMATION_ACTION_REQUIRED");
+  for (const tko_action of tko_input.actions) {
+    if (tko_action.type !== "create_work_item") continue;
+    const tko_projectId = tko_text(tko_action.config.projectId);
+    if (!tko_projectId) throw new Error("WORKSPACE_AUTOMATION_PROJECT_REQUIRED");
+    const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_projectId);
+    if (!tko_project) throw new Error("WORKSPACE_AUTOMATION_PROJECT_NOT_FOUND");
+    requireCapability(tko_actor, "work.item.create", tko_project);
+  }
+  return getWorkspaceStore().createAutomationRule(tko_actor, { name: tko_input.name, status: "active", triggerType: tko_input.triggerType, condition: tko_input.condition ?? {}, actions: tko_input.actions, correlationId: tko_input.correlationId });
+}
 export async function automationRules(tko_actor: PlatformActor) { tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_rule", "list"); return getWorkspaceStore().listAutomationRules(tko_actor.tenantId); }
 export async function automationExecutions(tko_actor: PlatformActor) {
   tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_execution", "list");

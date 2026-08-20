@@ -34,6 +34,7 @@ export interface WorkspaceStore {
   getForm(tko_tenantId: string, tko_formId: string): Promise<WorkspaceForm | null>;
   activateForm(tko_actor: PlatformActor, tko_input: { formId: string; correlationId: string }): Promise<WorkspaceForm>;
   getFormSubmission(tko_tenantId: string, tko_formId: string, tko_idempotencyKey: string): Promise<WorkspaceFormSubmission | null>;
+  listFormSubmissions(tko_tenantId: string, tko_formId: string): Promise<WorkspaceFormSubmission[]>;
   recordFormSubmission(tko_actor: PlatformActor, tko_input: Omit<WorkspaceFormSubmission, "id" | "tenantId" | "type" | "submittedByMemberId" | "createdAt"> & { correlationId: string }): Promise<WorkspaceFormSubmission>;
   createAutomationRule(tko_actor: PlatformActor, tko_input: Omit<WorkspaceAutomationRule, "id" | "tenantId" | "type" | "ownerMemberId" | "version" | "createdAt" | "updatedAt"> & { correlationId: string }): Promise<WorkspaceAutomationRule>;
   listAutomationRules(tko_tenantId: string, tko_triggerType?: WorkspaceAutomationRule["triggerType"]): Promise<WorkspaceAutomationRule[]>;
@@ -153,6 +154,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore {
   async activateForm(tko_actor: PlatformActor, tko_input: { formId: string; correlationId: string }): Promise<WorkspaceForm> { const tko_form = this.tko_forms.get(tko_input.formId); if (!tko_form || tko_form.tenantId !== tko_actor.tenantId) throw new Error("WORKSPACE_FORM_NOT_FOUND"); tko_form.status = "active"; tko_form.updatedAt = tko_now(); this.tko_forms.set(tko_form.id, tko_form); await this.tko_emit(tko_actor, "workspace.form_activated.v1", "workspace.form", { formId: tko_form.id }, "workspace.form.activated", "workspace_form", tko_form.id, tko_input.correlationId); return tko_clone(tko_form); }
 
   async getFormSubmission(tko_tenantId: string, tko_formId: string, tko_idempotencyKey: string): Promise<WorkspaceFormSubmission | null> { return tko_clone(this.tko_submissions.get(`${tko_tenantId}:${tko_formId}:${tko_idempotencyKey}`) ?? null); }
+  async listFormSubmissions(tko_tenantId: string, tko_formId: string): Promise<WorkspaceFormSubmission[]> { return Array.from(this.tko_submissions.values()).filter(tko_submission => tko_submission.tenantId === tko_tenantId && tko_submission.formId === tko_formId).sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime()).map(tko_clone); }
 
   async recordFormSubmission(tko_actor: PlatformActor, tko_input: Omit<WorkspaceFormSubmission, "id" | "tenantId" | "type" | "submittedByMemberId" | "createdAt"> & { correlationId: string }): Promise<WorkspaceFormSubmission> {
     const tko_key = `${tko_actor.tenantId}:${tko_input.formId}:${tko_input.idempotencyKey}`;

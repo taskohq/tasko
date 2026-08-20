@@ -14,6 +14,7 @@ import Admin from "./pages/Admin";
 import Ecosystem from "./pages/Ecosystem";
 import Imports from "./pages/Imports";
 import Workspace from "./pages/Workspace";
+import FormsAutomation from "./pages/FormsAutomation";
 import AI from "./pages/AI";
 import Login from "./pages/Login";
 
@@ -27,8 +28,8 @@ function Router() {
         <Route path={"/platform"} component={() => <Workspace mode="overview" />} />
         <Route path={"/inbox"} component={() => <Workspace mode="inbox" />} />
         <Route path={"/docs"} component={() => <Workspace mode="docs" />} />
-        <Route path={"/forms"} component={() => <Workspace mode="forms" />} />
-        <Route path={"/automations"} component={() => <Workspace mode="automations" />} />
+        <Route path={"/forms"} component={() => <FormsAutomation mode="forms" />} />
+        <Route path={"/automations"} component={() => <FormsAutomation mode="automations" />} />
         <Route path={"/calendar"} component={() => <Workspace mode="calendar" />} />
         <Route path={"/work"} component={Work} />
         <Route path={"/chat"} component={Chat} />

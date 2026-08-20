@@ -50,4 +50,35 @@ tko_describe("Unified Workspace Beta M4 on PostgreSQL", () => {
       await tko_pool.end();
     }
   });
+
+  it("persists tenant-scoped Form submission history idempotently with audit and outbox", async () => {
+    const tko_pool = new Pool({ connectionString: tko_postgresUrl });
+    const tko_store = new PostgresWorkspaceStore(tko_postgresUrl!);
+    const tko_tenantId = randomUUID();
+    const tko_userId = randomUUID();
+    const tko_actor: PlatformActor = { authSubject: `postgres-workspace-form:${tko_tenantId}`, tenantId: tko_tenantId, tenantSlug: `postgres-form-${tko_tenantId.slice(0, 8)}`, memberId: randomUUID(), role: "owner", membershipStatus: "active", correlationId: `postgres-workspace-form:${tko_tenantId}` };
+
+    try {
+      await tko_pool.query("insert into tenants (id,slug,name,status,deployment_profile) values ($1,$2,$3,'active','single_tenant')", [tko_tenantId, tko_actor.tenantSlug, "PostgreSQL Form Acceptance"]);
+      await tko_pool.query("insert into users (id,auth_subject,status) values ($1,$2,'active')", [tko_userId, tko_actor.authSubject]);
+      await tko_pool.query("insert into tenant_members (id,tenant_id,user_id,role,status,display_name) values ($1,$2,$3,'owner','active','PostgreSQL Form Owner')", [tko_actor.memberId, tko_tenantId, tko_userId]);
+
+      const tko_form = await tko_store.createForm(tko_actor, { name: "PostgreSQL intake", description: "Durable submissions", fields: [{ id: "title", label: "Title", fieldType: "text", required: true }], targetType: "work_item", targetConfig: { projectId: randomUUID() }, correlationId: `${tko_actor.correlationId}:create` });
+      await tko_store.activateForm(tko_actor, { formId: tko_form.id, correlationId: `${tko_actor.correlationId}:activate` });
+      const tko_submissionInput = { formId: tko_form.id, values: { title: "Persisted intake" }, targetEntityType: "work_item" as const, targetEntityId: randomUUID(), idempotencyKey: randomUUID(), correlationId: `${tko_actor.correlationId}:submit` };
+      const tko_first = await tko_store.recordFormSubmission(tko_actor, tko_submissionInput);
+      const tko_second = await tko_store.recordFormSubmission(tko_actor, { ...tko_submissionInput, targetEntityId: randomUUID(), correlationId: `${tko_actor.correlationId}:retry` });
+      const tko_durable = await tko_pool.query("select count(*) from workspace_form_submissions where tenant_id=$1 and form_id=$2", [tko_tenantId, tko_form.id]);
+
+      expect(tko_second.id).toBe(tko_first.id);
+      expect(await tko_store.listFormSubmissions(tko_tenantId, tko_form.id)).toEqual([expect.objectContaining({ id: tko_first.id, targetEntityId: tko_submissionInput.targetEntityId })]);
+      expect(await tko_store.listFormSubmissions(randomUUID(), tko_form.id)).toEqual([]);
+      expect(tko_durable.rows[0]?.count).toBe("1");
+      expect((await tko_pool.query("select action from audit_logs where tenant_id=$1", [tko_tenantId])).rows.map(tko_row => tko_row.action)).toEqual(expect.arrayContaining(["workspace.form.created", "workspace.form.activated", "workspace.form.submitted"]));
+    } finally {
+      await tko_cleanup(tko_pool, tko_tenantId, tko_userId);
+      await tko_store.close();
+      await tko_pool.end();
+    }
+  });
 });
