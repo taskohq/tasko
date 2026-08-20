@@ -217,6 +217,14 @@ export interface UpdateWorkItemInput {
   correlationId: string;
 }
 
+/** User-requested task deletion is a reversible archive, never a hard delete. */
+export interface ArchiveWorkItemInput {
+  actor: PlatformActor;
+  workItemId: string;
+  expectedVersion: number;
+  correlationId: string;
+}
+
 export interface CreateCommentInput {
   actor: PlatformActor;
   workItemId: string;

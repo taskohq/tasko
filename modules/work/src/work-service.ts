@@ -1,4 +1,5 @@
 import type {
+  ArchiveWorkItemInput,
   CreateCommentInput,
   CreateProjectInput,
   CreateSprintInput,
@@ -218,6 +219,14 @@ export async function updateWorkItem(tko_input: UpdateWorkItemInput) {
   const tko_dueAt = tko_input.dueAt === undefined ? tko_item.dueAt : tko_input.dueAt;
   if (tko_startAt && tko_dueAt && tko_startAt.getTime() > tko_dueAt.getTime()) throw new Error("WORK_ITEM_DATE_RANGE_INVALID");
   return getWorkStore().updateWorkItem(tko_input);
+}
+
+/** Archive is the supported destructive action: it preserves tenant auditability and related history. */
+export async function archiveWorkItem(tko_input: ArchiveWorkItemInput) {
+  const tko_item = await getWorkStore().getWorkItem(tko_input.actor.tenantId, tko_input.workItemId);
+  if (!tko_item || tko_item.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+  tko_require(tko_input.actor, "work.item.archive", tko_item);
+  return getWorkStore().archiveWorkItem(tko_input);
 }
 
 export async function createComment(tko_input: CreateCommentInput) {

@@ -321,4 +321,29 @@ describe("Work Alpha acceptance boundaries", () => {
     expect((await tko_platformStore.listAuditLogs()).some(tko_event => tko_event.action === "work.sprint.started" && tko_event.metadata.sprintId === tko_sprint.id)).toBe(true);
     expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.sprint_started.v1" && tko_event.payload.sprintId === tko_sprint.id)).toBe(true);
   });
+
+  it("creates visible task comments and archives a task without bypassing RBAC, history or outbox", async () => {
+    const tko_owner = await tko_actor();
+    const tko_otherTenant = { ...tko_owner, authSubject: tko_otherSubject, tenantId: "tko-tenant-other-workspace", tenantSlug: "other-workspace", memberId: "tko-member-demo-owner", correlationId: "test:archive-other-tenant" };
+    const tko_guest = { ...tko_owner, authSubject: "archive-guest", memberId: "archive-guest-member", role: "guest" as const, correlationId: "test:archive-guest" };
+    const tko_space = await work.createSpace(tko_owner, { name: "Operations", slug: "operations", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Incident response", key: "INC", methodology: "kanban", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_item = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Document the handoff", correlationId: tko_owner.correlationId });
+
+    const tko_comment = await work.createComment({ actor: tko_owner, workItemId: tko_item.id, body: "The on-call handoff is complete.", correlationId: tko_owner.correlationId });
+    expect((await work.itemDetails(tko_owner, tko_item.id)).comments).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_comment.id, body: "The on-call handoff is complete.", authorMemberId: tko_owner.memberId })]));
+    expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.comment_created.v1" && tko_event.payload.commentId === tko_comment.id)).toBe(true);
+
+    await expect(work.archiveWorkItem({ actor: tko_guest, workItemId: tko_item.id, expectedVersion: tko_item.version, correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+    await expect(work.archiveWorkItem({ actor: tko_otherTenant, workItemId: tko_item.id, expectedVersion: tko_item.version, correlationId: tko_otherTenant.correlationId })).rejects.toThrow("WORK_ITEM_NOT_FOUND");
+    await expect(work.archiveWorkItem({ actor: tko_owner, workItemId: tko_item.id, expectedVersion: tko_item.version + 1, correlationId: tko_owner.correlationId })).rejects.toThrow("WORK_ITEM_VERSION_CONFLICT");
+
+    const tko_archived = await work.archiveWorkItem({ actor: tko_owner, workItemId: tko_item.id, expectedVersion: tko_item.version, correlationId: tko_owner.correlationId });
+    expect(tko_archived).toEqual(expect.objectContaining({ id: tko_item.id, archivedAt: expect.any(Date), version: 2 }));
+    expect((await work.board(tko_owner, tko_project.id)).items.map(tko_entry => tko_entry.id)).not.toContain(tko_item.id);
+    await expect(work.itemDetails(tko_owner, tko_item.id)).rejects.toThrow("WORK_ITEM_NOT_FOUND");
+    expect((await tko_workStore.listHistory(tko_owner.tenantId, tko_item.id)).at(-1)).toEqual(expect.objectContaining({ field: "archived", before: false, after: true, actorMemberId: tko_owner.memberId }));
+    expect((await tko_platformStore.listAuditLogs()).some(tko_event => tko_event.action === "work.work_item.archived" && tko_event.resourceId === tko_item.id)).toBe(true);
+    expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.work_item_archived.v1" && tko_event.payload.workItemId === tko_item.id)).toBe(true);
+  });
 });

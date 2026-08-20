@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import type {
+  ArchiveWorkItemInput,
   CreateCommentInput,
   CreateProjectInput,
   ReorderWorkflowStatusInput,
@@ -151,6 +152,20 @@ export class PostgresWorkStore implements WorkStore {
     await this.tko_history(c, tko_input.actor, item.id, "fields", before, after);
     await this.tko_emit(c, tko_input.actor, "work.work_item_updated.v1", "work.item", { workItemId: item.id, key: item.key, before, after, version: item.version }, "work.work_item.updated", "work_item", item.id, tko_input.correlationId);
     return item;
+  }); }
+
+  async archiveWorkItem(tko_input: ArchiveWorkItemInput): Promise<WorkItem> { return this.tko_withTransaction(tko_input.actor.tenantId, async c => {
+    const tko_currentResult = await c.query(`select * from work_items where id=$1 and tenant_id=$2 for update`, [tko_input.workItemId, tko_input.actor.tenantId]);
+    if (!tko_currentResult.rowCount) throw new Error("WORK_ITEM_NOT_FOUND");
+    const tko_current = await this.tko_item(c, tko_currentResult.rows[0]);
+    if (tko_current.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+    if (tko_current.version !== tko_input.expectedVersion) throw new Error("WORK_ITEM_VERSION_CONFLICT");
+    const tko_archived = await c.query(`update work_items set archived_at=now(),version=version+1,updated_at=now() where id=$1 and tenant_id=$2 and archived_at is null returning *`, [tko_current.id, tko_input.actor.tenantId]);
+    if (!tko_archived.rowCount) throw new Error("WORK_ITEM_NOT_FOUND");
+    const tko_item = await this.tko_item(c, tko_archived.rows[0]);
+    await this.tko_history(c, tko_input.actor, tko_item.id, "archived", false, true);
+    await this.tko_emit(c, tko_input.actor, "work.work_item_archived.v1", "work.item", { workItemId: tko_item.id, key: tko_item.key, projectId: tko_item.projectId, archivedAt: tko_item.archivedAt, version: tko_item.version }, "work.work_item.archived", "work_item", tko_item.id, tko_input.correlationId);
+    return tko_item;
   }); }
 
   async createComment(tko_input: CreateCommentInput): Promise<WorkComment> { return this.tko_withTransaction(tko_input.actor.tenantId, async c => { const item=await c.query(`select id from work_items where id=$1 and tenant_id=$2`,[tko_input.workItemId,tko_input.actor.tenantId]); if(!item.rowCount) throw new Error("WORK_ITEM_NOT_FOUND"); const r=await c.query(`insert into work_comments (id,tenant_id,work_item_id,author_member_id,body_text) values ($1,$2,$3,$4,$5) returning *`,[crypto.randomUUID(),tko_input.actor.tenantId,tko_input.workItemId,tko_input.actor.memberId,tko_input.body.trim()]); const comment=this.tko_comment(r.rows[0]); await this.tko_emit(c,tko_input.actor,"work.comment_created.v1","work.item",{workItemId:tko_input.workItemId,commentId:comment.id},"work.comment.created","work_comment",comment.id,tko_input.correlationId); return comment; }); }

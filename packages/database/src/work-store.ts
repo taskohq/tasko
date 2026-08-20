@@ -1,4 +1,5 @@
 import type {
+  ArchiveWorkItemInput,
   CreateCommentInput,
   CompleteSprintInput,
   CreateProjectInput,
@@ -69,6 +70,7 @@ export interface WorkStore {
   transitionWorkItem(tko_input: TransitionWorkItemInput): Promise<WorkItem>;
   moveWorkItem(tko_input: MoveWorkItemInput): Promise<WorkItem>;
   updateWorkItem(tko_input: UpdateWorkItemInput): Promise<WorkItem>;
+  archiveWorkItem(tko_input: ArchiveWorkItemInput): Promise<WorkItem>;
   createComment(tko_input: CreateCommentInput): Promise<WorkComment>;
   listComments(tko_tenantId: string, tko_workItemId: string): Promise<WorkComment[]>;
   listChecklistItems(tko_tenantId: string, tko_workItemId: string): Promise<WorkChecklistItem[]>;
@@ -398,6 +400,20 @@ export class MemoryWorkStore implements WorkStore {
     };
     await this.tko_historyEntry(tko_input.actor, tko_item, "fields", tko_before, tko_after);
     await this.tko_emit(tko_input.actor, "work.work_item_updated.v1", "work.item", { workItemId: tko_item.id, key: tko_item.key, before: tko_before, after: tko_after, version: tko_item.version }, "work.work_item.updated", "work_item", tko_item.id, tko_input.correlationId);
+    return tko_clone(tko_item);
+  }
+
+  async archiveWorkItem(tko_input: ArchiveWorkItemInput): Promise<WorkItem> {
+    const tko_item = await this.getWorkItem(tko_input.actor.tenantId, tko_input.workItemId);
+    if (!tko_item || tko_item.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+    if (tko_item.version !== tko_input.expectedVersion) throw new Error("WORK_ITEM_VERSION_CONFLICT");
+    const tko_archivedAt = tko_now();
+    tko_item.archivedAt = tko_archivedAt;
+    tko_item.updatedAt = tko_archivedAt;
+    tko_item.version += 1;
+    this.tko_items.set(tko_item.id, tko_item);
+    await this.tko_historyEntry(tko_input.actor, tko_item, "archived", false, true);
+    await this.tko_emit(tko_input.actor, "work.work_item_archived.v1", "work.item", { workItemId: tko_item.id, key: tko_item.key, projectId: tko_item.projectId, archivedAt: tko_archivedAt, version: tko_item.version }, "work.work_item.archived", "work_item", tko_item.id, tko_input.correlationId);
     return tko_clone(tko_item);
   }
 
