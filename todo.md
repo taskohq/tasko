@@ -189,3 +189,4 @@
 - [x] Branding: dùng logo và favicon chính thức từ tệp người dùng cung cấp, cập nhật app shell, metadata và kiểm chứng hiển thị responsive.
 - [x] Work board realtime: đồng bộ các thay đổi board giữa nhiều thành viên theo tenant channel, không bỏ qua authorization hay server-authoritative reconciliation.
 - [x] Work board notifications: phát notification tenant-safe và có ngữ cảnh cho các thay đổi board liên quan đến người dùng.
+- [x] Work Backlog/Board consistency: dùng cùng server-authoritative workflow status và realtime reconciliation cho mọi task view; loại bỏ trường hợp một task hiển thị hai cột/trạng thái khác nhau, kèm regression cross-view.

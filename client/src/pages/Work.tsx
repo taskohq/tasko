@@ -4,6 +4,7 @@ import { startLogin } from "@/const";
 import { tko_runBulkStatusMove } from "@/lib/bulk-work-status";
 import { tko_filterKanbanItems, tko_groupKanbanItems, type TkoKanbanFilter, type TkoKanbanGrouping } from "@/lib/kanban-board-controls";
 import { tko_addOptimistic, tko_removeOptimistic, tko_runOptimisticCreate } from "@/lib/kanban-optimistic";
+import { tko_displayWorkflowStatus } from "@/lib/work-status-reconciliation";
 import { useWorkBoardRealtime } from "@/hooks/useWorkBoardRealtime";
 import { trpc } from "@/lib/trpc";
 import {
@@ -43,7 +44,7 @@ type TkoBoardItem = {
   key: string;
   title: string;
   priority: TkoPriority;
-  status: TkoCategory;
+  status: string;
   statusId?: string;
   version?: number;
   rank?: string;
@@ -458,13 +459,13 @@ export default function Work() {
   }, [tko_board.data]);
   const tko_items = useMemo<TkoBoardItem[]>(() => {
     if (!tko_board.data) return [...tko_previewItems, ...tko_optimisticItems];
-    const tko_statusById = new Map(tko_board.data.statuses.map(tko_status => [tko_status.id, tko_status.category]));
+    const tko_statusById = new Map(tko_board.data.statuses.map(tko_status => [tko_status.id, tko_status]));
     const tko_serverItems = tko_board.data.items.map(tko_item => ({
       id: tko_item.id,
       key: tko_item.key,
       title: tko_item.title,
       priority: tko_item.priority,
-      status: tko_statusFor(tko_statusById.get(tko_item.statusId) ?? "todo"),
+      status: tko_displayWorkflowStatus(tko_item.statusId, tko_board.data.statuses, "Unknown status"),
       statusId: tko_item.statusId,
       version: tko_item.version,
       rank: tko_item.rank,
@@ -511,6 +512,21 @@ export default function Work() {
       return tko_next.size === tko_current.size ? tko_current : tko_next;
     });
   }, [tko_items]);
+
+  useEffect(() => {
+    if (!tko_selectedItem?.id) return;
+    const tko_liveItem = tko_items.find(tko_item => tko_item.id === tko_selectedItem.id && !tko_item.optimistic);
+    if (!tko_liveItem) return;
+    setTkoSelectedItem(tko_current => {
+      if (!tko_current || tko_current.id !== tko_liveItem.id) return tko_current;
+      return tko_current.statusId === tko_liveItem.statusId
+        && tko_current.status === tko_liveItem.status
+        && tko_current.version === tko_liveItem.version
+        && tko_current.title === tko_liveItem.title
+        ? tko_current
+        : tko_liveItem;
+    });
+  }, [tko_items, tko_selectedItem?.id]);
 
   function tko_openItem(tko_item: TkoBoardItem) {
     setTkoSelectedItem(tko_item);
@@ -675,7 +691,7 @@ export default function Work() {
       key: "Creating…",
       title: tko_draft.title.trim(),
       priority: tko_draft.priority,
-      status: tko_draft.status,
+      status: tko_columns.find(tko_column => tko_column.statusId === tko_draft.statusId)?.label ?? tko_draft.status.replace("_", " "),
       statusId: tko_draft.statusId,
       version: 0,
       rank: "zzzzzzzzzzzz",
@@ -702,7 +718,7 @@ export default function Work() {
       await tko_uploadDraftFiles(tko_created.id, tko_files);
       tko_cancelCreateComposer();
       await tko_refreshBoard();
-      tko_openItem({ id: tko_created.id, key: tko_created.key, title: tko_created.title, priority: tko_created.priority, status: "todo", statusId: tko_created.statusId, version: tko_created.version, rank: tko_created.rank, detail: tko_created.estimateMinutes ? `${Math.round(tko_created.estimateMinutes / 60)}h estimate` : "Work item", assignee: tko_created.assigneeMemberIds.length ? "ME" : "—", dueLabel: tko_dueLabel(tko_created.dueAt) });
+      tko_openItem({ id: tko_created.id, key: tko_created.key, title: tko_created.title, priority: tko_created.priority, status: tko_columns.find(tko_column => tko_column.statusId === tko_created.statusId)?.label ?? "To do", statusId: tko_created.statusId, version: tko_created.version, rank: tko_created.rank, detail: tko_created.estimateMinutes ? `${Math.round(tko_created.estimateMinutes / 60)}h estimate` : "Work item", assignee: tko_created.assigneeMemberIds.length ? "ME" : "—", dueLabel: tko_dueLabel(tko_created.dueAt) });
       toast.error("Task đã tạo ở To do nhưng chưa thể đặt vào cột đã chọn. Đã mở task để bạn thử lại.");
       return;
     }
@@ -710,7 +726,7 @@ export default function Work() {
     await tko_uploadDraftFiles(tko_finalItem.id, tko_files);
     tko_cancelCreateComposer();
     await tko_refreshBoard();
-    tko_openItem({ id: tko_finalItem.id, key: tko_finalItem.key, title: tko_finalItem.title, priority: tko_finalItem.priority, status: tko_draft.status, statusId: tko_finalItem.statusId, version: tko_finalItem.version, rank: tko_finalItem.rank, detail: tko_finalItem.estimateMinutes ? `${Math.round(tko_finalItem.estimateMinutes / 60)}h estimate` : "Work item", assignee: tko_finalItem.assigneeMemberIds.length ? "ME" : "—", dueLabel: tko_dueLabel(tko_finalItem.dueAt) });
+    tko_openItem({ id: tko_finalItem.id, key: tko_finalItem.key, title: tko_finalItem.title, priority: tko_finalItem.priority, status: tko_columns.find(tko_column => tko_column.statusId === tko_finalItem.statusId)?.label ?? tko_draft.status.replace("_", " "), statusId: tko_finalItem.statusId, version: tko_finalItem.version, rank: tko_finalItem.rank, detail: tko_finalItem.estimateMinutes ? `${Math.round(tko_finalItem.estimateMinutes / 60)}h estimate` : "Work item", assignee: tko_finalItem.assigneeMemberIds.length ? "ME" : "—", dueLabel: tko_dueLabel(tko_finalItem.dueAt) });
     toast.success("Đã tạo task và mở chi tiết để hoàn thiện.");
   }
 
