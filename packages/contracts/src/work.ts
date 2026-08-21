@@ -74,6 +74,12 @@ export interface ProjectPermissionActivity {
   createdAt: Date;
 }
 
+/** Server-authoritative page of project permission audit history. */
+export interface ProjectPermissionActivityPage {
+  items: ProjectPermissionActivity[];
+  nextCursor: string | null;
+}
+
 export interface WorkflowStatus extends TenantResource {
   type: "workflow_status";
   workflowId: string;
@@ -287,6 +293,10 @@ export interface ProjectPermissionActivityFilter {
   action?: ProjectPermissionActivity["action"];
   from?: Date;
   to?: Date;
+  /** Opaque cursor obtained from the previous response page. */
+  cursor?: string;
+  /** Bounded server page size. */
+  limit?: number;
 }
 
 export interface CreateWorkItemInput {

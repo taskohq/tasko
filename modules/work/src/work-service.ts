@@ -4,6 +4,7 @@ import type {
   CreateProjectInput,
   CreateSprintInput,
   ProjectPermissionActivityFilter,
+  ProjectPermissionActivityPage,
   ProjectOverview,
   ProjectPermissionActivity,
   ProjectSearchResult,
@@ -151,7 +152,7 @@ export async function redeemProjectInvitation(tko_actor: PlatformActor, tko_inpu
   return getWorkStore().redeemProjectInvitation({ actor: tko_actor, ...tko_input });
 }
 
-export async function projectPermissionActivity(tko_actor: PlatformActor, tko_projectId: string, tko_filter: ProjectPermissionActivityFilter = {}): Promise<ProjectPermissionActivity[]> {
+export async function projectPermissionActivity(tko_actor: PlatformActor, tko_projectId: string, tko_filter: ProjectPermissionActivityFilter = {}): Promise<ProjectPermissionActivityPage> {
   const tko_project = await tko_projectFor(tko_actor, tko_projectId);
   tko_require(tko_actor, "work.project.manage", tko_project);
   const [tko_audit, tko_members] = await Promise.all([
@@ -159,7 +160,8 @@ export async function projectPermissionActivity(tko_actor: PlatformActor, tko_pr
     getPlatformStore().listTenantMembers(tko_actor.tenantId),
   ]);
   const tko_memberByAuthSubject = new Map(tko_members.map(tko_member => [tko_member.authSubject, tko_member]));
-  return tko_audit
+  const tko_visibleActivity: ProjectPermissionActivity[] = tko_audit
+    .filter(tko_entry => tko_entry.tenantId === tko_actor.tenantId)
     .filter(tko_entry => tko_entry.resourceType === "project" && typeof tko_entry.metadata.projectId === "string" && tko_entry.metadata.projectId === tko_project.id)
     .filter(tko_entry => tko_entry.action === "work.project.visibility_updated" || tko_entry.action === "work.project.member_upserted" || tko_entry.action === "work.project.member_removed" || tko_entry.action === "work.project.invitation_created" || tko_entry.action === "work.project.invitation_resent" || tko_entry.action === "work.project.invitation_redeemed" || tko_entry.action === "work.project.invitation_revoked")
     .filter(tko_entry => !tko_filter.actorMemberId || tko_memberByAuthSubject.get(tko_entry.actorAuthSubject ?? "")?.id === tko_filter.actorMemberId)
@@ -170,7 +172,17 @@ export async function projectPermissionActivity(tko_actor: PlatformActor, tko_pr
       const tko_member = tko_entry.actorAuthSubject ? tko_memberByAuthSubject.get(tko_entry.actorAuthSubject) : undefined;
       return { id: tko_entry.id, projectId: tko_project.id, action: tko_entry.action, actorDisplayName: tko_member?.displayName ?? "Former member", actorMemberId: tko_member?.id ?? null, metadata: tko_entry.metadata, createdAt: tko_entry.createdAt };
     })
-    .sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime());
+    .sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime() || tko_right.id.localeCompare(tko_left.id));
+  const tko_limit = Math.max(1, Math.min(tko_filter.limit ?? 20, 100));
+  const tko_cursorFor = (tko_entry: ProjectPermissionActivity) => `${tko_entry.createdAt.getTime()}:${tko_entry.id}`;
+  const tko_cursorIndex = tko_filter.cursor ? tko_visibleActivity.findIndex(tko_entry => tko_cursorFor(tko_entry) === tko_filter.cursor) : -1;
+  const tko_startIndex = tko_cursorIndex >= 0 ? tko_cursorIndex + 1 : 0;
+  const tko_items = tko_visibleActivity.slice(tko_startIndex, tko_startIndex + tko_limit);
+  const tko_hasMore = tko_startIndex + tko_items.length < tko_visibleActivity.length;
+  return {
+    items: tko_items,
+    nextCursor: tko_hasMore && tko_items.length ? tko_cursorFor(tko_items[tko_items.length - 1]) : null,
+  };
 }
 
 export async function board(tko_actor: PlatformActor, tko_projectId: string) {

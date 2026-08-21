@@ -403,7 +403,7 @@ describe("Work Alpha acceptance boundaries", () => {
     expect((await work.projectInvitations(tko_owner, tko_project.id)).find(tko_invitation => tko_invitation.id === tko_secondIssue.invitation.id)?.revokedAt).toEqual(expect.any(Date));
     await expect(work.redeemProjectInvitation(tko_member, { token: tko_secondIssue.token, recipientEmail: "invitee@example.com", correlationId: tko_member.correlationId })).rejects.toThrow("WORK_PROJECT_INVITATION_REVOKED");
     const tko_activity = await work.projectPermissionActivity(tko_owner, tko_project.id);
-    expect(tko_activity.map(tko_entry => tko_entry.action)).toEqual(expect.arrayContaining(["work.project.invitation_created", "work.project.invitation_redeemed", "work.project.invitation_revoked"]));
+    expect(tko_activity.items.map(tko_entry => tko_entry.action)).toEqual(expect.arrayContaining(["work.project.invitation_created", "work.project.invitation_redeemed", "work.project.invitation_revoked"]));
     expect((await tko_platformStore.listOutbox()).filter(tko_event => ["work.project_invitation_created.v1", "work.project_invitation_redeemed.v1", "work.project_invitation_revoked.v1"].includes(tko_event.eventType))).toHaveLength(4);
   });
 
@@ -422,8 +422,14 @@ describe("Work Alpha acceptance boundaries", () => {
     await expect(work.resendProjectInvitation(tko_member, { projectId: tko_project.id, invitationId: tko_resent.invitation.id, expiresAt: new Date(Date.now() + 172_800_000), correlationId: tko_member.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
 
     const tko_filtered = await work.projectPermissionActivity(tko_owner, tko_project.id, { actorMemberId: tko_owner.memberId, action: "work.project.invitation_resent" });
-    expect(tko_filtered).toEqual([expect.objectContaining({ action: "work.project.invitation_resent", actorMemberId: tko_owner.memberId, projectId: tko_project.id })]);
-    expect((await work.projectPermissionActivity(tko_owner, tko_project.id, { from: new Date(Date.now() + 86_400_000) }))).toEqual([]);
+    expect(tko_filtered.items).toEqual([expect.objectContaining({ action: "work.project.invitation_resent", actorMemberId: tko_owner.memberId, projectId: tko_project.id })]);
+    expect((await work.projectPermissionActivity(tko_owner, tko_project.id, { from: new Date(Date.now() + 86_400_000) })).items).toEqual([]);
+    const tko_firstPage = await work.projectPermissionActivity(tko_owner, tko_project.id, { limit: 1 });
+    expect(tko_firstPage.items).toHaveLength(1);
+    expect(tko_firstPage.nextCursor).toEqual(expect.any(String));
+    const tko_secondPage = await work.projectPermissionActivity(tko_owner, tko_project.id, { limit: 1, cursor: tko_firstPage.nextCursor ?? undefined });
+    expect(tko_secondPage.items).toHaveLength(1);
+    expect(tko_secondPage.items[0]?.id).not.toBe(tko_firstPage.items[0]?.id);
     expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.project_invitation_resent.v1" && tko_event.payload.projectId === tko_project.id)).toBe(true);
   });
 

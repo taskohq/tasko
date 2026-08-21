@@ -108,6 +108,17 @@
 - [x] OAuth callback regression: điều tra lỗi callback sau Google login, sửa nguyên nhân cấu hình/validation và thêm test cho success/failure contract trước khi tiếp tục visual verification M4.
 - [x] Deferred OAuth/browser follow-up: được chuyển sang kiểm tra tự động theo yêu cầu người dùng; không yêu cầu xác nhận hoặc thông tin đăng nhập thủ công nữa.
 - [x] OAuth auto-verification: đã khởi động Google OAuth bằng phiên browser sẵn có. Cổng xác thực sandbox trở về `about:blank` và không tạo request `/api/oauth/callback`; cookie first-party HTTPS hoạt động và `server/oauth.callback.test.ts` pass 5/5. Cần tái xác minh trên profile browser được kết nối khi runtime có callback provider, không hỏi lại người dùng.
+- [x] Work collaboration: bổ sung cursor pagination/infinite scroll cho activity feed, giữ filter server-authoritative và tenant isolation.
+- [x] Work collaboration: hỗ trợ kéo-thả ảnh vào composer bình luận, preview trước khi gửi và tái sử dụng luồng upload S3 đã phân quyền.
+- [x] Work collaboration hardening: thêm loading/error state rõ ràng cho Permission Activity infinite query, tách biệt khỏi empty state.
+- [x] Work collaboration hardening: thêm regression cho trạng thái first-page, load-more và empty/error của Permission Activity panel.
+- [ ] Work collaboration: tạo notification Inbox/realtime khi người dùng được mention hoặc nhận reaction trong bình luận, với audit/outbox nguyên tử và negative authorization tests.
+- [ ] Work: hoàn thiện My Work bằng danh sách item được giao cho người dùng hiện tại, nhóm/lọc theo project, status và hạn xử lý.
+- [ ] Work: hoàn thiện Ops Update theo thay đổi hoạt động 24 giờ, nhóm theo project và hiển thị tác nhân/thay đổi.
+- [ ] Work: hoàn thiện Calendar theo ngày bắt đầu/hạn xử lý, gồm điều hướng thời gian và mở task inspector.
+- [ ] Work Files: refactor Files tab thành file manager thuần túy có search/filter, preview, signed download và điều hướng về task chứa file để xóa; không hỗ trợ xóa hàng loạt.
+- [ ] Chat: hoàn thiện Slack-like channel CRUD, quản lý thành viên, gửi tin nhắn, file attachment, quote, reply thread, @channel/@here, audit/outbox/realtime và negative authorization tests.
+- [ ] Workspace administration: quản lý thành viên workspace, phân quyền role, mời qua email, quản lý trạng thái lời mời, gửi lại/thu hồi, audit/outbox và negative authorization tests.
 - [x] Work task creation bug: tái hiện, xác định và sửa nguyên nhân task không được tạo từ composer/board trên phiên tenant thật, kèm regression success và failure recovery.
 - [x] Work three-mode task composer: cung cấp chuyển đổi giữa quick-create trên board, panel phải và full-screen editor; dùng một draft thống nhất, keyboard-accessible, không mất dữ liệu khi đổi chế độ.
 - [x] Work rich task content: mở rộng task composer cho description chi tiết, checklist và đính kèm S3 có validation, tenant isolation, authorization, audit/outbox và regression thực.
