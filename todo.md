@@ -204,3 +204,7 @@
 - [x] Project invitation delivery: tạo lời mời project bền vững bằng email hoặc link có hạn, redeem tenant-safe, role viewer/editor, revoke/expiry, audit/outbox và regression quyền âm.
 - [x] Project permission activity feed: hiển thị lịch sử thay đổi visibility, mời, nhận lời mời, đổi role, gỡ/revoke trong Members tab từ audit history tenant/project-scoped.
 - [x] Work delete/comment revalidation: kiểm thử end-to-end thao tác xóa task và gửi/hiển thị comment, gồm success/error/authorization/realtime paths.
+- [x] Project invitation management: tạo trang quản lý lời mời với danh sách trạng thái, tìm kiếm, thu hồi và gửi lại link/email theo quyền owner/admin, audit/outbox và regression.
+- [x] Project permission activity filters: bổ sung bộ lọc activity feed theo thành viên, hành động và khoảng thời gian với query project/tenant-safe phía server.
+- [x] Work comment collaboration: cải thiện composer/comment thread với reactions và đính kèm hình ảnh S3, signed access, authorization, audit/outbox/realtime và regression âm.
+- [x] Work move task runtime bug: truy vết và sửa phản hồi 500 của work.moveItem quan sát trong log runtime, bổ sung regression và kiểm tra client recovery.

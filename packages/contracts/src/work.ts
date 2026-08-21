@@ -132,9 +132,30 @@ export interface WorkComment extends TenantResource {
   workItemId: string;
   authorMemberId: string;
   body: string;
+  reactions: WorkCommentReaction[];
+  attachments: WorkCommentAttachment[];
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
+}
+
+export interface WorkCommentReaction extends TenantResource {
+  type: "work_comment_reaction";
+  commentId: string;
+  memberId: string;
+  emoji: string;
+  createdAt: Date;
+}
+
+export interface WorkCommentAttachment extends TenantResource {
+  type: "work_comment_attachment";
+  commentId: string;
+  objectKey: string;
+  filename: string;
+  contentType: string;
+  byteSize: number;
+  uploadedByMemberId: string;
+  createdAt: Date;
 }
 
 export interface WorkChecklistItem extends TenantResource {
@@ -253,6 +274,21 @@ export interface RevokeProjectInvitationInput {
   correlationId: string;
 }
 
+export interface ResendProjectInvitationInput {
+  actor: PlatformActor;
+  projectId: string;
+  invitationId: string;
+  expiresAt: Date;
+  correlationId: string;
+}
+
+export interface ProjectPermissionActivityFilter {
+  actorMemberId?: string;
+  action?: ProjectPermissionActivity["action"];
+  from?: Date;
+  to?: Date;
+}
+
 export interface CreateWorkItemInput {
   actor: PlatformActor;
   projectId: string;
@@ -309,6 +345,14 @@ export interface CreateCommentInput {
   actor: PlatformActor;
   workItemId: string;
   body: string;
+  correlationId: string;
+}
+
+export interface ToggleWorkCommentReactionInput {
+  actor: PlatformActor;
+  workItemId: string;
+  commentId: string;
+  emoji: string;
   correlationId: string;
 }
 

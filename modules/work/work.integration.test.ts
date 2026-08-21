@@ -406,4 +406,43 @@ describe("Work Alpha acceptance boundaries", () => {
     expect(tko_activity.map(tko_entry => tko_entry.action)).toEqual(expect.arrayContaining(["work.project.invitation_created", "work.project.invitation_redeemed", "work.project.invitation_revoked"]));
     expect((await tko_platformStore.listOutbox()).filter(tko_event => ["work.project_invitation_created.v1", "work.project_invitation_redeemed.v1", "work.project_invitation_revoked.v1"].includes(tko_event.eventType))).toHaveLength(4);
   });
+
+  it("manages invitation resend and filters project permission activity without leaking other project events", async () => {
+    const tko_owner = await tko_actor();
+    const tko_member = await tko_actor("demo-member:tasko-demo");
+    const tko_space = await work.createSpace(tko_owner, { name: "Invitation operations", slug: "invitation-operations", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Invitation control", key: "ICL", methodology: "kanban", visibility: "private", correlationId: tko_owner.correlationId });
+    const tko_issue = await work.createProjectInvitation(tko_owner, { projectId: tko_project.id, inviteeEmail: "member@example.com", projectRole: "editor", expiresAt: new Date(Date.now() + 86_400_000), correlationId: tko_owner.correlationId });
+    const tko_resent = await work.resendProjectInvitation(tko_owner, { projectId: tko_project.id, invitationId: tko_issue.invitation.id, expiresAt: new Date(Date.now() + 172_800_000), correlationId: tko_owner.correlationId });
+
+    const tko_invitations = await work.projectInvitations(tko_owner, tko_project.id);
+    expect(tko_resent.invitation.id).not.toBe(tko_issue.invitation.id);
+    expect(tko_invitations.find(tko_invitation => tko_invitation.id === tko_issue.invitation.id)?.revokedAt).toEqual(expect.any(Date));
+    expect(tko_invitations.find(tko_invitation => tko_invitation.id === tko_resent.invitation.id)).toEqual(expect.objectContaining({ inviteeEmail: "member@example.com", projectRole: "editor", revokedAt: null }));
+    await expect(work.resendProjectInvitation(tko_member, { projectId: tko_project.id, invitationId: tko_resent.invitation.id, expiresAt: new Date(Date.now() + 172_800_000), correlationId: tko_member.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+
+    const tko_filtered = await work.projectPermissionActivity(tko_owner, tko_project.id, { actorMemberId: tko_owner.memberId, action: "work.project.invitation_resent" });
+    expect(tko_filtered).toEqual([expect.objectContaining({ action: "work.project.invitation_resent", actorMemberId: tko_owner.memberId, projectId: tko_project.id })]);
+    expect((await work.projectPermissionActivity(tko_owner, tko_project.id, { from: new Date(Date.now() + 86_400_000) }))).toEqual([]);
+    expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.project_invitation_resent.v1" && tko_event.payload.projectId === tko_project.id)).toBe(true);
+  });
+
+  it("hydrates comment reactions and image metadata while rejecting viewer collaboration mutations", async () => {
+    const tko_owner = await tko_actor();
+    const tko_viewer = await tko_actor("demo-member:tasko-demo");
+    const tko_space = await work.createSpace(tko_owner, { name: "Comment collaboration", slug: "comment-collaboration", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Comment evidence", key: "CMT", methodology: "kanban", visibility: "private", correlationId: tko_owner.correlationId });
+    const tko_item = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Review annotated screenshot", correlationId: tko_owner.correlationId });
+    const tko_comment = await work.createComment({ actor: tko_owner, workItemId: tko_item.id, body: "Please verify this screenshot.", correlationId: tko_owner.correlationId });
+    await tko_workStore.createCommentAttachment(tko_owner, { commentId: tko_comment.id, objectKey: `tenants/${tko_owner.tenantId}/work-comments/${tko_comment.id}/evidence.png`, filename: "evidence.png", contentType: "image/png", byteSize: 68, correlationId: tko_owner.correlationId });
+
+    const tko_reacted = await work.toggleCommentReaction(tko_owner, { workItemId: tko_item.id, commentId: tko_comment.id, emoji: "👍", correlationId: tko_owner.correlationId });
+    const tko_detail = await work.itemDetails(tko_owner, tko_item.id);
+    expect(tko_reacted.reactions).toEqual(expect.arrayContaining([expect.objectContaining({ emoji: "👍", memberId: tko_owner.memberId })]));
+    expect(tko_detail.comments.find(tko_entry => tko_entry.id === tko_comment.id)).toEqual(expect.objectContaining({ attachments: [expect.objectContaining({ filename: "evidence.png", contentType: "image/png", byteSize: 68 })] }));
+    await work.upsertProjectMember(tko_owner, { projectId: tko_project.id, memberId: tko_viewer.memberId, projectRole: "viewer", correlationId: tko_owner.correlationId });
+    await expect(work.toggleCommentReaction(tko_viewer, { workItemId: tko_item.id, commentId: tko_comment.id, emoji: "👀", correlationId: tko_viewer.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:project_role_read_only");
+    expect((await tko_platformStore.listAuditLogs()).some(tko_event => tko_event.action === "work.comment.reaction_added" && tko_event.resourceId === tko_comment.id)).toBe(true);
+    expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.comment_reaction_added.v1" && tko_event.payload.commentId === tko_comment.id)).toBe(true);
+  });
 });

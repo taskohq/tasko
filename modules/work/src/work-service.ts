@@ -3,6 +3,7 @@ import type {
   CreateCommentInput,
   CreateProjectInput,
   CreateSprintInput,
+  ProjectPermissionActivityFilter,
   ProjectOverview,
   ProjectPermissionActivity,
   ProjectSearchResult,
@@ -139,11 +140,18 @@ export async function revokeProjectInvitation(tko_actor: PlatformActor, tko_inpu
   return getWorkStore().revokeProjectInvitation({ actor: tko_actor, ...tko_input });
 }
 
+export async function resendProjectInvitation(tko_actor: PlatformActor, tko_input: { projectId: string; invitationId: string; expiresAt: Date; correlationId: string }) {
+  const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  if (tko_input.expiresAt.getTime() - Date.now() > 1000 * 60 * 60 * 24 * 90) throw new Error("WORK_PROJECT_INVITATION_EXPIRY_TOO_LONG");
+  return getWorkStore().resendProjectInvitation({ actor: tko_actor, ...tko_input });
+}
+
 export async function redeemProjectInvitation(tko_actor: PlatformActor, tko_input: { token: string; recipientEmail: string | null; correlationId: string }) {
   return getWorkStore().redeemProjectInvitation({ actor: tko_actor, ...tko_input });
 }
 
-export async function projectPermissionActivity(tko_actor: PlatformActor, tko_projectId: string): Promise<ProjectPermissionActivity[]> {
+export async function projectPermissionActivity(tko_actor: PlatformActor, tko_projectId: string, tko_filter: ProjectPermissionActivityFilter = {}): Promise<ProjectPermissionActivity[]> {
   const tko_project = await tko_projectFor(tko_actor, tko_projectId);
   tko_require(tko_actor, "work.project.manage", tko_project);
   const [tko_audit, tko_members] = await Promise.all([
@@ -153,7 +161,11 @@ export async function projectPermissionActivity(tko_actor: PlatformActor, tko_pr
   const tko_memberByAuthSubject = new Map(tko_members.map(tko_member => [tko_member.authSubject, tko_member]));
   return tko_audit
     .filter(tko_entry => tko_entry.resourceType === "project" && typeof tko_entry.metadata.projectId === "string" && tko_entry.metadata.projectId === tko_project.id)
-    .filter(tko_entry => tko_entry.action === "work.project.visibility_updated" || tko_entry.action === "work.project.member_upserted" || tko_entry.action === "work.project.member_removed" || tko_entry.action === "work.project.invitation_created" || tko_entry.action === "work.project.invitation_redeemed" || tko_entry.action === "work.project.invitation_revoked")
+    .filter(tko_entry => tko_entry.action === "work.project.visibility_updated" || tko_entry.action === "work.project.member_upserted" || tko_entry.action === "work.project.member_removed" || tko_entry.action === "work.project.invitation_created" || tko_entry.action === "work.project.invitation_resent" || tko_entry.action === "work.project.invitation_redeemed" || tko_entry.action === "work.project.invitation_revoked")
+    .filter(tko_entry => !tko_filter.actorMemberId || tko_memberByAuthSubject.get(tko_entry.actorAuthSubject ?? "")?.id === tko_filter.actorMemberId)
+    .filter(tko_entry => !tko_filter.action || tko_entry.action === tko_filter.action)
+    .filter(tko_entry => !tko_filter.from || tko_entry.createdAt.getTime() >= tko_filter.from.getTime())
+    .filter(tko_entry => !tko_filter.to || tko_entry.createdAt.getTime() <= tko_filter.to.getTime())
     .map(tko_entry => {
       const tko_member = tko_entry.actorAuthSubject ? tko_memberByAuthSubject.get(tko_entry.actorAuthSubject) : undefined;
       return { id: tko_entry.id, projectId: tko_project.id, action: tko_entry.action, actorDisplayName: tko_member?.displayName ?? "Former member", actorMemberId: tko_member?.id ?? null, metadata: tko_entry.metadata, createdAt: tko_entry.createdAt };
@@ -340,6 +352,34 @@ export async function createComment(tko_input: CreateCommentInput) {
   const tko_item = await tko_itemFor(tko_input.actor, tko_input.workItemId);
   tko_require(tko_input.actor, "work.comment.create", tko_item);
   return getWorkStore().createComment(tko_input);
+}
+
+export async function toggleCommentReaction(tko_actor: PlatformActor, tko_input: { workItemId: string; commentId: string; emoji: string; correlationId: string }) {
+  const tko_item = await tko_itemFor(tko_actor, tko_input.workItemId);
+  tko_require(tko_actor, "work.comment.create", tko_item);
+  if (!tko_input.emoji.trim() || tko_input.emoji.trim().length > 16) throw new Error("WORK_COMMENT_REACTION_INVALID");
+  return getWorkStore().toggleCommentReaction({ actor: tko_actor, ...tko_input });
+}
+
+export async function uploadCommentImage(tko_actor: PlatformActor, tko_input: { workItemId: string; commentId: string; filename: string; contentType: string; base64: string; correlationId: string }) {
+  const tko_item = await tko_itemFor(tko_actor, tko_input.workItemId);
+  tko_require(tko_actor, "work.comment.create", tko_item);
+  if (!new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]).has(tko_input.contentType.toLocaleLowerCase())) throw new Error("WORK_COMMENT_IMAGE_CONTENT_TYPE_INVALID");
+  const tko_bytes = Buffer.from(tko_input.base64, "base64");
+  if (!tko_bytes.byteLength || tko_bytes.byteLength > 5 * 1024 * 1024) throw new Error("WORK_COMMENT_IMAGE_SIZE_INVALID");
+  const tko_comment = (await getWorkStore().listComments(tko_actor.tenantId, tko_item.id)).find(tko_entry => tko_entry.id === tko_input.commentId);
+  if (!tko_comment) throw new Error("WORK_COMMENT_NOT_FOUND");
+  const tko_stored = await uploadTenantAttachment({ actor: tko_actor, filename: tko_input.filename, contentType: tko_input.contentType, bytes: tko_bytes });
+  return getWorkStore().createCommentAttachment(tko_actor, { commentId: tko_comment.id, objectKey: tko_stored.objectKey, filename: tko_stored.filename, contentType: tko_stored.contentType, byteSize: tko_bytes.byteLength, correlationId: tko_input.correlationId });
+}
+
+export async function commentImageDownloadUrl(tko_actor: PlatformActor, tko_input: { workItemId: string; commentId: string; attachmentId: string }) {
+  const tko_item = await tko_itemFor(tko_actor, tko_input.workItemId);
+  tko_require(tko_actor, "work.item.read", tko_item);
+  const tko_comment = (await getWorkStore().listComments(tko_actor.tenantId, tko_item.id)).find(tko_entry => tko_entry.id === tko_input.commentId);
+  const tko_attachment = tko_comment?.attachments.find(tko_entry => tko_entry.id === tko_input.attachmentId);
+  if (!tko_attachment) throw new Error("WORK_COMMENT_ATTACHMENT_NOT_FOUND");
+  return { url: await getTenantAttachmentDownloadUrl(tko_actor, tko_attachment) };
 }
 
 export async function createChecklistItem(tko_actor: PlatformActor, tko_input: { workItemId: string; body: string; correlationId: string }) {

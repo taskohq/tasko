@@ -80,6 +80,7 @@ const tko_viewerRestrictedCapabilities = new Set<Capability>([
   "work.item.update",
   "work.item.transition",
   "work.item.archive",
+  "work.comment.create",
   "work.sprint.manage",
   "work.custom_field.manage",
 ]);
