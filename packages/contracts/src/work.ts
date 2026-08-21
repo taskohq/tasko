@@ -417,3 +417,48 @@ export interface ProjectSearchResult {
   workItemId?: string;
   updatedAt?: Date;
 }
+
+export interface MyWorkItem {
+  workItemId: string;
+  projectId: string;
+  projectName: string;
+  projectKey: string;
+  key: string;
+  title: string;
+  priority: WorkPriority;
+  statusId: string;
+  statusName: string;
+  statusCategory: WorkflowStatusCategory;
+  startAt: Date | null;
+  dueAt: Date | null;
+  updatedAt: Date;
+  isOverdue: boolean;
+}
+
+export interface OpsUpdateEntry {
+  workItemId: string;
+  projectId: string;
+  projectName: string;
+  projectKey: string;
+  key: string;
+  title: string;
+  actorMemberId: string;
+  actorDisplayName: string;
+  field: string;
+  beforeLabel: string;
+  afterLabel: string;
+  changedAt: Date;
+}
+
+export interface WorkCalendarItem {
+  workItemId: string;
+  projectId: string;
+  projectName: string;
+  projectKey: string;
+  key: string;
+  title: string;
+  statusName: string;
+  priority: WorkPriority;
+  startAt: Date | null;
+  dueAt: Date | null;
+}

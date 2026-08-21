@@ -113,9 +113,9 @@
 - [x] Work collaboration hardening: thêm loading/error state rõ ràng cho Permission Activity infinite query, tách biệt khỏi empty state.
 - [x] Work collaboration hardening: thêm regression cho trạng thái first-page, load-more và empty/error của Permission Activity panel.
 - [x] Work collaboration: tạo notification Inbox/realtime khi người dùng được mention hoặc nhận reaction trong bình luận, với audit/outbox nguyên tử và negative authorization tests.
-- [ ] Work: hoàn thiện My Work bằng danh sách item được giao cho người dùng hiện tại, nhóm/lọc theo project, status và hạn xử lý.
-- [ ] Work: hoàn thiện Ops Update theo thay đổi hoạt động 24 giờ, nhóm theo project và hiển thị tác nhân/thay đổi.
-- [ ] Work: hoàn thiện Calendar theo ngày bắt đầu/hạn xử lý, gồm điều hướng thời gian và mở task inspector.
+- [x] Work: hoàn thiện My Work bằng danh sách item được giao cho người dùng hiện tại, nhóm/lọc theo project, status và hạn xử lý.
+- [x] Work: hoàn thiện Ops Update theo thay đổi hoạt động 24 giờ, nhóm theo project và hiển thị tác nhân/thay đổi.
+- [x] Work: hoàn thiện Calendar theo ngày bắt đầu/hạn xử lý, gồm điều hướng thời gian và mở task inspector.
 - [ ] Work Files: refactor Files tab thành file manager thuần túy có search/filter, preview, signed download và điều hướng về task chứa file để xóa; không hỗ trợ xóa hàng loạt.
 - [ ] Chat: hoàn thiện Slack-like channel CRUD, quản lý thành viên, gửi tin nhắn, file attachment, quote, reply thread, @channel/@here, audit/outbox/realtime và negative authorization tests.
 - [x] Workspace administration: quản lý thành viên workspace, phân quyền role, invitation email-link một lần, quản lý trạng thái lời mời, gửi lại/thu hồi, audit/outbox và negative authorization tests.

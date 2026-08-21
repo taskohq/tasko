@@ -346,6 +346,33 @@ describe("Work Alpha acceptance boundaries", () => {
     expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.sprint_started.v1" && tko_event.payload.sprintId === tko_sprint.id)).toBe(true);
   });
 
+  it("projects tenant-safe My Work, Ops Update and Calendar read models without durable writes", async () => {
+    const tko_owner = await tko_actor();
+    const tko_otherTenant = { ...tko_owner, authSubject: tko_otherSubject, tenantId: "tko-tenant-other-workspace", tenantSlug: "other-workspace", memberId: "tko-member-other-workspace-owner", correlationId: "test:work-views-other-tenant" };
+    const tko_space = await work.createSpace(tko_owner, { name: "Operating cadence", slug: "operating-cadence", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Service operations", key: "OPS", methodology: "kanban", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_item = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Review service health", assigneeMemberIds: [tko_owner.memberId], correlationId: tko_owner.correlationId });
+    const tko_startAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const tko_dueAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    await work.updateWorkItem({ actor: tko_owner, workItemId: tko_item.id, expectedVersion: tko_item.version, startAt: tko_startAt, dueAt: tko_dueAt, correlationId: tko_owner.correlationId });
+    const tko_auditBefore = (await tko_platformStore.listAuditLogs()).length;
+    const tko_outboxBefore = (await tko_platformStore.listOutbox()).length;
+
+    const tko_myWork = await work.myWork(tko_owner, { due: "soon" });
+    const tko_opsUpdate = await work.opsUpdate(tko_owner, { since: new Date(Date.now() - 24 * 60 * 60 * 1000) });
+    const tko_calendar = await work.calendar(tko_owner, { startAt: new Date(Date.now()), endAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
+
+    expect(tko_myWork).toEqual(expect.arrayContaining([expect.objectContaining({ workItemId: tko_item.id, projectId: tko_project.id, statusName: expect.any(String) })]));
+    expect(tko_opsUpdate).toEqual(expect.arrayContaining([expect.objectContaining({ workItemId: tko_item.id, actorMemberId: tko_owner.memberId, field: "fields" })]));
+    expect(tko_calendar).toEqual(expect.arrayContaining([expect.objectContaining({ workItemId: tko_item.id, startAt: tko_startAt, dueAt: tko_dueAt })]));
+    const tko_otherTenantWorkItemIds = (await work.myWork(tko_otherTenant, { due: "all" })).map(tko_entry => tko_entry.workItemId);
+    expect(tko_otherTenantWorkItemIds).not.toContain(tko_item.id);
+    await expect(work.calendar(tko_owner, { startAt: tko_dueAt, endAt: tko_startAt })).rejects.toThrow("WORK_CALENDAR_RANGE_INVALID");
+    await expect(work.opsUpdate(tko_owner, { since: new Date(Date.now() - 32 * 24 * 60 * 60 * 1000) })).rejects.toThrow("WORK_OPS_UPDATE_RANGE_INVALID");
+    expect((await tko_platformStore.listAuditLogs()).length).toBe(tko_auditBefore);
+    expect((await tko_platformStore.listOutbox()).length).toBe(tko_outboxBefore);
+  });
+
   it("creates visible task comments and archives a task without bypassing RBAC, history or outbox", async () => {
     const tko_owner = await tko_actor();
     const tko_otherTenant = { ...tko_owner, authSubject: tko_otherSubject, tenantId: "tko-tenant-other-workspace", tenantSlug: "other-workspace", memberId: "tko-member-demo-owner", correlationId: "test:archive-other-tenant" };

@@ -8,6 +8,9 @@ import type {
   ProjectOverview,
   ProjectPermissionActivity,
   ProjectSearchResult,
+  MyWorkItem,
+  OpsUpdateEntry,
+  WorkCalendarItem,
   CreateWorkItemInput,
   MoveWorkItemInput,
   TransitionWorkItemInput,
@@ -254,6 +257,89 @@ export async function overview(tko_actor: PlatformActor, tko_projectId: string):
     plannedSprintCount: tko_data.sprints.filter(tko_sprint => tko_sprint.state === "planned").length,
     workload: Array.from(tko_workload.values()).filter(tko_entry => tko_entry.assignedItems > 0).sort((tko_left, tko_right) => tko_right.assignedItems - tko_left.assignedItems),
   };
+}
+
+async function tko_accessibleBoards(tko_actor: PlatformActor) {
+  return Promise.all((await projects(tko_actor)).map(tko_project => board(tko_actor, tko_project.id)));
+}
+
+export async function myWork(tko_actor: PlatformActor, tko_input: { due: "all" | "overdue" | "soon" | "none" } = { due: "all" }): Promise<MyWorkItem[]> {
+  const tko_now = Date.now();
+  const tko_soon = tko_now + 7 * 24 * 60 * 60 * 1000;
+  const tko_entries = (await tko_accessibleBoards(tko_actor)).flatMap(tko_data => {
+    const tko_statusById = new Map(tko_data.statuses.map(tko_status => [tko_status.id, tko_status]));
+    return tko_data.items
+      .filter(tko_item => tko_item.assigneeMemberIds.includes(tko_actor.memberId) && !tko_item.archivedAt)
+      .map(tko_item => {
+        const tko_status = tko_statusById.get(tko_item.statusId);
+        return {
+          workItemId: tko_item.id,
+          projectId: tko_data.project.id,
+          projectName: tko_data.project.name,
+          projectKey: tko_data.project.key,
+          key: tko_item.key,
+          title: tko_item.title,
+          priority: tko_item.priority,
+          statusId: tko_item.statusId,
+          statusName: tko_status?.name ?? "Unknown status",
+          statusCategory: tko_status?.category ?? "todo",
+          startAt: tko_item.startAt,
+          dueAt: tko_item.dueAt,
+          updatedAt: tko_item.updatedAt,
+          isOverdue: !!tko_item.dueAt && tko_item.dueAt.getTime() < tko_now && tko_status?.category !== "done",
+        } satisfies MyWorkItem;
+      });
+  }).filter(tko_item => {
+    if (tko_input.due === "overdue") return tko_item.isOverdue;
+    if (tko_input.due === "soon") return !!tko_item.dueAt && tko_item.dueAt.getTime() >= tko_now && tko_item.dueAt.getTime() <= tko_soon;
+    if (tko_input.due === "none") return !tko_item.dueAt;
+    return true;
+  });
+  return tko_entries.sort((tko_left, tko_right) => (tko_left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (tko_right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) || tko_right.updatedAt.getTime() - tko_left.updatedAt.getTime());
+}
+
+function tko_historyValueLabel(tko_value: unknown): string {
+  if (tko_value === null || tko_value === undefined || tko_value === "") return "empty";
+  if (typeof tko_value === "string" || typeof tko_value === "number" || typeof tko_value === "boolean") return String(tko_value);
+  try { return JSON.stringify(tko_value); } catch { return "changed"; }
+}
+
+export async function opsUpdate(tko_actor: PlatformActor, tko_input: { since: Date }): Promise<OpsUpdateEntry[]> {
+  const tko_since = tko_input.since;
+  if (Number.isNaN(tko_since.getTime()) || Date.now() - tko_since.getTime() > 31 * 24 * 60 * 60 * 1000 || tko_since.getTime() > Date.now() + 60_000) throw new Error("WORK_OPS_UPDATE_RANGE_INVALID");
+  const [tko_boards, tko_members] = await Promise.all([tko_accessibleBoards(tko_actor), getPlatformStore().listTenantMembers(tko_actor.tenantId)]);
+  const tko_memberNameById = new Map(tko_members.map(tko_member => [tko_member.id, tko_member.displayName]));
+  const tko_updates = await Promise.all(tko_boards.flatMap(tko_data => tko_data.items.map(async tko_item => {
+    const tko_history = await getWorkStore().listHistory(tko_actor.tenantId, tko_item.id);
+    return tko_history
+      .filter(tko_entry => tko_entry.createdAt.getTime() >= tko_since.getTime())
+      .map(tko_entry => ({
+        workItemId: tko_item.id,
+        projectId: tko_data.project.id,
+        projectName: tko_data.project.name,
+        projectKey: tko_data.project.key,
+        key: tko_item.key,
+        title: tko_item.title,
+        actorMemberId: tko_entry.actorMemberId,
+        actorDisplayName: tko_memberNameById.get(tko_entry.actorMemberId) ?? "Former member",
+        field: tko_entry.field,
+        beforeLabel: tko_historyValueLabel(tko_entry.before),
+        afterLabel: tko_historyValueLabel(tko_entry.after),
+        changedAt: tko_entry.createdAt,
+      } satisfies OpsUpdateEntry));
+  })));
+  return tko_updates.flat().sort((tko_left, tko_right) => tko_right.changedAt.getTime() - tko_left.changedAt.getTime()).slice(0, 250);
+}
+
+export async function calendar(tko_actor: PlatformActor, tko_input: { startAt: Date; endAt: Date }): Promise<WorkCalendarItem[]> {
+  if (Number.isNaN(tko_input.startAt.getTime()) || Number.isNaN(tko_input.endAt.getTime()) || tko_input.startAt.getTime() > tko_input.endAt.getTime() || tko_input.endAt.getTime() - tko_input.startAt.getTime() > 400 * 24 * 60 * 60 * 1000) throw new Error("WORK_CALENDAR_RANGE_INVALID");
+  return (await tko_accessibleBoards(tko_actor)).flatMap(tko_data => {
+    const tko_statusById = new Map(tko_data.statuses.map(tko_status => [tko_status.id, tko_status]));
+    return tko_data.items
+      .filter(tko_item => !tko_item.archivedAt && (tko_item.startAt || tko_item.dueAt))
+      .filter(tko_item => (tko_item.dueAt ?? tko_item.startAt)!.getTime() >= tko_input.startAt.getTime() && (tko_item.startAt ?? tko_item.dueAt)!.getTime() <= tko_input.endAt.getTime())
+      .map(tko_item => ({ workItemId: tko_item.id, projectId: tko_data.project.id, projectName: tko_data.project.name, projectKey: tko_data.project.key, key: tko_item.key, title: tko_item.title, statusName: tko_statusById.get(tko_item.statusId)?.name ?? "Unknown status", priority: tko_item.priority, startAt: tko_item.startAt, dueAt: tko_item.dueAt } satisfies WorkCalendarItem));
+  }).sort((tko_left, tko_right) => (tko_left.startAt ?? tko_left.dueAt)!.getTime() - (tko_right.startAt ?? tko_right.dueAt)!.getTime());
 }
 
 export async function searchProject(tko_actor: PlatformActor, tko_input: { projectId: string; query: string; statusId?: string; sprintId?: string; assigneeMemberId?: string; limit?: number }): Promise<ProjectSearchResult[]> {
