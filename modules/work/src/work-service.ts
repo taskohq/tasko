@@ -368,11 +368,14 @@ export async function searchProject(tko_actor: PlatformActor, tko_input: { proje
 /** Central project file library: attachment bytes remain in S3; only authorized metadata is projected here. */
 export async function projectFiles(tko_actor: PlatformActor, tko_projectId: string) {
   const tko_data = await board(tko_actor, tko_projectId);
+  const tko_members = await getPlatformStore().listTenantMembers(tko_actor.tenantId);
+  const tko_memberNames = new Map(tko_members.map(tko_member => [tko_member.id, tko_member.displayName]));
   const tko_files = (await Promise.all(tko_data.items.map(async tko_item =>
     (await getWorkStore().listAttachments(tko_actor.tenantId, tko_item.id)).map(tko_attachment => ({
       ...tko_attachment,
       workItemKey: tko_item.key,
       workItemTitle: tko_item.title,
+      uploaderDisplayName: tko_memberNames.get(tko_attachment.uploadedByMemberId) ?? "Unknown member",
     })),
   ))).flat();
   return tko_files.sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime());
@@ -524,6 +527,12 @@ export async function attachmentDownloadUrl(tko_actor: PlatformActor, tko_input:
   const tko_attachment = (await getWorkStore().listAttachments(tko_actor.tenantId, tko_item.id)).find(tko_entry => tko_entry.id === tko_input.attachmentId);
   if (!tko_attachment) throw new Error("WORK_ATTACHMENT_NOT_FOUND");
   return { url: await getTenantAttachmentDownloadUrl(tko_actor, tko_attachment) };
+}
+
+export async function removeWorkAttachment(tko_actor: PlatformActor, tko_input: { workItemId: string; attachmentId: string; correlationId: string }) {
+  const tko_item = await tko_itemFor(tko_actor, tko_input.workItemId);
+  tko_require(tko_actor, "work.item.update", tko_item);
+  return getWorkStore().removeAttachment(tko_actor, { ...tko_input, workItemId: tko_item.id });
 }
 
 export async function addDependency(tko_actor: PlatformActor, tko_input: { sourceWorkItemId: string; targetWorkItemId: string; relationType: "blocks" | "blocked_by" | "relates_to" | "duplicates" | "duplicated_by"; correlationId: string }) {
