@@ -581,7 +581,7 @@ export class MemoryWorkStore implements WorkStore {
     if (!tko_item) throw new Error("WORK_ITEM_NOT_FOUND");
     const tko_comment: WorkComment = { id: crypto.randomUUID(), tenantId: tko_item.tenantId, type: "work_comment", workItemId: tko_item.id, authorMemberId: tko_input.actor.memberId, body: tko_input.body.trim(), reactions: [], attachments: [], createdAt: tko_now(), editedAt: null, deletedAt: null };
     this.tko_comments.set(tko_comment.id, tko_comment);
-    await this.tko_emit(tko_input.actor, "work.comment_created.v1", "work.item", { workItemId: tko_item.id, commentId: tko_comment.id }, "work.comment.created", "work_comment", tko_comment.id, tko_input.correlationId);
+    await this.tko_emit(tko_input.actor, "work.comment_created.v1", "work.item", { workItemId: tko_item.id, commentId: tko_comment.id, mentionMemberIds: Array.from(new Set(tko_input.mentionMemberIds ?? [])).filter(tko_memberId => tko_memberId !== tko_input.actor.memberId) }, "work.comment.created", "work_comment", tko_comment.id, tko_input.correlationId);
     return tko_clone(tko_comment);
   }
 
@@ -603,7 +603,7 @@ export class MemoryWorkStore implements WorkStore {
       await this.tko_emit(tko_input.actor, "work.comment_reaction_removed.v1", "work.item", { workItemId: tko_comment.workItemId, commentId: tko_comment.id, emoji: tko_input.emoji }, "work.comment.reaction_removed", "work_comment", tko_comment.id, tko_input.correlationId);
     } else {
       this.tko_commentReactions.set(tko_key, { id: tko_key, tenantId: tko_comment.tenantId, type: "work_comment_reaction", commentId: tko_comment.id, memberId: tko_input.actor.memberId, emoji: tko_input.emoji, createdAt: tko_now() });
-      await this.tko_emit(tko_input.actor, "work.comment_reaction_added.v1", "work.item", { workItemId: tko_comment.workItemId, commentId: tko_comment.id, emoji: tko_input.emoji }, "work.comment.reaction_added", "work_comment", tko_comment.id, tko_input.correlationId);
+      await this.tko_emit(tko_input.actor, "work.comment_reaction_added.v1", "work.item", { workItemId: tko_comment.workItemId, commentId: tko_comment.id, emoji: tko_input.emoji, recipientMemberId: tko_comment.authorMemberId === tko_input.actor.memberId ? null : tko_comment.authorMemberId }, "work.comment.reaction_added", "work_comment", tko_comment.id, tko_input.correlationId);
     }
     return (await this.listComments(tko_input.actor.tenantId, tko_comment.workItemId)).find(tko_entry => tko_entry.id === tko_comment.id)!;
   }

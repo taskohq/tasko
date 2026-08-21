@@ -355,6 +355,8 @@ export interface CreateCommentInput {
   actor: PlatformActor;
   workItemId: string;
   body: string;
+  /** Resolved server-side from active project membership; not accepted from browser input. */
+  mentionMemberIds?: string[];
   correlationId: string;
 }
 

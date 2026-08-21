@@ -112,7 +112,7 @@
 - [x] Work collaboration: hỗ trợ kéo-thả ảnh vào composer bình luận, preview trước khi gửi và tái sử dụng luồng upload S3 đã phân quyền.
 - [x] Work collaboration hardening: thêm loading/error state rõ ràng cho Permission Activity infinite query, tách biệt khỏi empty state.
 - [x] Work collaboration hardening: thêm regression cho trạng thái first-page, load-more và empty/error của Permission Activity panel.
-- [ ] Work collaboration: tạo notification Inbox/realtime khi người dùng được mention hoặc nhận reaction trong bình luận, với audit/outbox nguyên tử và negative authorization tests.
+- [x] Work collaboration: tạo notification Inbox/realtime khi người dùng được mention hoặc nhận reaction trong bình luận, với audit/outbox nguyên tử và negative authorization tests.
 - [ ] Work: hoàn thiện My Work bằng danh sách item được giao cho người dùng hiện tại, nhóm/lọc theo project, status và hạn xử lý.
 - [ ] Work: hoàn thiện Ops Update theo thay đổi hoạt động 24 giờ, nhóm theo project và hiển thị tác nhân/thay đổi.
 - [ ] Work: hoàn thiện Calendar theo ngày bắt đầu/hạn xử lý, gồm điều hướng thời gian và mở task inspector.

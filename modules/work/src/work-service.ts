@@ -37,6 +37,21 @@ function tko_require(tko_actor: PlatformActor, tko_capability: Capability, tko_r
   requireCapability(tko_actor, tko_capability, tko_workResource(tko_actor, tko_resource));
 }
 
+function tko_escapeRegex(tko_value: string): string { return tko_value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+async function tko_resolveCommentMentionMemberIds(tko_actor: PlatformActor, tko_item: WorkItem, tko_body: string): Promise<string[]> {
+  const [tko_projectMembers, tko_tenantMembers] = await Promise.all([
+    getWorkStore().listProjectMembers(tko_actor.tenantId, tko_item.projectId),
+    getPlatformStore().listTenantMembers(tko_actor.tenantId),
+  ]);
+  const tko_activeById = new Map(tko_tenantMembers.filter(tko_member => tko_member.status === "active").map(tko_member => [tko_member.id, tko_member]));
+  return tko_projectMembers
+    .map(tko_projectMember => tko_activeById.get(tko_projectMember.memberId))
+    .filter((tko_member): tko_member is NonNullable<typeof tko_member> => !!tko_member && tko_member.id !== tko_actor.memberId && !!tko_member.displayName.trim())
+    .filter(tko_member => new RegExp(`(^|[^\\p{L}\\p{N}_])@${tko_escapeRegex(tko_member.displayName.trim())}(?=$|[^\\p{L}\\p{N}_])`, "iu").test(tko_body))
+    .map(tko_member => tko_member.id);
+}
+
 async function tko_projectFor(tko_actor: PlatformActor, tko_projectId: string): Promise<WorkProject> {
   const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_projectId);
   if (!tko_project || tko_project.archivedAt) throw new Error("WORK_PROJECT_NOT_FOUND");
@@ -363,7 +378,8 @@ export async function archiveWorkItem(tko_input: ArchiveWorkItemInput) {
 export async function createComment(tko_input: CreateCommentInput) {
   const tko_item = await tko_itemFor(tko_input.actor, tko_input.workItemId);
   tko_require(tko_input.actor, "work.comment.create", tko_item);
-  return getWorkStore().createComment(tko_input);
+  const tko_mentionMemberIds = await tko_resolveCommentMentionMemberIds(tko_input.actor, tko_item, tko_input.body);
+  return getWorkStore().createComment({ ...tko_input, mentionMemberIds: tko_mentionMemberIds });
 }
 
 export async function toggleCommentReaction(tko_actor: PlatformActor, tko_input: { workItemId: string; commentId: string; emoji: string; correlationId: string }) {

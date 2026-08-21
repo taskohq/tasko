@@ -8,6 +8,7 @@ import { registerOutboxConsumer } from "../../worker/src/worker-service";
 import { createInboxItem, materializeSearchDocument, processAutomationEvent } from "./workspace-service";
 
 function tko_payloadId(tko_record: OutboxRecord, tko_name: string): string | null { const tko_value = tko_record.payload[tko_name]; return typeof tko_value === "string" ? tko_value : null; }
+function tko_payloadIds(tko_record: OutboxRecord, tko_name: string): string[] { const tko_value = tko_record.payload[tko_name]; return Array.isArray(tko_value) ? Array.from(new Set(tko_value.filter((tko_id): tko_id is string => typeof tko_id === "string"))) : []; }
 async function tko_actorFor(tko_record: OutboxRecord): Promise<PlatformActor> { const tko_actor = await resolveWorkerServiceActor({ tenantId: tko_record.tenantId, correlationId: tko_record.correlationId }); if (!tko_actor) throw new Error("WORKSPACE_SERVICE_ACTOR_MISSING"); return tko_actor; }
 
 async function tko_indexWork(tko_record: OutboxRecord): Promise<void> {
@@ -50,6 +51,26 @@ async function tko_handleFormSubmission(tko_record: OutboxRecord): Promise<void>
   await processAutomationEvent(tko_actor, tko_record);
 }
 
+async function tko_handleCommentMention(tko_record: OutboxRecord): Promise<void> {
+  const tko_workItemId = tko_payloadId(tko_record, "workItemId");
+  const tko_recipients = tko_payloadIds(tko_record, "mentionMemberIds");
+  if (!tko_workItemId || !tko_recipients.length) return;
+  const tko_actor = await tko_actorFor(tko_record);
+  const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_workItemId);
+  if (!tko_item) return;
+  await Promise.all(tko_recipients.map(tko_memberId => createInboxItem(tko_actor, { memberId: tko_memberId, kind: "mention", entityType: "work_item", entityId: tko_item.id, title: "You were mentioned in a work comment", body: `${tko_item.key} · ${tko_item.title}`, href: `/work?item=${tko_item.id}`, sourceEventId: tko_record.eventId, correlationId: `tko_materialize:${tko_record.eventId}` })));
+}
+
+async function tko_handleCommentReaction(tko_record: OutboxRecord): Promise<void> {
+  const tko_workItemId = tko_payloadId(tko_record, "workItemId");
+  const tko_recipientMemberId = tko_payloadId(tko_record, "recipientMemberId");
+  if (!tko_workItemId || !tko_recipientMemberId) return;
+  const tko_actor = await tko_actorFor(tko_record);
+  const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_workItemId);
+  if (!tko_item) return;
+  await createInboxItem(tko_actor, { memberId: tko_recipientMemberId, kind: "comment", entityType: "work_item", entityId: tko_item.id, title: "Your comment received a reaction", body: `${tko_item.key} · ${tko_item.title}`, href: `/work?item=${tko_item.id}`, sourceEventId: tko_record.eventId, correlationId: `tko_materialize:${tko_record.eventId}` });
+}
+
 export function registerWorkspaceWorker(): void {
   registerOutboxConsumer("work.work_item_created.v1", tko_indexWork, "job.process");
   registerOutboxConsumer("crm.lead_created.v1", tko_indexLead, "job.process");
@@ -57,4 +78,6 @@ export function registerWorkspaceWorker(): void {
   registerOutboxConsumer("chat.message_created.v1", tko_indexMessage, "job.process");
   registerOutboxConsumer("workspace.document_created.v1", tko_indexDocument, "job.process");
   registerOutboxConsumer("workspace.form_submitted.v1", tko_handleFormSubmission, "job.process");
+  registerOutboxConsumer("work.comment_created.v1", tko_handleCommentMention, "job.process");
+  registerOutboxConsumer("work.comment_reaction_added.v1", tko_handleCommentReaction, "job.process");
 }

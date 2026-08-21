@@ -7,6 +7,8 @@ import { resolveTenantRequestContext } from "../tenancy/src/tenant-context";
 import { processOutboxOnce } from "../worker/src/worker-service";
 import * as work from "./src/work-service";
 import { registerWorkRealtimeWorker } from "./src/work-realtime-worker";
+import { registerWorkspaceWorker } from "../workspace/src/workspace-worker";
+import * as workspaceMembership from "../workspace/src/workspace-membership-service";
 
 const tko_ownerSubject = "work-owner";
 const tko_otherSubject = "work-other-owner";
@@ -24,6 +26,7 @@ describe("Work Alpha acceptance boundaries", () => {
     setWorkStoreForTests(tko_workStore);
     setWorkspaceStoreForTests(tko_workspaceStore);
     registerWorkRealtimeWorker();
+    registerWorkspaceWorker();
     await tko_platformStore.seedDemoWorkspace({ ownerAuthSubject: tko_ownerSubject, tenantSlug: "tasko-demo" });
     await tko_platformStore.seedDemoWorkspace({ ownerAuthSubject: tko_otherSubject, tenantSlug: "other-workspace" });
   });
@@ -53,6 +56,27 @@ describe("Work Alpha acceptance boundaries", () => {
     expect(tko_inbox).toEqual(expect.arrayContaining([expect.objectContaining({ entityId: tko_item.id, kind: "assignment", sourceEventId: expect.any(String) })]));
     expect((await tko_platformStore.listAuditLogs()).some(tko_entry => tko_entry.action === "workspace.inbox.item_created")).toBe(true);
     expect((await tko_platformStore.listOutbox()).some(tko_entry => tko_entry.eventType === "workspace.inbox_item_created.v1")).toBe(true);
+  });
+
+  it("notifies active project members for @mentions and comment authors for reactions through idempotent outbox delivery", async () => {
+    const tko_owner = await tko_actor();
+    const tko_invitation = await workspaceMembership.createWorkspaceInvitation({ actor: tko_owner, email: "collaborator@example.test", role: "member", correlationId: "work-notification-member" });
+    const tko_member = await workspaceMembership.redeemWorkspaceInvitation({ authSubject: "work-collaborator", email: "collaborator@example.test", displayName: "Alex Collaborator", token: tko_invitation.token, correlationId: "work-notification-member-redeem" });
+    const tko_collaborator = await tko_actor("work-collaborator");
+    const tko_space = await work.createSpace(tko_owner, { name: "Collaboration", slug: "collaboration", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Collaboration", key: "COL", methodology: "kanban", visibility: "internal", correlationId: tko_owner.correlationId });
+    await work.upsertProjectMember(tko_owner, { projectId: tko_project.id, memberId: tko_member.membership.id, projectRole: "editor", correlationId: tko_owner.correlationId });
+    const tko_item = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Review comment", correlationId: tko_owner.correlationId });
+    const tko_comment = await work.createComment({ actor: tko_owner, workItemId: tko_item.id, body: "@Alex Collaborator please review this update.", correlationId: tko_owner.correlationId });
+    await work.toggleCommentReaction(tko_collaborator, { workItemId: tko_item.id, commentId: tko_comment.id, emoji: "👍", correlationId: tko_collaborator.correlationId });
+    await work.toggleCommentReaction(tko_owner, { workItemId: tko_item.id, commentId: tko_comment.id, emoji: "👀", correlationId: tko_owner.correlationId });
+
+    await processOutboxOnce(100);
+    const tko_collaboratorInbox = await getWorkspaceStore().listInbox(tko_owner.tenantId, tko_collaborator.memberId);
+    const tko_ownerInbox = await getWorkspaceStore().listInbox(tko_owner.tenantId, tko_owner.memberId);
+    expect(tko_collaboratorInbox).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "mention", entityId: tko_item.id })]));
+    expect(tko_ownerInbox.filter(tko_entry => tko_entry.kind === "comment" && tko_entry.entityId === tko_item.id)).toHaveLength(1);
+    expect((await tko_platformStore.listOutbox()).map(tko_entry => tko_entry.eventType)).toEqual(expect.arrayContaining(["work.comment_created.v1", "work.comment_reaction_added.v1", "workspace.inbox_item_created.v1"]));
   });
 
   it("delivers the board + sprint acceptance flow with stable project keys and durable history", async () => {
