@@ -1,5 +1,5 @@
 import type { PlatformActor } from "../../contracts/src/platform";
-import type { Channel, ChannelKind, ChannelNotificationLevel, ChannelReadState, ChatMessage, ChatSearchResult, CreateChannelInput, MessageReaction, SaveMessageInput, SavedMessage, SendMessageInput } from "../../contracts/src/chat";
+import type { Channel, ChannelKind, ChannelNotificationLevel, ChannelReadState, ChatMessage, ChatSearchResult, CreateChannelInput, MessageReaction, SaveMessageInput, SavedMessage, SendMessageInput, UpdateChannelInput } from "../../contracts/src/chat";
 import { getPlatformStore } from "./platform-store";
 import { tko_config } from "../../config/src/tasko-config";
 import { PostgresChatStore } from "./postgres-chat-store";
@@ -11,6 +11,11 @@ export interface ChatStore {
   listMessages(tenantId: string, channelId: string, afterSequence?: number): Promise<ChatMessage[]>;
   getMessage(tenantId: string, messageId: string): Promise<ChatMessage | null>;
   createChannel(actor: PlatformActor, input: CreateChannelInput): Promise<Channel>;
+  updateChannel(actor: PlatformActor, channelId: string, input: UpdateChannelInput, correlationId: string): Promise<Channel>;
+  archiveChannel(actor: PlatformActor, channelId: string, correlationId: string): Promise<Channel>;
+  deleteChannel(actor: PlatformActor, channelId: string, correlationId: string): Promise<void>;
+  addChannelMembers(actor: PlatformActor, channelId: string, memberIds: string[], correlationId: string): Promise<Channel>;
+  removeChannelMember(actor: PlatformActor, channelId: string, memberId: string, correlationId: string): Promise<Channel>;
   sendMessage(actor: PlatformActor, input: SendMessageInput, correlationId: string): Promise<ChatMessage>;
   editMessage(actor: PlatformActor, messageId: string, text: string, correlationId: string): Promise<ChatMessage>;
   deleteMessage(actor: PlatformActor, messageId: string, correlationId: string): Promise<ChatMessage>;
@@ -25,7 +30,7 @@ export interface ChatStore {
   seedDemo(actor: PlatformActor): Promise<Channel>;
 }
 
-function cloneChannel(tko_value: Channel): Channel { return { ...tko_value, memberIds: [...tko_value.memberIds], createdAt: new Date(tko_value.createdAt) }; }
+function cloneChannel(tko_value: Channel): Channel { return { ...tko_value, memberIds: [...tko_value.memberIds], createdAt: new Date(tko_value.createdAt), archivedAt: tko_value.archivedAt && new Date(tko_value.archivedAt) }; }
 function cloneMessage(tko_value: ChatMessage): ChatMessage { return { ...tko_value, body: { ...tko_value.body, mentions: [...(tko_value.body.mentions ?? [])] }, attachments: tko_value.attachments.map(tko_attachment => ({ ...tko_attachment })), createdAt: new Date(tko_value.createdAt), editedAt: tko_value.editedAt && new Date(tko_value.editedAt), deletedAt: tko_value.deletedAt && new Date(tko_value.deletedAt), latestReplyAt: tko_value.latestReplyAt && new Date(tko_value.latestReplyAt) }; }
 function emptyReadState(tko_channelId: string, tko_memberId: string): ChannelReadState { return { channelId: tko_channelId, memberId: tko_memberId, lastReadSeq: 0, lastNotifiedSeq: 0, unreadMentions: 0, notificationLevel: "mentions" }; }
 
@@ -39,18 +44,40 @@ export class MemoryChatStore implements ChatStore {
   private readonly tko_savedMessages = new Map<string, SavedMessage>();
 
   async listChannels(tko_tenantId: string, tko_memberId: string): Promise<Channel[]> {
-    return Array.from(this.tko_channels.values()).filter(tko_channel => tko_channel.tenantId === tko_tenantId && (tko_channel.kind === "public" || tko_channel.memberIds.includes(tko_memberId))).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).map(cloneChannel);
+    return Array.from(this.tko_channels.values()).filter(tko_channel => tko_channel.tenantId === tko_tenantId && !tko_channel.archivedAt && (tko_channel.kind === "public" || tko_channel.memberIds.includes(tko_memberId))).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")).map(cloneChannel);
   }
   async getChannel(tko_tenantId: string, tko_channelId: string): Promise<Channel | null> { const tko_value = this.tko_channels.get(tko_channelId); return tko_value?.tenantId === tko_tenantId ? cloneChannel(tko_value) : null; }
   async listMessages(tko_tenantId: string, tko_channelId: string, tko_after = 0): Promise<ChatMessage[]> { return Array.from(this.tko_messages.values()).filter(tko_message => tko_message.tenantId === tko_tenantId && tko_message.channelId === tko_channelId && tko_message.sequence > tko_after).sort((a,b) => a.sequence - b.sequence).map(cloneMessage); }
   async getMessage(tko_tenantId: string, tko_messageId: string): Promise<ChatMessage | null> { const tko_value = this.tko_messages.get(tko_messageId); return tko_value?.tenantId === tko_tenantId ? cloneMessage(tko_value) : null; }
   async createChannel(tko_actor: PlatformActor, tko_input: CreateChannelInput): Promise<Channel> {
-    const tko_channel: Channel = { id: crypto.randomUUID(), tenantId: tko_input.tenantId, kind: tko_input.kind, name: tko_input.kind === "public" || tko_input.kind === "private" ? (tko_input.name ?? null) : null, topic: tko_input.topic ?? null, visibility: tko_input.visibility ?? (tko_input.kind === "private" || tko_input.kind === "dm" || tko_input.kind === "group_dm" ? "private" : "internal"), memberIds: Array.from(new Set([tko_actor.memberId, ...tko_input.memberIds])), lastSequence: 0, createdAt: new Date(), type: "channel", explicitMemberIds: [] };
+    const tko_channel: Channel = { id: crypto.randomUUID(), tenantId: tko_input.tenantId, kind: tko_input.kind, name: tko_input.kind === "public" || tko_input.kind === "private" ? (tko_input.name ?? null) : null, topic: tko_input.topic ?? null, visibility: tko_input.visibility ?? (tko_input.kind === "private" || tko_input.kind === "dm" || tko_input.kind === "group_dm" ? "private" : "internal"), memberIds: Array.from(new Set([tko_actor.memberId, ...tko_input.memberIds])), lastSequence: 0, createdByMemberId: tko_actor.memberId, archivedAt: null, createdAt: new Date(), type: "channel", explicitMemberIds: [] };
     tko_channel.explicitMemberIds = tko_channel.memberIds;
     this.tko_channels.set(tko_channel.id, tko_channel);
     for (const tko_memberId of tko_channel.memberIds) this.tko_reads.set(`${tko_channel.id}:${tko_memberId}`, emptyReadState(tko_channel.id, tko_memberId));
     await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.channel_created.v1", topic: "chat.channel", payload: { channelId: tko_channel.id, kind: tko_channel.kind }, auditAction: "chat.channel.created", resourceType: "channel", resourceId: tko_channel.id, correlationId: tko_actor.correlationId });
     return cloneChannel(tko_channel);
+  }
+  async updateChannel(tko_actor: PlatformActor, tko_channelId: string, tko_input: UpdateChannelInput, tko_correlationId: string): Promise<Channel> {
+    const tko_channel = this.tko_channels.get(tko_channelId); if (!tko_channel || tko_channel.tenantId !== tko_actor.tenantId || tko_channel.archivedAt) throw new Error("CHAT_CHANNEL_NOT_FOUND");
+    if (tko_input.name !== undefined) tko_channel.name = tko_input.name.trim(); if (tko_input.topic !== undefined) tko_channel.topic = tko_input.topic?.trim() || null; if (tko_input.visibility !== undefined) tko_channel.visibility = tko_input.visibility;
+    await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.channel_updated.v1", topic: "chat.channel", payload: { channelId: tko_channelId }, auditAction: "chat.channel.updated", resourceType: "channel", resourceId: tko_channelId, correlationId: tko_correlationId }); return cloneChannel(tko_channel);
+  }
+  async archiveChannel(tko_actor: PlatformActor, tko_channelId: string, tko_correlationId: string): Promise<Channel> {
+    const tko_channel = this.tko_channels.get(tko_channelId); if (!tko_channel || tko_channel.tenantId !== tko_actor.tenantId || tko_channel.archivedAt) throw new Error("CHAT_CHANNEL_NOT_FOUND"); tko_channel.archivedAt = new Date();
+    await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.channel_archived.v1", topic: "chat.channel", payload: { channelId: tko_channelId }, auditAction: "chat.channel.archived", resourceType: "channel", resourceId: tko_channelId, correlationId: tko_correlationId }); return cloneChannel(tko_channel);
+  }
+  async deleteChannel(tko_actor: PlatformActor, tko_channelId: string, tko_correlationId: string): Promise<void> {
+    const tko_channel = this.tko_channels.get(tko_channelId); if (!tko_channel || tko_channel.tenantId !== tko_actor.tenantId) throw new Error("CHAT_CHANNEL_NOT_FOUND"); this.tko_channels.delete(tko_channelId);
+    for (const [tko_id, tko_message] of Array.from(this.tko_messages.entries())) if (tko_message.channelId === tko_channelId) this.tko_messages.delete(tko_id); for (const tko_key of Array.from(this.tko_reads.keys())) if (tko_key.startsWith(`${tko_channelId}:`)) this.tko_reads.delete(tko_key);
+    await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.channel_deleted.v1", topic: "chat.channel", payload: { channelId: tko_channelId }, auditAction: "chat.channel.deleted", resourceType: "channel", resourceId: tko_channelId, correlationId: tko_correlationId });
+  }
+  async addChannelMembers(tko_actor: PlatformActor, tko_channelId: string, tko_memberIds: string[], tko_correlationId: string): Promise<Channel> {
+    const tko_channel = this.tko_channels.get(tko_channelId); if (!tko_channel || tko_channel.tenantId !== tko_actor.tenantId || tko_channel.archivedAt) throw new Error("CHAT_CHANNEL_NOT_FOUND"); const tko_added = tko_memberIds.filter(tko_memberId => !tko_channel.memberIds.includes(tko_memberId)); tko_channel.memberIds.push(...tko_added); tko_channel.explicitMemberIds = [...tko_channel.memberIds]; for (const tko_memberId of tko_added) this.tko_reads.set(`${tko_channelId}:${tko_memberId}`, emptyReadState(tko_channelId, tko_memberId));
+    await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.channel_members_added.v1", topic: "chat.channel", payload: { channelId: tko_channelId, memberIds: tko_added }, auditAction: "chat.channel.members_added", resourceType: "channel", resourceId: tko_channelId, correlationId: tko_correlationId }); return cloneChannel(tko_channel);
+  }
+  async removeChannelMember(tko_actor: PlatformActor, tko_channelId: string, tko_memberId: string, tko_correlationId: string): Promise<Channel> {
+    const tko_channel = this.tko_channels.get(tko_channelId); if (!tko_channel || tko_channel.tenantId !== tko_actor.tenantId || tko_channel.archivedAt) throw new Error("CHAT_CHANNEL_NOT_FOUND"); tko_channel.memberIds = tko_channel.memberIds.filter(tko_value => tko_value !== tko_memberId); tko_channel.explicitMemberIds = [...tko_channel.memberIds]; this.tko_reads.delete(`${tko_channelId}:${tko_memberId}`);
+    await getPlatformStore().writeDurableMutation({ actor: tko_actor, tenantId: tko_actor.tenantId, eventType: "chat.channel_member_removed.v1", topic: "chat.channel", payload: { channelId: tko_channelId, memberId: tko_memberId }, auditAction: "chat.channel.member_removed", resourceType: "channel", resourceId: tko_channelId, correlationId: tko_correlationId }); return cloneChannel(tko_channel);
   }
   async sendMessage(tko_actor: PlatformActor, tko_input: SendMessageInput, tko_correlationId: string): Promise<ChatMessage> {
     const tko_idempotencyKey = `${tko_input.channelId}:${tko_input.clientMessageId}`;

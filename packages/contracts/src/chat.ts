@@ -1,6 +1,6 @@
 
 export type ChannelKind = "public" | "private" | "dm" | "group_dm";
-export type MessageBody = { type: "text"; text: string; mentions?: string[] };
+export type MessageBody = { type: "text"; text: string; mentions?: string[]; broadcastMention?: "channel" | "here"; quotedMessageId?: string | null };
 export type ChannelNotificationLevel = "all" | "mentions" | "none";
 export type SavedMessageStatus = "open" | "done";
 
@@ -30,7 +30,16 @@ export interface Channel {
   memberIds: string[];
   explicitMemberIds: string[];
   lastSequence: number;
+  createdByMemberId: string | null;
+  archivedAt: Date | null;
   createdAt: Date;
+}
+
+export interface ChannelMemberCandidate {
+  id: string;
+  displayName: string;
+  role: string;
+  isInChannel: boolean;
 }
 
 export interface ChatMessage {
@@ -114,6 +123,12 @@ export interface SendMessageInput {
   body: MessageBody;
   attachments?: MessageAttachment[];
   parentMessageId?: string | null;
+}
+
+export interface UpdateChannelInput {
+  name?: string;
+  topic?: string | null;
+  visibility?: "internal" | "private";
 }
 
 export interface SaveMessageInput {

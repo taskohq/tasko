@@ -116,4 +116,32 @@ describe("Collaboration Alpha M2", () => {
     expect((await chat.readStates(tko_member)).find(tko_state => tko_state.channelId === tko_channel.id)?.unreadMentions).toBe(0);
     expect((await chat.messages(tko_owner, tko_channel.id)).find(tko_item => tko_item.id === tko_message.id)?.attachments).toEqual([expect.objectContaining({ filename: "handoff.txt", objectKey: expect.stringContaining("attachments/") })]);
   });
+
+  it("manages named channel lifecycle durably and rejects unauthorized or foreign membership changes", async () => {
+    const tko_owner = tko_actor({ memberId: "tko-member-tasko-demo-owner" });
+    const tko_private = await chat.createChannel(tko_owner, { kind: "private", name: "launch-room", topic: "Launch planning", visibility: "private", memberIds: [] });
+    const tko_candidates = await chat.channelMemberCandidates(tko_owner, tko_private.id);
+    const tko_updated = await chat.updateChannel(tko_owner, tko_private.id, { name: "launch-control", topic: "Decision log" }, "channel-update");
+
+    expect(tko_candidates).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_owner.memberId, isInChannel: true })]));
+    expect(tko_updated.name).toBe("launch-control");
+    await expect(chat.addChannelMembers(tko_owner, tko_private.id, ["19d1d3e6-dc63-4c3d-bc35-5d87ee977605"], "foreign-member")).rejects.toThrow("CHAT_CHANNEL_MEMBER_NOT_FOUND");
+    await expect(chat.updateChannel(tko_actor({ authSubject: "ordinary-member", memberId: "member-not-manager", role: "member" }), tko_private.id, { topic: "Nope" }, "denied-update")).rejects.toThrow("AUTHORIZATION_DENIED");
+    await chat.archiveChannel(tko_owner, tko_private.id, "channel-archive");
+    expect((await chat.listChannels(tko_owner)).map(tko_channel => tko_channel.id)).not.toContain(tko_private.id);
+    expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["chat.channel.updated", "chat.channel.archived"]));
+  });
+
+  it("keeps quote references in-channel and normalizes nested replies onto a single Slack-style thread root", async () => {
+    const tko_owner = tko_actor();
+    const tko_channel = await chat.seedDemo(tko_owner);
+    const tko_root = await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "e8f8b71e-636e-41e6-ad80-c31d53b61271", body: { type: "text", text: "Root decision" } }, "thread-root");
+    const tko_firstReply = await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "b84c7031-4645-432b-bb14-d11dd47f7c26", parentMessageId: tko_root.id, body: { type: "text", text: "First reply", quotedMessageId: tko_root.id } }, "thread-first");
+    const tko_nestedReply = await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "c85a4f51-4e2e-48e4-8df3-b40fccb4b4f9", parentMessageId: tko_firstReply.id, body: { type: "text", text: "Nested reply" } }, "thread-nested");
+    const tko_otherChannel = await chat.createChannel(tko_owner, { kind: "public", name: "other-room", memberIds: [] });
+
+    expect(tko_firstReply.body.quotedMessageId).toBe(tko_root.id);
+    expect(tko_nestedReply.parentMessageId).toBe(tko_root.id);
+    await expect(chat.sendMessage(tko_owner, { channelId: tko_otherChannel.id, clientMessageId: "8e7369e1-c247-43a1-a3c3-df361869306e", body: { type: "text", text: "Invalid quote", quotedMessageId: tko_root.id } }, "quote-cross-channel")).rejects.toThrow("CHAT_QUOTED_MESSAGE_NOT_FOUND");
+  });
 });

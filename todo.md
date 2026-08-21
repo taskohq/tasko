@@ -117,7 +117,7 @@
 - [x] Work: hoàn thiện Ops Update theo thay đổi hoạt động 24 giờ, nhóm theo project và hiển thị tác nhân/thay đổi.
 - [x] Work: hoàn thiện Calendar theo ngày bắt đầu/hạn xử lý, gồm điều hướng thời gian và mở task inspector.
 - [x] Work Files: refactor Files tab thành file manager thuần túy có search/filter, preview, signed download và điều hướng về task chứa file để xóa; không hỗ trợ xóa hàng loạt.
-- [ ] Chat: hoàn thiện Slack-like channel CRUD, quản lý thành viên, gửi tin nhắn, file attachment, quote, reply thread, @channel/@here, audit/outbox/realtime và negative authorization tests.
+- [x] Chat: hoàn thiện Slack-like channel CRUD, quản lý thành viên, gửi tin nhắn, file attachment, quote, reply thread, @channel/@here, audit/outbox/realtime và negative authorization tests.
 - [x] Workspace administration: quản lý thành viên workspace, phân quyền role, invitation email-link một lần, quản lý trạng thái lời mời, gửi lại/thu hồi, audit/outbox và negative authorization tests.
 - [ ] Workspace invitation delivery: nối provider email giao dịch để gửi thư mời thực tế; hiện UI cung cấp copy link an toàn khi chưa có provider được kết nối.
 - [x] Work task creation bug: tái hiện, xác định và sửa nguyên nhân task không được tạo từ composer/board trên phiên tenant thật, kèm regression success và failure recovery.

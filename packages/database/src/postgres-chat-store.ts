@@ -1,5 +1,5 @@
 import type { PlatformActor } from "../../contracts/src/platform";
-import type { Channel, ChannelNotificationLevel, ChannelReadState, ChatMessage, ChatSearchResult, CreateChannelInput, SaveMessageInput, SavedMessage, SendMessageInput } from "../../contracts/src/chat";
+import type { Channel, ChannelNotificationLevel, ChannelReadState, ChatMessage, ChatSearchResult, CreateChannelInput, SaveMessageInput, SavedMessage, SendMessageInput, UpdateChannelInput } from "../../contracts/src/chat";
 import type { ChatStore } from "./chat-store";
 import { Pool, type PoolClient } from "pg";
 
@@ -17,7 +17,7 @@ export class PostgresChatStore implements ChatStore {
 
   async listChannels(tko_tenantId: string, tko_memberId: string): Promise<Channel[]> {
     return this.tko_read(tko_tenantId, async tko_client => {
-      const tko_rows = await tko_client.query(`select distinct c.* from channels c left join channel_members cm on cm.channel_id=c.id and cm.tenant_id=c.tenant_id where c.tenant_id=$1 and (c.kind='public' or cm.member_id=$2) order by c.name nulls last, c.created_at`, [tko_tenantId, tko_memberId]);
+      const tko_rows = await tko_client.query(`select distinct c.* from channels c left join channel_members cm on cm.channel_id=c.id and cm.tenant_id=c.tenant_id where c.tenant_id=$1 and c.archived_at is null and (c.kind='public' or cm.member_id=$2) order by c.name nulls last, c.created_at`, [tko_tenantId, tko_memberId]);
       return Promise.all(tko_rows.rows.map(tko_row => this.tko_channel(tko_client, tko_row)));
     });
   }
@@ -45,11 +45,61 @@ export class PostgresChatStore implements ChatStore {
 
   async createChannel(tko_actor: PlatformActor, tko_input: CreateChannelInput): Promise<Channel> {
     return this.tko_transaction(tko_actor.tenantId, async tko_client => {
-      const tko_result = await tko_client.query(`insert into channels (id,tenant_id,kind,name,topic,visibility) values ($1,$2,$3,$4,$5,$6) returning *`, [crypto.randomUUID(), tko_actor.tenantId, tko_input.kind, tko_input.kind === "public" || tko_input.kind === "private" ? (tko_input.name?.trim() ?? null) : null, tko_input.topic?.trim() ?? null, tko_input.visibility ?? (tko_input.kind === "private" || tko_input.kind === "dm" || tko_input.kind === "group_dm" ? "private" : "internal")]);
+      const tko_result = await tko_client.query(`insert into channels (id,tenant_id,kind,name,topic,visibility,created_by_member_id) values ($1,$2,$3,$4,$5,$6,$7) returning *`, [crypto.randomUUID(), tko_actor.tenantId, tko_input.kind, tko_input.kind === "public" || tko_input.kind === "private" ? (tko_input.name?.trim() ?? null) : null, tko_input.topic?.trim() ?? null, tko_input.visibility ?? (tko_input.kind === "private" || tko_input.kind === "dm" || tko_input.kind === "group_dm" ? "private" : "internal"), tko_actor.memberId]);
       const tko_memberIds = Array.from(new Set([tko_actor.memberId, ...tko_input.memberIds]));
       for (const tko_memberId of tko_memberIds) await tko_client.query(`insert into channel_members (tenant_id,channel_id,member_id) values ($1,$2,$3)`, [tko_actor.tenantId, tko_result.rows[0].id, tko_memberId]);
       const tko_channel = await this.tko_channel(tko_client, tko_result.rows[0]);
       await this.tko_emit(tko_client, tko_actor, "chat.channel_created.v1", "chat.channel", { channelId: tko_channel.id, kind: tko_channel.kind }, "chat.channel.created", "channel", tko_channel.id, tko_actor.correlationId);
+      return tko_channel;
+    });
+  }
+
+  async updateChannel(tko_actor: PlatformActor, tko_channelId: string, tko_input: UpdateChannelInput, tko_correlationId: string): Promise<Channel> {
+    return this.tko_transaction(tko_actor.tenantId, async tko_client => {
+      const tko_result = await tko_client.query(`update channels set name=coalesce($1,name), topic=case when $2::boolean then $3 else topic end, visibility=coalesce($4,visibility), updated_at=now() where tenant_id=$5 and id=$6 and archived_at is null returning *`, [tko_input.name?.trim() ?? null, tko_input.topic !== undefined, tko_input.topic?.trim() || null, tko_input.visibility ?? null, tko_actor.tenantId, tko_channelId]);
+      if (!tko_result.rowCount) throw new Error("CHAT_CHANNEL_NOT_FOUND");
+      const tko_channel = await this.tko_channel(tko_client, tko_result.rows[0]);
+      await this.tko_emit(tko_client, tko_actor, "chat.channel_updated.v1", "chat.channel", { channelId: tko_channelId }, "chat.channel.updated", "channel", tko_channelId, tko_correlationId);
+      return tko_channel;
+    });
+  }
+
+  async archiveChannel(tko_actor: PlatformActor, tko_channelId: string, tko_correlationId: string): Promise<Channel> {
+    return this.tko_transaction(tko_actor.tenantId, async tko_client => {
+      const tko_result = await tko_client.query(`update channels set archived_at=now(),updated_at=now() where tenant_id=$1 and id=$2 and archived_at is null returning *`, [tko_actor.tenantId, tko_channelId]);
+      if (!tko_result.rowCount) throw new Error("CHAT_CHANNEL_NOT_FOUND");
+      const tko_channel = await this.tko_channel(tko_client, tko_result.rows[0]);
+      await this.tko_emit(tko_client, tko_actor, "chat.channel_archived.v1", "chat.channel", { channelId: tko_channelId }, "chat.channel.archived", "channel", tko_channelId, tko_correlationId);
+      return tko_channel;
+    });
+  }
+
+  async deleteChannel(tko_actor: PlatformActor, tko_channelId: string, tko_correlationId: string): Promise<void> {
+    await this.tko_transaction(tko_actor.tenantId, async tko_client => {
+      const tko_result = await tko_client.query(`delete from channels where tenant_id=$1 and id=$2 returning id`, [tko_actor.tenantId, tko_channelId]);
+      if (!tko_result.rowCount) throw new Error("CHAT_CHANNEL_NOT_FOUND");
+      await this.tko_emit(tko_client, tko_actor, "chat.channel_deleted.v1", "chat.channel", { channelId: tko_channelId }, "chat.channel.deleted", "channel", tko_channelId, tko_correlationId);
+    });
+  }
+
+  async addChannelMembers(tko_actor: PlatformActor, tko_channelId: string, tko_memberIds: string[], tko_correlationId: string): Promise<Channel> {
+    return this.tko_transaction(tko_actor.tenantId, async tko_client => {
+      const tko_channelResult = await tko_client.query(`select * from channels where tenant_id=$1 and id=$2 and archived_at is null for update`, [tko_actor.tenantId, tko_channelId]);
+      if (!tko_channelResult.rowCount) throw new Error("CHAT_CHANNEL_NOT_FOUND");
+      for (const tko_memberId of tko_memberIds) await tko_client.query(`insert into channel_members (tenant_id,channel_id,member_id) values ($1,$2,$3) on conflict (channel_id,member_id) do nothing`, [tko_actor.tenantId, tko_channelId, tko_memberId]);
+      const tko_channel = await this.tko_channel(tko_client, tko_channelResult.rows[0]);
+      await this.tko_emit(tko_client, tko_actor, "chat.channel_members_added.v1", "chat.channel", { channelId: tko_channelId, memberIds: tko_memberIds }, "chat.channel.members_added", "channel", tko_channelId, tko_correlationId);
+      return tko_channel;
+    });
+  }
+
+  async removeChannelMember(tko_actor: PlatformActor, tko_channelId: string, tko_memberId: string, tko_correlationId: string): Promise<Channel> {
+    return this.tko_transaction(tko_actor.tenantId, async tko_client => {
+      const tko_channelResult = await tko_client.query(`select * from channels where tenant_id=$1 and id=$2 and archived_at is null for update`, [tko_actor.tenantId, tko_channelId]);
+      if (!tko_channelResult.rowCount) throw new Error("CHAT_CHANNEL_NOT_FOUND");
+      await tko_client.query(`delete from channel_members where tenant_id=$1 and channel_id=$2 and member_id=$3`, [tko_actor.tenantId, tko_channelId, tko_memberId]);
+      const tko_channel = await this.tko_channel(tko_client, tko_channelResult.rows[0]);
+      await this.tko_emit(tko_client, tko_actor, "chat.channel_member_removed.v1", "chat.channel", { channelId: tko_channelId, memberId: tko_memberId }, "chat.channel.member_removed", "channel", tko_channelId, tko_correlationId);
       return tko_channel;
     });
   }
@@ -176,7 +226,7 @@ export class PostgresChatStore implements ChatStore {
   private async tko_channel(tko_client: PoolClient, tko_row: Row): Promise<Channel> {
     const tko_members = await tko_client.query(`select member_id from channel_members where tenant_id=$1 and channel_id=$2 order by member_id`, [String(tko_row.tenant_id), String(tko_row.id)]);
     const tko_memberIds = tko_members.rows.map(tko_member => String(tko_member.member_id));
-    return { id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "channel", kind: tko_row.kind as Channel["kind"], name: tko_row.name ? String(tko_row.name) : null, topic: tko_row.topic ? String(tko_row.topic) : null, visibility: tko_row.visibility as Channel["visibility"], memberIds: tko_memberIds, explicitMemberIds: tko_memberIds, lastSequence: Number(tko_row.last_sequence), createdAt: new Date(String(tko_row.created_at)) };
+    return { id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "channel", kind: tko_row.kind as Channel["kind"], name: tko_row.name ? String(tko_row.name) : null, topic: tko_row.topic ? String(tko_row.topic) : null, visibility: tko_row.visibility as Channel["visibility"], memberIds: tko_memberIds, explicitMemberIds: tko_memberIds, lastSequence: Number(tko_row.last_sequence), createdByMemberId: tko_row.created_by_member_id ? String(tko_row.created_by_member_id) : null, archivedAt: tko_date(tko_row.archived_at), createdAt: new Date(String(tko_row.created_at)) };
   }
 
   private async tko_message(tko_client: PoolClient, tko_row: Row): Promise<ChatMessage> {
