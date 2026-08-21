@@ -116,7 +116,7 @@
 - [x] Work: hoàn thiện My Work bằng danh sách item được giao cho người dùng hiện tại, nhóm/lọc theo project, status và hạn xử lý.
 - [x] Work: hoàn thiện Ops Update theo thay đổi hoạt động 24 giờ, nhóm theo project và hiển thị tác nhân/thay đổi.
 - [x] Work: hoàn thiện Calendar theo ngày bắt đầu/hạn xử lý, gồm điều hướng thời gian và mở task inspector.
-- [ ] Work Files: refactor Files tab thành file manager thuần túy có search/filter, preview, signed download và điều hướng về task chứa file để xóa; không hỗ trợ xóa hàng loạt.
+- [x] Work Files: refactor Files tab thành file manager thuần túy có search/filter, preview, signed download và điều hướng về task chứa file để xóa; không hỗ trợ xóa hàng loạt.
 - [ ] Chat: hoàn thiện Slack-like channel CRUD, quản lý thành viên, gửi tin nhắn, file attachment, quote, reply thread, @channel/@here, audit/outbox/realtime và negative authorization tests.
 - [x] Workspace administration: quản lý thành viên workspace, phân quyền role, invitation email-link một lần, quản lý trạng thái lời mời, gửi lại/thu hồi, audit/outbox và negative authorization tests.
 - [ ] Workspace invitation delivery: nối provider email giao dịch để gửi thư mời thực tế; hiện UI cung cấp copy link an toàn khi chưa có provider được kết nối.
@@ -143,6 +143,8 @@
 - [x] Workspace Forms/Automation P1 audit/remediation: xác minh cấu hình, kích hoạt, chạy/submit, execution log và authorization; chỉ hoàn thiện những flow có backend thực.
 - [x] Ecosystem connections P1 audit/remediation: phân tách rõ registration boundary khỏi provider OAuth/sync thực và loại bỏ mọi mô tả UI gây hiểu nhầm.
 - [x] Work sprint planning remediation: đưa workflow sprint có dữ liệu thật vào Work gồm create sprint, chọn item, thêm item, hoàn tất sprint với disposition và trạng thái/feedback truy cập được.
+- [ ] Document management: bổ sung thư viện tài liệu theo project, lưu metadata và bytes trên S3/Wasabi, preview/tải xuống định dạng văn phòng và quyền tenant/project-safe.
+- [ ] Workspace document library: bổ sung nơi tìm kiếm, lọc và quản lý gộp tài liệu từ mọi project mà thành viên được quyền truy cập, theo mô hình đơn giản tương tự Google Drive.
 - [x] Work Sprint PostgreSQL proof: kiểm thử carry-over Sprint trên Postgres Docker với RLS tenant, item disposition, audit metadata và outbox trong cùng transaction.
 - [x] Work dependency remediation: xác minh và hoàn thiện flow tạo/xem/gỡ dependency từ inspector Work bằng API tenant-safe thực, có validation cycle/authorization, audit/outbox và regression.
 - [x] Project-management audit verification: viết/điều chỉnh tests, chạy regression/build, kiểm tra desktop/mobile, cập nhật evidence, commit và checkpoint.

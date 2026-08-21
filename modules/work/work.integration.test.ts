@@ -346,6 +346,23 @@ describe("Work Alpha acceptance boundaries", () => {
     expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.sprint_started.v1" && tko_event.payload.sprintId === tko_sprint.id)).toBe(true);
   });
 
+  it("removes task attachments only through an authorized task update with durable audit and outbox", async () => {
+    const tko_owner = await tko_actor();
+    const tko_guest = { ...tko_owner, authSubject: "files-guest", memberId: "files-guest-member", role: "guest" as const, correlationId: "test:files-guest" };
+    const tko_space = await work.createSpace(tko_owner, { name: "File controls", slug: "file-controls", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "File controls", key: "FILE", methodology: "kanban", visibility: "guest_shared", correlationId: tko_owner.correlationId });
+    const tko_item = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: "Remove an attachment", correlationId: tko_owner.correlationId });
+    const tko_attachment = await tko_workStore.createAttachment(tko_owner, { workItemId: tko_item.id, objectKey: `tenants/${tko_owner.tenantId}/attachments/to-remove.pdf`, filename: "to-remove.pdf", contentType: "application/pdf", byteSize: 512, correlationId: tko_owner.correlationId });
+
+    await expect(work.removeWorkAttachment(tko_guest, { workItemId: tko_item.id, attachmentId: tko_attachment.id, correlationId: tko_guest.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+    await work.removeWorkAttachment(tko_owner, { workItemId: tko_item.id, attachmentId: tko_attachment.id, correlationId: tko_owner.correlationId });
+
+    expect((await work.itemDetails(tko_owner, tko_item.id)).attachments).toEqual([]);
+    expect(await work.projectFiles(tko_owner, tko_project.id)).toEqual([]);
+    expect((await tko_platformStore.listAuditLogs()).some(tko_event => tko_event.action === "work.attachment.removed" && tko_event.metadata.attachmentId === tko_attachment.id)).toBe(true);
+    expect((await tko_platformStore.listOutbox()).some(tko_event => tko_event.eventType === "work.attachment_removed.v1" && tko_event.payload.attachmentId === tko_attachment.id)).toBe(true);
+  });
+
   it("projects tenant-safe My Work, Ops Update and Calendar read models without durable writes", async () => {
     const tko_owner = await tko_actor();
     const tko_otherTenant = { ...tko_owner, authSubject: tko_otherSubject, tenantId: "tko-tenant-other-workspace", tenantSlug: "other-workspace", memberId: "tko-member-other-workspace-owner", correlationId: "test:work-views-other-tenant" };
