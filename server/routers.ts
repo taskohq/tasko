@@ -13,6 +13,7 @@ import * as workService from "../modules/work/src/work-service";
 import * as chatService from "../modules/chat/src/chat-service";
 import * as crmService from "../modules/crm/src/crm-service";
 import * as workspaceService from "../modules/workspace/src/workspace-service";
+import * as workspaceMembershipService from "../modules/workspace/src/workspace-membership-service";
 import { getSaaSService } from "../modules/saas/src/saas-service";
 import { getImportService } from "../modules/ecosystem/src/import-service";
 import { getDeveloperService } from "../modules/ecosystem/src/developer-service";
@@ -167,6 +168,29 @@ export const appRouter = router({
       }
       return getPlatformStore().seedDemoWorkspace({ ownerAuthSubject: ctx.user.openId });
     }),
+  }),
+
+  workspaceMembers: router({
+    list: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceMembers(ctx.platform.actor)),
+    invitations: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceInvitations(ctx.platform.actor)),
+    invite: tenantProcedure
+      .input(z.object({ email: z.string().trim().email().max(254), role: z.enum(["admin", "member", "guest"]) }))
+      .mutation(async ({ ctx, input }) => workspaceMembershipService.createWorkspaceInvitation({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
+    resendInvitation: tenantProcedure
+      .input(z.object({ invitationId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => workspaceMembershipService.resendWorkspaceInvitation({ actor: ctx.platform.actor, invitationId: input.invitationId, correlationId: ctx.correlationId })),
+    revokeInvitation: tenantProcedure
+      .input(z.object({ invitationId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => { await workspaceMembershipService.revokeWorkspaceInvitation({ actor: ctx.platform.actor, invitationId: input.invitationId, correlationId: ctx.correlationId }); return { success: true } as const; }),
+    changeRole: tenantProcedure
+      .input(z.object({ memberId: z.string().uuid(), newRole: z.enum(["owner", "admin", "member", "guest"]) }))
+      .mutation(async ({ ctx, input }) => { await workspaceMembershipService.changeWorkspaceMemberRole({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId }); return { success: true } as const; }),
+    changeStatus: tenantProcedure
+      .input(z.object({ memberId: z.string().uuid(), newStatus: z.enum(["active", "suspended"]) }))
+      .mutation(async ({ ctx, input }) => { await workspaceMembershipService.changeWorkspaceMemberStatus({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId }); return { success: true } as const; }),
+    redeemInvitation: protectedProcedure
+      .input(z.object({ token: z.string().min(32).max(512) }))
+      .mutation(async ({ ctx, input }) => workspaceMembershipService.redeemWorkspaceInvitation({ authSubject: ctx.user.openId, email: ctx.user.email ?? null, displayName: ctx.user.name ?? "Tasko member", token: input.token, correlationId: ctx.correlationId })),
   }),
 
   work: router({

@@ -4,6 +4,8 @@ export type TenantRole = "owner" | "admin" | "member" | "guest" | "service_accou
 
 export type MembershipStatus = "active" | "suspended" | "invited";
 
+export type WorkspaceInvitationStatus = "pending" | "accepted" | "revoked" | "expired";
+
 export type OutboxStatus = "pending" | "processing" | "processed" | "dead_letter";
 
 export type Capability =
@@ -97,6 +99,20 @@ export interface TenantMembership {
   displayName: string;
 }
 
+export interface WorkspaceInvitation {
+  id: string;
+  tenantId: string;
+  email: string;
+  role: Exclude<TenantRole, "service_account" | "owner">;
+  status: WorkspaceInvitationStatus;
+  createdByAuthSubject: string;
+  createdAt: Date;
+  expiresAt: Date;
+  lastSentAt: Date;
+  acceptedAt: Date | null;
+  revokedAt: Date | null;
+}
+
 export interface PlatformActor {
   authSubject: string;
   tenantId: string;
@@ -173,5 +189,45 @@ export interface ChangeTenantMemberRoleInput {
   tenantId: string;
   memberId: string;
   newRole: Exclude<TenantRole, "service_account">;
+  correlationId: string;
+}
+
+export interface ChangeTenantMemberStatusInput {
+  actor: PlatformActor;
+  tenantId: string;
+  memberId: string;
+  newStatus: Extract<MembershipStatus, "active" | "suspended">;
+  correlationId: string;
+}
+
+export interface CreateWorkspaceInvitationInput {
+  actor: PlatformActor;
+  tenantId: string;
+  email: string;
+  role: WorkspaceInvitation["role"];
+  correlationId: string;
+  expiresAt: Date;
+}
+
+export interface ResendWorkspaceInvitationInput {
+  actor: PlatformActor;
+  tenantId: string;
+  invitationId: string;
+  correlationId: string;
+  expiresAt: Date;
+}
+
+export interface RevokeWorkspaceInvitationInput {
+  actor: PlatformActor;
+  tenantId: string;
+  invitationId: string;
+  correlationId: string;
+}
+
+export interface RedeemWorkspaceInvitationInput {
+  authSubject: string;
+  email: string | null;
+  displayName: string;
+  token: string;
   correlationId: string;
 }
