@@ -5,6 +5,7 @@ import type {
   AutomationTriggerType,
   WorkspaceAutomationAction,
   WorkspaceAutomationRule,
+  WorkspaceDocument,
   WorkspaceEntityType,
   WorkspaceSearchDocument,
 } from "../../../packages/contracts/src/workspace";
@@ -14,6 +15,7 @@ import { getWorkStore } from "../../../packages/database/src/work-store";
 import { getWorkspaceStore } from "../../../packages/database/src/workspace-store";
 import { requireCapability } from "../../permissions/src/authorization";
 import { getSaaSService } from "../../saas/src/saas-service";
+import { storageGetSignedUrl, storagePut } from "../../../server/storage";
 import * as crmService from "../../crm/src/crm-service";
 import * as workService from "../../work/src/work-service";
 
@@ -22,13 +24,23 @@ const tko_require = (tko_actor: PlatformActor, tko_capability: Capability, tko_t
 
 function tko_text(tko_value: unknown): string { return typeof tko_value === "string" ? tko_value.trim() : ""; }
 function tko_stringArray(tko_value: unknown): string[] { return Array.isArray(tko_value) ? tko_value.filter((tko_item): tko_item is string => typeof tko_item === "string") : []; }
+const tko_documentFileTypes = new Set(["application/pdf", "text/plain", "text/markdown", "text/csv", "application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint", "application/vnd.oasis.opendocument.text", "application/vnd.oasis.opendocument.spreadsheet", "application/vnd.oasis.opendocument.presentation", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.presentationml.presentation"]);
+const tko_documentFileMaxBytes = 15 * 1024 * 1024;
+function tko_safeDocumentFilename(tko_filename: string): string { const tko_safe = tko_filename.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, ""); if (!tko_safe || tko_safe.length > 180) throw new Error("WORKSPACE_DOCUMENT_FILENAME_INVALID"); return tko_safe; }
+
+async function tko_requireProjectDocumentAccess(tko_actor: PlatformActor, tko_projectId: string, tko_capability: "work.project.read" | "work.item.update") {
+  const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_projectId);
+  if (!tko_project) throw new Error("WORKSPACE_DOCUMENT_PROJECT_NOT_FOUND");
+  requireCapability(tko_actor, tko_capability, tko_project);
+  return tko_project;
+}
 
 export async function tko_requireEntityRead(tko_actor: PlatformActor, tko_entityType: WorkspaceEntityType, tko_entityId: string): Promise<void> {
   if (tko_entityType === "work_item") { const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_entityId); if (!tko_item) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_item.projectId); if (!tko_project) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "work.project.read", tko_project); requireCapability(tko_actor, "work.item.read", tko_item); return; }
   if (tko_entityType === "project") { const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_entityId); if (!tko_project) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "work.project.read", tko_project); return; }
   if (tko_entityType === "channel") { const tko_channel = await getChatStore().getChannel(tko_actor.tenantId, tko_entityId); if (!tko_channel) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "chat.channel.read", tko_channel); return; }
   if (tko_entityType === "message") { const tko_message = await getChatStore().getMessage(tko_actor.tenantId, tko_entityId); if (!tko_message) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); const tko_channel = await getChatStore().getChannel(tko_actor.tenantId, tko_message.channelId); if (!tko_channel) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "chat.message.read", tko_channel); return; }
-  if (tko_entityType === "document") { const tko_document = await getWorkspaceStore().getDocument(tko_actor.tenantId, tko_entityId); if (!tko_document) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "workspace.document.read", tko_document); return; }
+  if (tko_entityType === "document") { const tko_document = await getWorkspaceStore().getDocument(tko_actor.tenantId, tko_entityId); if (!tko_document) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); requireCapability(tko_actor, "workspace.document.read", tko_document); if (tko_document.projectId) await tko_requireProjectDocumentAccess(tko_actor, tko_document.projectId, "work.project.read"); return; }
   if (tko_entityType === "form") { const tko_form = await getWorkspaceStore().getForm(tko_actor.tenantId, tko_entityId); if (!tko_form) throw new Error("WORKSPACE_ENTITY_NOT_FOUND"); tko_require(tko_actor, "workspace.form.read", "workspace_form", tko_form.id); return; }
   const tko_crmStore = getCRMStore();
   const tko_entity = tko_entityType === "crm_lead" ? await tko_crmStore.getLead(tko_actor.tenantId, tko_entityId)
@@ -67,8 +79,40 @@ export async function inbox(tko_actor: PlatformActor, tko_options?: { includeArc
 export async function setInboxState(tko_actor: PlatformActor, tko_input: { inboxItemId: string; state: "read" | "unread" | "archived"; correlationId: string }) { tko_require(tko_actor, "workspace.inbox.manage", "workspace_inbox", tko_input.inboxItemId); return getWorkspaceStore().setInboxState(tko_actor, tko_input); }
 export async function createInboxItem(tko_actor: PlatformActor, tko_input: { memberId: string; kind: "mention" | "assignment" | "comment" | "deal" | "form" | "automation" | "system"; entityType: WorkspaceEntityType; entityId: string; title: string; body?: string; href: string; sourceEventId?: string | null; correlationId: string }) { tko_require(tko_actor, "workspace.inbox.manage", "workspace_inbox", tko_input.memberId); await tko_entityExists(tko_actor, tko_input.entityType, tko_input.entityId); return getWorkspaceStore().createInboxItem(tko_actor, { ...tko_input, body: tko_input.body ?? "", sourceEventId: tko_input.sourceEventId ?? null }); }
 
-export async function createDocument(tko_actor: PlatformActor, tko_input: { title: string; bodyText?: string; content?: Record<string, unknown>; visibility?: "internal" | "private" | "guest_shared"; templateKey?: string | null; correlationId: string }) { tko_require(tko_actor, "workspace.document.manage", "workspace_document", "new", tko_input.visibility ?? "internal"); return getWorkspaceStore().createDocument(tko_actor, { title: tko_input.title, bodyText: tko_input.bodyText ?? "", content: tko_input.content ?? {}, visibility: tko_input.visibility ?? "internal", templateKey: tko_input.templateKey ?? null, correlationId: tko_input.correlationId }); }
-export async function documents(tko_actor: PlatformActor) { tko_require(tko_actor, "workspace.document.read", "workspace_document", "list"); const tko_documents = await getWorkspaceStore().listDocuments(tko_actor.tenantId); return tko_documents.filter(tko_document => { try { requireCapability(tko_actor, "workspace.document.read", tko_document); return true; } catch { return false; } }); }
+export async function createDocument(tko_actor: PlatformActor, tko_input: { title: string; bodyText?: string; content?: Record<string, unknown>; visibility?: "internal" | "private" | "guest_shared"; templateKey?: string | null; correlationId: string }) { tko_require(tko_actor, "workspace.document.manage", "workspace_document", "new", tko_input.visibility ?? "internal"); return getWorkspaceStore().createDocument(tko_actor, { title: tko_input.title, documentKind: "note", projectId: null, objectKey: null, filename: null, contentType: null, byteSize: null, bodyText: tko_input.bodyText ?? "", content: tko_input.content ?? {}, visibility: tko_input.visibility ?? "internal", templateKey: tko_input.templateKey ?? null, correlationId: tko_input.correlationId }); }
+export async function documents(tko_actor: PlatformActor) {
+  tko_require(tko_actor, "workspace.document.read", "workspace_document", "list");
+  const tko_visible: WorkspaceDocument[] = [];
+  for (const tko_document of await getWorkspaceStore().listDocuments(tko_actor.tenantId)) {
+    try { await tko_requireEntityRead(tko_actor, "document", tko_document.id); tko_visible.push(tko_document); } catch { /* Do not disclose document metadata outside an authorized scope. */ }
+  }
+  return tko_visible;
+}
+export async function uploadDocumentFile(tko_actor: PlatformActor, tko_input: { projectId: string; filename: string; contentType: string; base64: string; correlationId: string }) {
+  tko_require(tko_actor, "workspace.document.manage", "workspace_document", "new");
+  const tko_project = await tko_requireProjectDocumentAccess(tko_actor, tko_input.projectId, "work.item.update");
+  const tko_filename = tko_safeDocumentFilename(tko_input.filename);
+  const tko_contentType = tko_input.contentType.toLocaleLowerCase();
+  if (!tko_documentFileTypes.has(tko_contentType) && !tko_contentType.startsWith("image/")) throw new Error("WORKSPACE_DOCUMENT_FILE_TYPE_UNSUPPORTED");
+  const tko_bytes = Buffer.from(tko_input.base64, "base64");
+  if (!tko_bytes.length || tko_bytes.length > tko_documentFileMaxBytes) throw new Error("WORKSPACE_DOCUMENT_FILE_SIZE_INVALID");
+  const tko_objectKey = `tenants/${tko_actor.tenantId}/workspace-documents/${tko_project.id}/${crypto.randomUUID()}/${tko_filename}`;
+  await storagePut(tko_objectKey, tko_bytes, tko_contentType);
+  return getWorkspaceStore().createDocument(tko_actor, { title: tko_filename, documentKind: "file", projectId: tko_project.id, objectKey: tko_objectKey, filename: tko_filename, contentType: tko_contentType, byteSize: tko_bytes.length, bodyText: "", content: {}, visibility: tko_project.visibility, templateKey: null, correlationId: tko_input.correlationId });
+}
+export async function documentDownloadUrl(tko_actor: PlatformActor, tko_documentId: string) {
+  await tko_requireEntityRead(tko_actor, "document", tko_documentId);
+  const tko_document = await getWorkspaceStore().getDocument(tko_actor.tenantId, tko_documentId);
+  if (!tko_document || tko_document.documentKind !== "file" || !tko_document.objectKey) throw new Error("WORKSPACE_DOCUMENT_FILE_NOT_FOUND");
+  return { url: await storageGetSignedUrl(tko_document.objectKey), filename: tko_document.filename, contentType: tko_document.contentType };
+}
+export async function removeDocumentFile(tko_actor: PlatformActor, tko_documentId: string, tko_correlationId: string) {
+  const tko_document = await getWorkspaceStore().getDocument(tko_actor.tenantId, tko_documentId);
+  if (!tko_document || tko_document.documentKind !== "file") throw new Error("WORKSPACE_DOCUMENT_FILE_NOT_FOUND");
+  requireCapability(tko_actor, "workspace.document.manage", tko_document);
+  if (tko_document.projectId) await tko_requireProjectDocumentAccess(tko_actor, tko_document.projectId, "work.item.update");
+  return getWorkspaceStore().removeDocument(tko_actor, { documentId: tko_document.id, correlationId: tko_correlationId });
+}
 export async function linkDocument(tko_actor: PlatformActor, tko_input: { documentId: string; entityType: WorkspaceEntityType; entityId: string; correlationId: string }) { const tko_document = await getWorkspaceStore().getDocument(tko_actor.tenantId, tko_input.documentId); if (!tko_document) throw new Error("WORKSPACE_DOCUMENT_NOT_FOUND"); requireCapability(tko_actor, "workspace.document.manage", tko_document); await tko_entityExists(tko_actor, tko_input.entityType, tko_input.entityId); return getWorkspaceStore().linkDocument(tko_actor, tko_input); }
 export async function entityLinks(tko_actor: PlatformActor, tko_entityType: WorkspaceEntityType, tko_entityId: string) { await tko_entityExists(tko_actor, tko_entityType, tko_entityId); return getWorkspaceStore().listEntityLinks(tko_actor.tenantId, tko_entityType, tko_entityId); }
 export async function createEntityLink(tko_actor: PlatformActor, tko_input: { sourceType: WorkspaceEntityType; sourceId: string; targetType: WorkspaceEntityType; targetId: string; relationType: "context" | "reference" | "related" | "blocks"; correlationId: string }) { tko_require(tko_actor, "workspace.link.manage", "workspace_entity_link", `${tko_input.sourceId}:${tko_input.targetId}`); await tko_entityExists(tko_actor, tko_input.sourceType, tko_input.sourceId); await tko_entityExists(tko_actor, tko_input.targetType, tko_input.targetId); return getWorkspaceStore().createEntityLink(tko_actor, tko_input); }

@@ -14,6 +14,7 @@ export type WorkspaceEntityType =
 
 export type WorkspaceVisibility = "internal" | "private" | "guest_shared";
 export type WorkspaceSearchKind = "work" | "chat" | "crm" | "doc";
+export type WorkspaceDocumentKind = "note" | "file";
 export type InboxItemKind = "mention" | "assignment" | "comment" | "deal" | "form" | "automation" | "system";
 export type FormTargetType = "work_item" | "crm_lead";
 export type AutomationTriggerType = "crm.lead_created.v1" | "work.work_item_created.v1" | "workspace.form_submitted.v1";
@@ -60,6 +61,12 @@ export interface WorkspaceEntityLink extends TenantResource {
 export interface WorkspaceDocument extends TenantResource {
   type: "workspace_document";
   title: string;
+  documentKind: WorkspaceDocumentKind;
+  projectId: string | null;
+  objectKey: string | null;
+  filename: string | null;
+  contentType: string | null;
+  byteSize: number | null;
   content: Record<string, unknown>;
   bodyText: string;
   ownerMemberId: string;
@@ -152,6 +159,12 @@ export interface WorkspaceOverview {
 export interface CreateWorkspaceDocumentInput {
   actor: PlatformActor;
   title: string;
+  documentKind?: WorkspaceDocumentKind;
+  projectId?: string | null;
+  objectKey?: string | null;
+  filename?: string | null;
+  contentType?: string | null;
+  byteSize?: number | null;
   content?: Record<string, unknown>;
   bodyText?: string;
   visibility?: WorkspaceVisibility;

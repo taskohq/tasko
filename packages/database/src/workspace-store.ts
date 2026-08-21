@@ -26,6 +26,7 @@ export interface WorkspaceStore {
   createDocument(tko_actor: PlatformActor, tko_input: Omit<WorkspaceDocument, "id" | "tenantId" | "type" | "ownerMemberId" | "createdAt" | "updatedAt"> & { correlationId: string }): Promise<WorkspaceDocument>;
   listDocuments(tko_tenantId: string): Promise<WorkspaceDocument[]>;
   getDocument(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocument | null>;
+  removeDocument(tko_actor: PlatformActor, tko_input: { documentId: string; correlationId: string }): Promise<WorkspaceDocument>;
   linkDocument(tko_actor: PlatformActor, tko_input: { documentId: string; entityType: WorkspaceEntityType; entityId: string; correlationId: string }): Promise<WorkspaceDocumentLink>;
   listDocumentLinks(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocumentLink[]>;
   listDocumentLinksForEntity(tko_tenantId: string, tko_entityType: WorkspaceEntityType, tko_entityId: string): Promise<WorkspaceDocumentLink[]>;
@@ -127,6 +128,14 @@ export class MemoryWorkspaceStore implements WorkspaceStore {
 
   async listDocuments(tko_tenantId: string): Promise<WorkspaceDocument[]> { return Array.from(this.tko_documents.values()).filter(tko_document => tko_document.tenantId === tko_tenantId).sort((tko_left, tko_right) => tko_right.updatedAt.getTime() - tko_left.updatedAt.getTime()).map(tko_clone); }
   async getDocument(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocument | null> { const tko_document = this.tko_documents.get(tko_documentId); return tko_document?.tenantId === tko_tenantId ? tko_clone(tko_document) : null; }
+
+  async removeDocument(tko_actor: PlatformActor, tko_input: { documentId: string; correlationId: string }): Promise<WorkspaceDocument> {
+    const tko_document = this.tko_documents.get(tko_input.documentId);
+    if (!tko_document || tko_document.tenantId !== tko_actor.tenantId) throw new Error("WORKSPACE_DOCUMENT_NOT_FOUND");
+    this.tko_documents.delete(tko_document.id);
+    await this.tko_emit(tko_actor, "workspace.document_deleted.v1", "workspace.document", { documentId: tko_document.id, projectId: tko_document.projectId }, "workspace.document.deleted", "workspace_document", tko_document.id, tko_input.correlationId);
+    return tko_clone(tko_document);
+  }
 
   async linkDocument(tko_actor: PlatformActor, tko_input: { documentId: string; entityType: WorkspaceEntityType; entityId: string; correlationId: string }): Promise<WorkspaceDocumentLink> {
     if (!await this.getDocument(tko_actor.tenantId, tko_input.documentId)) throw new Error("WORKSPACE_DOCUMENT_NOT_FOUND");

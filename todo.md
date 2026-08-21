@@ -143,8 +143,8 @@
 - [x] Workspace Forms/Automation P1 audit/remediation: xác minh cấu hình, kích hoạt, chạy/submit, execution log và authorization; chỉ hoàn thiện những flow có backend thực.
 - [x] Ecosystem connections P1 audit/remediation: phân tách rõ registration boundary khỏi provider OAuth/sync thực và loại bỏ mọi mô tả UI gây hiểu nhầm.
 - [x] Work sprint planning remediation: đưa workflow sprint có dữ liệu thật vào Work gồm create sprint, chọn item, thêm item, hoàn tất sprint với disposition và trạng thái/feedback truy cập được.
-- [ ] Document management: bổ sung thư viện tài liệu theo project, lưu metadata và bytes trên S3/Wasabi, preview/tải xuống định dạng văn phòng và quyền tenant/project-safe.
-- [ ] Workspace document library: bổ sung nơi tìm kiếm, lọc và quản lý gộp tài liệu từ mọi project mà thành viên được quyền truy cập, theo mô hình đơn giản tương tự Google Drive.
+- [x] Document management: bổ sung thư viện tài liệu theo project, lưu metadata và bytes trên S3/Wasabi, preview/tải xuống định dạng văn phòng và quyền tenant/project-safe.
+- [x] Workspace document library: bổ sung nơi tìm kiếm, lọc và quản lý gộp tài liệu từ mọi project mà thành viên được quyền truy cập, theo mô hình đơn giản tương tự Google Drive.
 - [x] Work Sprint PostgreSQL proof: kiểm thử carry-over Sprint trên Postgres Docker với RLS tenant, item disposition, audit metadata và outbox trong cùng transaction.
 - [x] Work dependency remediation: xác minh và hoàn thiện flow tạo/xem/gỡ dependency từ inspector Work bằng API tenant-safe thực, có validation cycle/authorization, audit/outbox và regression.
 - [x] Project-management audit verification: viết/điều chỉnh tests, chạy regression/build, kiểm tra desktop/mobile, cập nhật evidence, commit và checkpoint.

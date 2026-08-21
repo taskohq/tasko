@@ -14,6 +14,12 @@ import * as crm from "../crm/src/crm-service";
 import * as chat from "../chat/src/chat-service";
 import * as work from "../work/src/work-service";
 import * as workspace from "./src/workspace-service";
+import { vi } from "vitest";
+
+vi.mock("../../server/storage", () => ({
+  storagePut: vi.fn(async (tko_key: string) => ({ key: tko_key, url: `/manus-storage/${tko_key}` })),
+  storageGetSignedUrl: vi.fn(async (tko_key: string) => `https://signed.example.test/${encodeURIComponent(tko_key)}`),
+}));
 
 function tko_actor(tko_overrides: Partial<PlatformActor> = {}): PlatformActor {
   return { authSubject: "workspace-owner", tenantId: "tko-tenant-tasko-demo", tenantSlug: "tasko-demo", memberId: "tko-member-demo-owner", role: "owner", membershipStatus: "active", correlationId: "workspace-test", ...tko_overrides };
@@ -47,6 +53,21 @@ describe("Unified Workspace Beta M4", () => {
     expect(tko_link).toEqual(expect.objectContaining({ tenantId: tko_owner.tenantId, documentId: tko_document.id, entityType: "work_item", entityId: tko_item.id }));
     expect(await getWorkspaceStore().listDocumentLinksForEntity(tko_owner.tenantId, "work_item", tko_item.id)).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_link.id, documentId: tko_document.id })]));
     expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["workspace.document.created", "workspace.document.linked"]));
+  });
+
+  it("stores project-scoped document files, signs authorized downloads and rejects unauthorized removal", async () => {
+    const tko_owner = tko_actor(); const tko_project = await tko_createProject(tko_owner);
+    const tko_file = await workspace.uploadDocumentFile(tko_owner, { projectId: tko_project.id, filename: "operations-plan.xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64: Buffer.from("spreadsheet-evidence").toString("base64"), correlationId: "m4-document-file-upload" });
+    expect(tko_file).toMatchObject({ documentKind: "file", projectId: tko_project.id, filename: "operations-plan.xlsx", byteSize: 20, objectKey: expect.stringContaining(`/workspace-documents/${tko_project.id}/`) });
+    await expect(workspace.documentDownloadUrl(tko_owner, tko_file.id)).resolves.toEqual(expect.objectContaining({ filename: "operations-plan.xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", url: expect.stringContaining("signed.example.test") }));
+
+    const tko_guest = tko_actor({ authSubject: "workspace-document-guest", memberId: "workspace-document-guest", role: "guest" });
+    await expect(workspace.removeDocumentFile(tko_guest, tko_file.id, "m4-document-file-guest-remove")).rejects.toThrow("TASKO_AUTHORIZATION_DENIED");
+    await expect(workspace.documentDownloadUrl(tko_actor({ tenantId: "other-tenant", tenantSlug: "other", memberId: "other-member" }), tko_file.id)).rejects.toThrow("WORKSPACE_ENTITY_NOT_FOUND");
+
+    await expect(workspace.removeDocumentFile(tko_owner, tko_file.id, "m4-document-file-remove")).resolves.toMatchObject({ id: tko_file.id });
+    expect(await workspace.documents(tko_owner)).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_file.id })]));
+    expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["workspace.document.created", "workspace.document.deleted"]));
   });
 
   it("materializes and filters grouped Work, Chat, CRM and Docs search results", async () => {
