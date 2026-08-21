@@ -378,4 +378,32 @@ describe("Work Alpha acceptance boundaries", () => {
     expect((await tko_platformStore.listAuditLogs()).filter(tko_event => ["work.project.member_upserted", "work.project.visibility_updated", "work.project.member_removed"].includes(tko_event.action))).toHaveLength(4);
     expect((await tko_platformStore.listOutbox()).filter(tko_event => ["work.project_member_upserted.v1", "work.project_visibility_updated.v1", "work.project_member_removed.v1"].includes(tko_event.eventType))).toHaveLength(4);
   });
+
+  it("issues one-time project invitation links with a durable permission activity feed and blocks unauthorized redemption paths", async () => {
+    const tko_owner = await tko_actor();
+    const tko_member = await tko_actor("demo-member:tasko-demo");
+    const tko_otherTenant = { ...tko_owner, authSubject: tko_otherSubject, tenantId: "tko-tenant-other-workspace", tenantSlug: "other-workspace", memberId: "tko-member-other-workspace-owner", correlationId: "test:invitation-other-tenant" };
+    const tko_space = await work.createSpace(tko_owner, { name: "Invited delivery", slug: "invited-delivery", visibility: "internal", correlationId: tko_owner.correlationId });
+    const tko_project = await work.createProject({ actor: tko_owner, spaceId: tko_space.id, name: "Invite-only project", key: "INVT", methodology: "kanban", visibility: "private", correlationId: tko_owner.correlationId });
+
+    const tko_issue = await work.createProjectInvitation(tko_owner, { projectId: tko_project.id, inviteeEmail: null, projectRole: "viewer", expiresAt: new Date(Date.now() + 86_400_000), correlationId: tko_owner.correlationId });
+    expect(tko_issue.token).toEqual(expect.any(String));
+    expect(tko_issue.invitation).toEqual(expect.objectContaining({ projectId: tko_project.id, projectRole: "viewer", redeemedAt: null, revokedAt: null }));
+    expect(await work.projectInvitations(tko_owner, tko_project.id)).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_issue.invitation.id, projectId: tko_project.id })]));
+    await expect(work.createProjectInvitation(tko_member, { projectId: tko_project.id, projectRole: "viewer", expiresAt: new Date(Date.now() + 86_400_000), correlationId: tko_member.correlationId })).rejects.toThrow("TASKO_AUTHORIZATION_DENIED:capability_missing");
+    await expect(work.projectInvitations(tko_otherTenant, tko_project.id)).rejects.toThrow("WORK_PROJECT_NOT_FOUND");
+
+    const tko_redeemed = await work.redeemProjectInvitation(tko_member, { token: tko_issue.token, recipientEmail: null, correlationId: tko_member.correlationId });
+    expect(tko_redeemed).toEqual(expect.objectContaining({ projectId: tko_project.id, memberId: tko_member.memberId, projectRole: "viewer", addedByMemberId: tko_member.memberId }));
+    expect((await work.projects(tko_member)).map(tko_entry => tko_entry.id)).toContain(tko_project.id);
+    await expect(work.redeemProjectInvitation(tko_member, { token: tko_issue.token, recipientEmail: null, correlationId: tko_member.correlationId })).rejects.toThrow("WORK_PROJECT_INVITATION_REDEEMED");
+
+    const tko_secondIssue = await work.createProjectInvitation(tko_owner, { projectId: tko_project.id, inviteeEmail: "invitee@example.com", projectRole: "editor", expiresAt: new Date(Date.now() + 86_400_000), correlationId: tko_owner.correlationId });
+    await work.revokeProjectInvitation(tko_owner, { projectId: tko_project.id, invitationId: tko_secondIssue.invitation.id, correlationId: tko_owner.correlationId });
+    expect((await work.projectInvitations(tko_owner, tko_project.id)).find(tko_invitation => tko_invitation.id === tko_secondIssue.invitation.id)?.revokedAt).toEqual(expect.any(Date));
+    await expect(work.redeemProjectInvitation(tko_member, { token: tko_secondIssue.token, recipientEmail: "invitee@example.com", correlationId: tko_member.correlationId })).rejects.toThrow("WORK_PROJECT_INVITATION_REVOKED");
+    const tko_activity = await work.projectPermissionActivity(tko_owner, tko_project.id);
+    expect(tko_activity.map(tko_entry => tko_entry.action)).toEqual(expect.arrayContaining(["work.project.invitation_created", "work.project.invitation_redeemed", "work.project.invitation_revoked"]));
+    expect((await tko_platformStore.listOutbox()).filter(tko_event => ["work.project_invitation_created.v1", "work.project_invitation_redeemed.v1", "work.project_invitation_revoked.v1"].includes(tko_event.eventType))).toHaveLength(4);
+  });
 });

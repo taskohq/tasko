@@ -1,5 +1,6 @@
 import type {
   ArchiveWorkItemInput,
+  CreateProjectInvitationInput,
   CreateCommentInput,
   CompleteSprintInput,
   CreateProjectInput,
@@ -9,6 +10,9 @@ import type {
   MoveWorkItemInput,
   ProjectMember,
   ProjectMemberRole,
+  ProjectInvitation,
+  ProjectInvitationIssue,
+  RevokeProjectInvitationInput,
   RemoveProjectMemberInput,
   UpdateProjectVisibilityInput,
   UpdateWorkItemInput,
@@ -64,6 +68,10 @@ export interface WorkStore {
   updateProjectVisibility(tko_input: UpdateProjectVisibilityInput): Promise<WorkProject>;
   upsertProjectMember(tko_input: UpsertProjectMemberInput): Promise<ProjectMember>;
   removeProjectMember(tko_input: RemoveProjectMemberInput): Promise<void>;
+  listProjectInvitations(tko_tenantId: string, tko_projectId: string): Promise<ProjectInvitation[]>;
+  createProjectInvitation(tko_input: CreateProjectInvitationInput): Promise<ProjectInvitationIssue>;
+  redeemProjectInvitation(tko_input: { actor: PlatformActor; token: string; recipientEmail: string | null; correlationId: string }): Promise<ProjectMember>;
+  revokeProjectInvitation(tko_input: RevokeProjectInvitationInput): Promise<void>;
   listStatuses(tko_tenantId: string, tko_workflowId: string): Promise<WorkflowStatus[]>;
   createStatus(tko_actor: PlatformActor, tko_input: { projectId: string; name: string; category: WorkflowStatus["category"]; colorToken: string; description?: string; correlationId: string }): Promise<WorkflowStatus>;
   updateStatus(tko_actor: PlatformActor, tko_input: { projectId: string; statusId: string; name?: string; category?: WorkflowStatus["category"]; colorToken?: string; description?: string; correlationId: string }): Promise<WorkflowStatus>;
@@ -139,10 +147,16 @@ function tko_now(): Date {
   return new Date();
 }
 
+async function tko_invitationTokenHash(tko_token: string): Promise<string> {
+  const tko_digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(tko_token));
+  return Buffer.from(tko_digest).toString("hex");
+}
+
 export class MemoryWorkStore implements WorkStore {
   private readonly tko_spaces = new Map<string, WorkSpace>();
   private readonly tko_projects = new Map<string, WorkProject>();
   private readonly tko_projectMembers = new Map<string, ProjectMember>();
+  private readonly tko_projectInvitations = new Map<string, ProjectInvitation & { tokenHash: string }>();
   private readonly tko_statuses = new Map<string, WorkflowStatus>();
   private readonly tko_workTypes = new Map<string, WorkType>();
   private readonly tko_items = new Map<string, WorkItem>();
@@ -265,6 +279,55 @@ export class MemoryWorkStore implements WorkStore {
     delete tko_project.projectMemberRoles[tko_input.memberId];
     this.tko_projects.set(tko_project.id, tko_project);
     await this.tko_emit(tko_input.actor, "work.project_member_removed.v1", "work.project", { projectId: tko_project.id, memberId: tko_input.memberId, projectRole: tko_existing.projectRole }, "work.project.member_removed", "project", tko_project.id, tko_input.correlationId);
+  }
+
+  async listProjectInvitations(tko_tenantId: string, tko_projectId: string): Promise<ProjectInvitation[]> {
+    return Array.from(this.tko_projectInvitations.values())
+      .filter(tko_invitation => tko_invitation.tenantId === tko_tenantId && tko_invitation.projectId === tko_projectId)
+      .sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime())
+      .map(({ tokenHash: _tko_tokenHash, ...tko_invitation }) => tko_clone(tko_invitation));
+  }
+
+  async createProjectInvitation(tko_input: CreateProjectInvitationInput): Promise<ProjectInvitationIssue> {
+    const tko_project = this.tko_projects.get(tko_input.projectId);
+    if (!tko_project || tko_project.tenantId !== tko_input.actor.tenantId || tko_project.archivedAt) throw new Error("WORK_PROJECT_NOT_FOUND");
+    if (tko_input.expiresAt.getTime() <= Date.now()) throw new Error("WORK_PROJECT_INVITATION_EXPIRY_INVALID");
+    const tko_token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
+    const tko_invitation: ProjectInvitation & { tokenHash: string } = {
+      id: crypto.randomUUID(), tenantId: tko_input.actor.tenantId, type: "project_invitation", projectId: tko_project.id,
+      inviteeEmail: tko_input.inviteeEmail?.trim().toLocaleLowerCase() || null, projectRole: tko_input.projectRole,
+      createdByMemberId: tko_input.actor.memberId, expiresAt: tko_input.expiresAt, redeemedAt: null, redeemedByMemberId: null,
+      revokedAt: null, createdAt: tko_now(), tokenHash: await tko_invitationTokenHash(tko_token),
+    };
+    this.tko_projectInvitations.set(tko_invitation.id, tko_invitation);
+    await this.tko_emit(tko_input.actor, "work.project_invitation_created.v1", "work.project", { projectId: tko_project.id, invitationId: tko_invitation.id, inviteeEmail: tko_invitation.inviteeEmail, projectRole: tko_invitation.projectRole, expiresAt: tko_invitation.expiresAt }, "work.project.invitation_created", "project", tko_project.id, tko_input.correlationId);
+    const { tokenHash: _tko_tokenHash, ...tko_safe } = tko_invitation;
+    return { invitation: tko_clone(tko_safe), token: tko_token };
+  }
+
+  async redeemProjectInvitation(tko_input: { actor: PlatformActor; token: string; recipientEmail: string | null; correlationId: string }): Promise<ProjectMember> {
+    const tko_tokenHash = await tko_invitationTokenHash(tko_input.token);
+    const tko_invitation = Array.from(this.tko_projectInvitations.values()).find(tko_entry => tko_entry.tenantId === tko_input.actor.tenantId && tko_entry.tokenHash === tko_tokenHash);
+    if (!tko_invitation) throw new Error("WORK_PROJECT_INVITATION_INVALID");
+    if (tko_invitation.revokedAt) throw new Error("WORK_PROJECT_INVITATION_REVOKED");
+    if (tko_invitation.redeemedAt) throw new Error("WORK_PROJECT_INVITATION_REDEEMED");
+    if (tko_invitation.expiresAt.getTime() <= Date.now()) throw new Error("WORK_PROJECT_INVITATION_EXPIRED");
+    if (tko_invitation.inviteeEmail && tko_invitation.inviteeEmail !== tko_input.recipientEmail?.trim().toLocaleLowerCase()) throw new Error("WORK_PROJECT_INVITATION_EMAIL_MISMATCH");
+    tko_invitation.redeemedAt = tko_now();
+    tko_invitation.redeemedByMemberId = tko_input.actor.memberId;
+    this.tko_projectInvitations.set(tko_invitation.id, tko_invitation);
+    const tko_member = await this.upsertProjectMember({ actor: tko_input.actor, projectId: tko_invitation.projectId, memberId: tko_input.actor.memberId, projectRole: tko_invitation.projectRole, correlationId: tko_input.correlationId });
+    await this.tko_emit(tko_input.actor, "work.project_invitation_redeemed.v1", "work.project", { projectId: tko_invitation.projectId, invitationId: tko_invitation.id, memberId: tko_member.memberId, projectRole: tko_member.projectRole }, "work.project.invitation_redeemed", "project", tko_invitation.projectId, tko_input.correlationId);
+    return tko_member;
+  }
+
+  async revokeProjectInvitation(tko_input: RevokeProjectInvitationInput): Promise<void> {
+    const tko_invitation = this.tko_projectInvitations.get(tko_input.invitationId);
+    if (!tko_invitation || tko_invitation.tenantId !== tko_input.actor.tenantId || tko_invitation.projectId !== tko_input.projectId) throw new Error("WORK_PROJECT_INVITATION_NOT_FOUND");
+    if (tko_invitation.redeemedAt || tko_invitation.revokedAt) throw new Error("WORK_PROJECT_INVITATION_NOT_REVOCABLE");
+    tko_invitation.revokedAt = tko_now();
+    this.tko_projectInvitations.set(tko_invitation.id, tko_invitation);
+    await this.tko_emit(tko_input.actor, "work.project_invitation_revoked.v1", "work.project", { projectId: tko_invitation.projectId, invitationId: tko_invitation.id }, "work.project.invitation_revoked", "project", tko_invitation.projectId, tko_input.correlationId);
   }
 
   async listStatuses(tko_tenantId: string, tko_workflowId: string): Promise<WorkflowStatus[]> {

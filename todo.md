@@ -201,3 +201,6 @@
 - [x] Project Management custom search: tìm kiếm theo phạm vi project với bộ lọc Work/Sprint/Member/File/trạng thái, kết quả server-authoritative tenant-safe và saved query khi phù hợp.
 - [x] Work task deletion bug: sửa luồng xóa task từ UI đến API/service/store, giữ authorization tập trung, audit/outbox, cleanup/reconciliation và negative authorization regression.
 - [x] Work task comment bug: sửa luồng gửi và hiển thị bình luận của task từ UI đến API/service/store, giữ authorization tập trung, audit/outbox/realtime và negative authorization regression.
+- [x] Project invitation delivery: tạo lời mời project bền vững bằng email hoặc link có hạn, redeem tenant-safe, role viewer/editor, revoke/expiry, audit/outbox và regression quyền âm.
+- [x] Project permission activity feed: hiển thị lịch sử thay đổi visibility, mời, nhận lời mời, đổi role, gỡ/revoke trong Members tab từ audit history tenant/project-scoped.
+- [x] Work delete/comment revalidation: kiểm thử end-to-end thao tác xóa task và gửi/hiển thị comment, gồm success/error/authorization/realtime paths.

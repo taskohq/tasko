@@ -4,6 +4,7 @@ import type {
   CreateProjectInput,
   CreateSprintInput,
   ProjectOverview,
+  ProjectPermissionActivity,
   ProjectSearchResult,
   CreateWorkItemInput,
   MoveWorkItemInput,
@@ -116,6 +117,48 @@ export async function removeProjectMember(tko_actor: PlatformActor, tko_input: {
   const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
   tko_require(tko_actor, "work.project.manage", tko_project);
   return getWorkStore().removeProjectMember({ actor: tko_actor, ...tko_input });
+}
+
+export async function projectInvitations(tko_actor: PlatformActor, tko_projectId: string) {
+  const tko_project = await tko_projectFor(tko_actor, tko_projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  return getWorkStore().listProjectInvitations(tko_actor.tenantId, tko_project.id);
+}
+
+export async function createProjectInvitation(tko_actor: PlatformActor, tko_input: { projectId: string; inviteeEmail?: string | null; projectRole: "viewer" | "editor"; expiresAt: Date; correlationId: string }) {
+  const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  if (tko_input.inviteeEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tko_input.inviteeEmail)) throw new Error("WORK_PROJECT_INVITATION_EMAIL_INVALID");
+  if (tko_input.expiresAt.getTime() - Date.now() > 1000 * 60 * 60 * 24 * 90) throw new Error("WORK_PROJECT_INVITATION_EXPIRY_TOO_LONG");
+  return getWorkStore().createProjectInvitation({ actor: tko_actor, ...tko_input });
+}
+
+export async function revokeProjectInvitation(tko_actor: PlatformActor, tko_input: { projectId: string; invitationId: string; correlationId: string }) {
+  const tko_project = await tko_projectFor(tko_actor, tko_input.projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  return getWorkStore().revokeProjectInvitation({ actor: tko_actor, ...tko_input });
+}
+
+export async function redeemProjectInvitation(tko_actor: PlatformActor, tko_input: { token: string; recipientEmail: string | null; correlationId: string }) {
+  return getWorkStore().redeemProjectInvitation({ actor: tko_actor, ...tko_input });
+}
+
+export async function projectPermissionActivity(tko_actor: PlatformActor, tko_projectId: string): Promise<ProjectPermissionActivity[]> {
+  const tko_project = await tko_projectFor(tko_actor, tko_projectId);
+  tko_require(tko_actor, "work.project.manage", tko_project);
+  const [tko_audit, tko_members] = await Promise.all([
+    getPlatformStore().listAuditLogs(),
+    getPlatformStore().listTenantMembers(tko_actor.tenantId),
+  ]);
+  const tko_memberByAuthSubject = new Map(tko_members.map(tko_member => [tko_member.authSubject, tko_member]));
+  return tko_audit
+    .filter(tko_entry => tko_entry.resourceType === "project" && typeof tko_entry.metadata.projectId === "string" && tko_entry.metadata.projectId === tko_project.id)
+    .filter(tko_entry => tko_entry.action === "work.project.visibility_updated" || tko_entry.action === "work.project.member_upserted" || tko_entry.action === "work.project.member_removed" || tko_entry.action === "work.project.invitation_created" || tko_entry.action === "work.project.invitation_redeemed" || tko_entry.action === "work.project.invitation_revoked")
+    .map(tko_entry => {
+      const tko_member = tko_entry.actorAuthSubject ? tko_memberByAuthSubject.get(tko_entry.actorAuthSubject) : undefined;
+      return { id: tko_entry.id, projectId: tko_project.id, action: tko_entry.action, actorDisplayName: tko_member?.displayName ?? "Former member", actorMemberId: tko_member?.id ?? null, metadata: tko_entry.metadata, createdAt: tko_entry.createdAt };
+    })
+    .sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime());
 }
 
 export async function board(tko_actor: PlatformActor, tko_projectId: string) {

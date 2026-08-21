@@ -10,6 +10,8 @@ import { trpc } from "@/lib/trpc";
 import {
   CalendarDays,
   CheckCircle2,
+  Clock3,
+  Copy,
   ChevronDown,
   ChevronUp,
   ChevronDown as ChevronDownIcon,
@@ -19,9 +21,11 @@ import {
   FolderKanban,
   GripVertical,
   LayoutList,
+  Link,
   ListChecks,
   ListFilter,
   MessageCircle,
+  Mail,
   MoreHorizontal,
   PanelRight,
   Paperclip,
@@ -290,6 +294,73 @@ type TkoProjectMemberRow = {
   isOwner: boolean;
 };
 
+type TkoProjectInvitationRow = {
+  id: string;
+  inviteeEmail: string | null;
+  projectRole: "viewer" | "editor";
+  expiresAt: Date;
+  redeemedAt: Date | null;
+  revokedAt: Date | null;
+};
+
+type TkoProjectPermissionActivityRow = {
+  id: string;
+  action: string;
+  actorDisplayName: string;
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+};
+
+function tko_permissionActionLabel(tko_action: string) {
+  return ({
+    "work.project.visibility_updated": "updated project visibility",
+    "work.project.member_upserted": "changed a project role",
+    "work.project.member_removed": "removed project access",
+    "work.project.invitation_created": "created an invitation",
+    "work.project.invitation_redeemed": "accepted an invitation",
+    "work.project.invitation_revoked": "revoked an invitation",
+  } as Record<string, string>)[tko_action] ?? tko_action;
+}
+
+function TkoProjectInvitationActivityPanel({
+  tko_projectId,
+  tko_invitations,
+  tko_activity,
+  tko_pending,
+  tko_lastInvitation,
+  tko_onCreate,
+  tko_onRevoke,
+}: {
+  tko_projectId: string | undefined;
+  tko_invitations: TkoProjectInvitationRow[] | undefined;
+  tko_activity: TkoProjectPermissionActivityRow[] | undefined;
+  tko_pending: boolean;
+  tko_lastInvitation: { token: string; inviteeEmail: string | null } | null;
+  tko_onCreate: (tko_email: string, tko_projectRole: "viewer" | "editor") => void;
+  tko_onRevoke: (tko_invitationId: string) => void;
+}) {
+  const [tko_email, setTkoEmail] = useState("");
+  const [tko_role, setTkoRole] = useState<"viewer" | "editor">("viewer");
+  const tko_link = tko_lastInvitation ? `${window.location.origin}/work?invite=${encodeURIComponent(tko_lastInvitation.token)}` : "";
+  const tko_copy = async () => {
+    if (!tko_link) return;
+    try { await navigator.clipboard.writeText(tko_link); toast.success("Đã sao chép link lời mời."); }
+    catch { toast.error("Không thể sao chép tự động. Hãy sao chép link thủ công."); }
+  };
+  const tko_emailHref = tko_link && tko_lastInvitation?.inviteeEmail
+    ? `mailto:${encodeURIComponent(tko_lastInvitation.inviteeEmail)}?subject=${encodeURIComponent("Invitation to join a Tasko project")}&body=${encodeURIComponent(`You have been invited to a Tasko project. Open this one-time link after signing in:\n${tko_link}`)}`
+    : undefined;
+  return <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
+    <section aria-label="Project invitations" className="border border-[#dfe1e6] bg-white shadow-[0_1px_2px_rgba(9,30,66,.08)]">
+      <div className="border-b border-[#eaecf0] px-4 py-3"><div className="flex items-center gap-2"><Link className="h-4 w-4 text-[#5b51e8]" /><h3 className="text-sm font-semibold text-[#172b4d]">Invite by email or link</h3></div><p className="mt-1 text-xs leading-5 text-[#667085]">Create a single-use link with a seven-day expiry. Email delivery opens your mail client; the secure link itself is stored only as a hash.</p></div>
+      <form onSubmit={tko_event => { tko_event.preventDefault(); tko_onCreate(tko_email.trim(), tko_role); }} className="grid gap-3 border-b border-[#eaecf0] p-4 sm:grid-cols-[minmax(0,1fr)_8rem_auto]"><label className="text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">Recipient email <input type="email" value={tko_email} onChange={tko_event => setTkoEmail(tko_event.target.value)} placeholder="name@company.com (optional)" className="mt-1 block h-9 w-full border border-[#d0d5dd] px-2 text-xs font-normal normal-case tracking-normal text-[#344054] outline-none focus:border-[#0c66e4]" /></label><label className="text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">Role<select value={tko_role} onChange={tko_event => setTkoRole(tko_event.target.value as "viewer" | "editor")} className="mt-1 block h-9 w-full border border-[#d0d5dd] bg-white px-2 text-xs font-normal normal-case tracking-normal text-[#344054] outline-none focus:border-[#0c66e4]"><option value="viewer">Viewer</option><option value="editor">Editor</option></select></label><button type="submit" disabled={!tko_projectId || tko_pending} className="self-end h-9 bg-[#0c66e4] px-3 text-xs font-semibold text-white hover:bg-[#0055cc] disabled:cursor-not-allowed disabled:opacity-60">Create invite</button></form>
+      {tko_link ? <div className="border-b border-[#eaecf0] bg-[#f7fbff] p-4"><p className="text-[11px] font-semibold text-[#172b4d]">New single-use invitation</p><p className="mt-1 break-all font-mono text-[10px] leading-4 text-[#44546f]">{tko_link}</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={() => void tko_copy()} className="inline-flex h-8 items-center gap-1 border border-[#0c66e4] px-2 text-xs font-semibold text-[#0c66e4] hover:bg-[#deebff]"><Copy className="h-3.5 w-3.5" />Copy link</button>{tko_emailHref ? <a href={tko_emailHref} className="inline-flex h-8 items-center gap-1 border border-[#d0d5dd] px-2 text-xs font-semibold text-[#344054] hover:bg-white"><Mail className="h-3.5 w-3.5" />Open email draft</a> : null}</div></div> : null}
+      <div className="divide-y divide-[#f2f4f7]">{tko_invitations?.length ? tko_invitations.map(tko_invitation => <article key={tko_invitation.id} className="flex flex-wrap items-center gap-3 px-4 py-3"><Clock3 className="h-4 w-4 text-[#667085]" /><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-[#172b4d]">{tko_invitation.inviteeEmail ?? "Shareable project link"}</p><p className="text-[11px] text-[#667085]">{tko_invitation.projectRole} · expires {new Date(tko_invitation.expiresAt).toLocaleString()}{tko_invitation.redeemedAt ? " · redeemed" : tko_invitation.revokedAt ? " · revoked" : " · active"}</p></div>{!tko_invitation.redeemedAt && !tko_invitation.revokedAt ? <button type="button" disabled={tko_pending} onClick={() => tko_onRevoke(tko_invitation.id)} className="h-8 border border-[#fecdca] px-2 text-xs font-semibold text-[#b42318] hover:bg-[#fef3f2]">Revoke</button> : null}</article>) : <p className="px-4 py-7 text-xs text-[#667085]">No invitations have been created for this project.</p>}</div>
+    </section>
+    <section aria-label="Project permission activity" className="border border-[#dfe1e6] bg-white shadow-[0_1px_2px_rgba(9,30,66,.08)]"><div className="border-b border-[#eaecf0] px-4 py-3"><div className="flex items-center gap-2"><Clock3 className="h-4 w-4 text-[#5b51e8]" /><h3 className="text-sm font-semibold text-[#172b4d]">Permission activity</h3></div><p className="mt-1 text-xs text-[#667085]">Durable, project-scoped audit history for visibility, members and invitations.</p></div><div className="divide-y divide-[#f2f4f7]">{tko_activity?.length ? tko_activity.map(tko_entry => <article key={tko_entry.id} className="px-4 py-3"><p className="text-xs leading-5 text-[#344054]"><span className="font-semibold text-[#172b4d]">{tko_entry.actorDisplayName}</span> {tko_permissionActionLabel(tko_entry.action)}.</p><p className="mt-1 text-[11px] text-[#667085]">{new Date(tko_entry.createdAt).toLocaleString()}</p></article>) : <p className="px-4 py-7 text-xs text-[#667085]">No permission changes have been recorded for this project.</p>}</div></section>
+  </div>;
+}
+
 function TkoProjectMembersPanel({
   tko_projectId,
   tko_visibility,
@@ -351,6 +422,8 @@ export default function Work() {
   const [tko_newColumn, setTkoNewColumn] = useState({ name: "", description: "", category: "todo" as TkoCategory, colorToken: "blue" });
   const [tko_projectSearch, setTkoProjectSearch] = useState("");
   const [tko_downloadRequest, setTkoDownloadRequest] = useState<{ workItemId: string; attachmentId: string } | null>(null);
+  const [tko_lastInvitation, setTkoLastInvitation] = useState<{ token: string; inviteeEmail: string | null } | null>(null);
+  const tko_invitationToken = useMemo(() => new URLSearchParams(window.location.search).get("invite"), []);
 
   const tko_projects = trpc.work.projects.useQuery(undefined, { enabled: isAuthenticated });
   const tko_assignees = trpc.work.assignees.useQuery(undefined, { enabled: isAuthenticated });
@@ -376,6 +449,14 @@ export default function Work() {
     { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(tko_selectedProject && isAuthenticated) },
   );
+  const tko_projectInvitations = trpc.work.projectInvitations.useQuery(
+    { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(tko_selectedProject && isAuthenticated) },
+  );
+  const tko_projectPermissionActivity = trpc.work.projectPermissionActivity.useQuery(
+    { projectId: tko_selectedProject?.id ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(tko_selectedProject && isAuthenticated) },
+  );
   const tko_fileDownload = trpc.work.attachmentDownloadUrl.useQuery(
     { workItemId: tko_downloadRequest?.workItemId ?? "00000000-0000-0000-0000-000000000000", attachmentId: tko_downloadRequest?.attachmentId ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(tko_downloadRequest) },
@@ -391,6 +472,8 @@ export default function Work() {
     tko_utils.work.searchProject.invalidate(),
     tko_utils.work.projectFiles.invalidate(),
     tko_utils.work.projectMembers.invalidate(),
+    tko_utils.work.projectInvitations.invalidate(),
+    tko_utils.work.projectPermissionActivity.invalidate(),
     tko_utils.work.projects.invalidate(),
   ]), [tko_utils]);
   useWorkBoardRealtime({
@@ -541,6 +624,34 @@ export default function Work() {
       toast.success("Đã gỡ quyền truy cập project.");
     },
     onError: tko_error => toast.error(tko_error.message.includes("OWNER_MEMBER_REQUIRED") ? "Owner phải luôn giữ quyền editor trong project." : tko_error.message.includes("AUTHORIZATION") ? "Chỉ owner hoặc admin mới có thể gỡ thành viên project." : "Không thể gỡ thành viên project."),
+  });
+  const tko_createProjectInvitation = trpc.work.createProjectInvitation.useMutation({
+    onSuccess: async tko_issue => {
+      setTkoLastInvitation({ token: tko_issue.token, inviteeEmail: tko_issue.invitation.inviteeEmail });
+      await tko_refreshBoard();
+      toast.success("Đã tạo lời mời một lần. Hãy sao chép link hoặc mở email draft.");
+    },
+    onError: tko_error => toast.error(tko_error.message.includes("AUTHORIZATION") ? "Chỉ owner hoặc admin mới có thể tạo lời mời." : "Không thể tạo lời mời project."),
+  });
+  const tko_revokeProjectInvitation = trpc.work.revokeProjectInvitation.useMutation({
+    onSuccess: async () => { await tko_refreshBoard(); toast.success("Đã thu hồi lời mời."); },
+    onError: tko_error => toast.error(tko_error.message.includes("AUTHORIZATION") ? "Chỉ owner hoặc admin mới có thể thu hồi lời mời." : "Không thể thu hồi lời mời."),
+  });
+  const tko_redeemProjectInvitation = trpc.work.redeemProjectInvitation.useMutation({
+    onSuccess: async () => {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setTkoView("members");
+      await tko_refreshBoard();
+      toast.success("Bạn đã tham gia project. Quyền truy cập đã được cập nhật.");
+    },
+    onError: tko_error => {
+      const tko_message = tko_error.message;
+      if (tko_message.includes("EMAIL_MISMATCH")) toast.error("Link này chỉ dành cho địa chỉ email được mời.");
+      else if (tko_message.includes("REDEEMED")) toast.error("Link lời mời này đã được sử dụng.");
+      else if (tko_message.includes("EXPIRED")) toast.error("Link lời mời đã hết hạn.");
+      else if (tko_message.includes("REVOKED")) toast.error("Link lời mời đã bị thu hồi.");
+      else toast.error("Không thể nhận lời mời. Hãy kiểm tra lại link và workspace đăng nhập.");
+    },
   });
   const tko_update = trpc.work.updateItem.useMutation({
     onMutate: tko_input => {
@@ -946,10 +1057,11 @@ export default function Work() {
       </header>
 
       <main className="px-5 py-5 lg:px-7">
+        {tko_invitationToken ? <section aria-label="Project invitation" className="mb-4 flex flex-wrap items-center gap-3 border border-[#b3d4ff] bg-[#f0f7ff] px-4 py-3 shadow-[0_1px_2px_rgba(9,30,66,.08)]"><Link className="h-4 w-4 shrink-0 text-[#0c66e4]" /><div className="min-w-0 flex-1"><p className="text-xs font-semibold text-[#172b4d]">You have a project invitation</p><p className="mt-0.5 text-[11px] text-[#44546f]">Review and accept the single-use invitation to receive the granted project role.</p></div>{isAuthenticated ? <button type="button" disabled={tko_redeemProjectInvitation.isPending} onClick={() => tko_redeemProjectInvitation.mutate({ token: tko_invitationToken })} className="h-8 bg-[#0c66e4] px-3 text-xs font-semibold text-white hover:bg-[#0055cc] disabled:cursor-not-allowed disabled:opacity-60">{tko_redeemProjectInvitation.isPending ? "Joining…" : "Accept invitation"}</button> : <button type="button" onClick={startLogin} className="h-8 bg-[#0c66e4] px-3 text-xs font-semibold text-white hover:bg-[#0055cc]">Sign in to accept</button>}</section> : null}
         {tko_view === "board" && isAuthenticated && tko_selectedProject ? <div className="mb-4 flex justify-end"><button type="button" onClick={() => setTkoColumnsOpen(true)} className="inline-flex h-8 items-center gap-1.5 border border-[#d0d5dd] bg-white px-3 text-xs font-semibold text-[#344054] hover:border-[#0c66e4] hover:bg-[#deebff] hover:text-[#0c66e4]"><Columns3 className="h-3.5 w-3.5" />Manage columns</button></div> : null}
         {tko_columnsOpen && tko_selectedProject ? <aside className="fixed right-4 top-4 z-[66] w-[min(19rem,calc(100vw-2rem))] border border-[#dfe1e6] bg-white p-3 shadow-[0_10px_28px_rgba(9,30,66,.24)]" aria-label="Reorder workflow columns"><div className="mb-2 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#667085]">Column order</p><p className="text-xs text-[#344054]">Move columns without losing their rules.</p></div><button type="button" onClick={() => setTkoColumnsOpen(false)} aria-label="Close column tools" className="grid h-7 w-7 place-items-center text-[#667085] hover:bg-[#f1f2f4]"><X className="h-4 w-4" /></button></div><div className="space-y-1">{tko_columns.filter(tko_column => tko_column.statusId).map((tko_column, tko_index, tko_managedColumns) => <div key={tko_column.statusId} className="flex items-center gap-2 border border-[#eaecf0] bg-[#fcfcfd] px-2 py-1.5"><span className={`h-2 w-2 shrink-0 rounded-full ${tko_column.accent}`} /><span className="min-w-0 flex-1 truncate text-xs font-medium text-[#344054]">{tko_column.label}</span><button type="button" aria-label={`Move ${tko_column.label} earlier`} disabled={tko_index === 0 || tko_reorderStatus.isPending} onClick={() => tko_column.statusId && tko_reorderStatus.mutate({ projectId: tko_selectedProject.id, statusId: tko_column.statusId, beforeStatusId: tko_managedColumns[tko_index - 1]?.statusId ?? null })} className="grid h-6 w-6 place-items-center border border-[#d0d5dd] text-[#44546f] hover:border-[#0c66e4] hover:text-[#0c66e4] disabled:cursor-not-allowed disabled:opacity-35"><ChevronUp className="h-3.5 w-3.5" /></button><button type="button" aria-label={`Move ${tko_column.label} later`} disabled={tko_index === tko_managedColumns.length - 1 || tko_reorderStatus.isPending} onClick={() => tko_column.statusId && tko_reorderStatus.mutate({ projectId: tko_selectedProject.id, statusId: tko_column.statusId, beforeStatusId: tko_managedColumns[tko_index + 2]?.statusId ?? null })} className="grid h-6 w-6 place-items-center border border-[#d0d5dd] text-[#44546f] hover:border-[#0c66e4] hover:text-[#0c66e4] disabled:cursor-not-allowed disabled:opacity-35"><ChevronDownIcon className="h-3.5 w-3.5" /></button></div>)}</div></aside> : null}
         {tko_isPreview && !tko_authLoading ? <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#fedf89] bg-[#fffaeb] px-3 py-2.5 text-xs text-[#93370d]"><Sparkles className="h-4 w-4" /><span>Work preview. Sign in to update your tenant-scoped project.</span><button onClick={startLogin} className="ml-auto font-semibold underline">Sign in</button></div> : null}
-        {tko_view === "members" ? <TkoProjectMembersPanel tko_projectId={tko_selectedProject?.id} tko_visibility={tko_board.data?.project.visibility ?? tko_selectedProject?.visibility ?? "internal"} tko_members={tko_projectMembers.data} tko_loading={tko_projectMembers.isLoading} tko_pending={tko_updateProjectVisibility.isPending || tko_upsertProjectMember.isPending || tko_removeProjectMember.isPending} tko_onVisibilityChange={tko_visibility => { if (tko_selectedProject) tko_updateProjectVisibility.mutate({ projectId: tko_selectedProject.id, visibility: tko_visibility }); }} tko_onRoleChange={(tko_member, tko_projectRole) => { if (!tko_selectedProject) return; if (tko_projectRole === "none") { if (tko_member.isProjectMember) tko_removeProjectMember.mutate({ projectId: tko_selectedProject.id, memberId: tko_member.id }); return; } tko_upsertProjectMember.mutate({ projectId: tko_selectedProject.id, memberId: tko_member.id, projectRole: tko_projectRole }); }} /> : null}
+        {tko_view === "members" ? <div className="space-y-4"><TkoProjectMembersPanel tko_projectId={tko_selectedProject?.id} tko_visibility={tko_board.data?.project.visibility ?? tko_selectedProject?.visibility ?? "internal"} tko_members={tko_projectMembers.data} tko_loading={tko_projectMembers.isLoading} tko_pending={tko_updateProjectVisibility.isPending || tko_upsertProjectMember.isPending || tko_removeProjectMember.isPending} tko_onVisibilityChange={tko_visibility => { if (tko_selectedProject) tko_updateProjectVisibility.mutate({ projectId: tko_selectedProject.id, visibility: tko_visibility }); }} tko_onRoleChange={(tko_member, tko_projectRole) => { if (!tko_selectedProject) return; if (tko_projectRole === "none") { if (tko_member.isProjectMember) tko_removeProjectMember.mutate({ projectId: tko_selectedProject.id, memberId: tko_member.id }); return; } tko_upsertProjectMember.mutate({ projectId: tko_selectedProject.id, memberId: tko_member.id, projectRole: tko_projectRole }); }} /><TkoProjectInvitationActivityPanel tko_projectId={tko_selectedProject?.id} tko_invitations={tko_projectInvitations.data} tko_activity={tko_projectPermissionActivity.data} tko_pending={tko_createProjectInvitation.isPending || tko_revokeProjectInvitation.isPending} tko_lastInvitation={tko_lastInvitation} tko_onCreate={(tko_email, tko_projectRole) => { if (tko_selectedProject) tko_createProjectInvitation.mutate({ projectId: tko_selectedProject.id, inviteeEmail: tko_email, projectRole: tko_projectRole, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }); }} tko_onRevoke={tko_invitationId => { if (tko_selectedProject) tko_revokeProjectInvitation.mutate({ projectId: tko_selectedProject.id, invitationId: tko_invitationId }); }} /></div> : null}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2">
             <div className="relative">

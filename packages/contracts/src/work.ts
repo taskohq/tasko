@@ -44,6 +44,36 @@ export interface ProjectMember extends TenantResource {
   createdAt: Date;
 }
 
+/** A one-time bearer invitation. Only its token hash is persisted by store adapters. */
+export interface ProjectInvitation extends TenantResource {
+  type: "project_invitation";
+  projectId: string;
+  inviteeEmail: string | null;
+  projectRole: ProjectMemberRole;
+  createdByMemberId: string;
+  expiresAt: Date;
+  redeemedAt: Date | null;
+  redeemedByMemberId: string | null;
+  revokedAt: Date | null;
+  createdAt: Date;
+}
+
+export interface ProjectInvitationIssue {
+  invitation: ProjectInvitation;
+  /** Returned only once to the project manager so it can be copied or sent via their mail client. */
+  token: string;
+}
+
+export interface ProjectPermissionActivity {
+  id: string;
+  projectId: string;
+  action: string;
+  actorDisplayName: string;
+  actorMemberId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+}
+
 export interface WorkflowStatus extends TenantResource {
   type: "workflow_status";
   workflowId: string;
@@ -204,6 +234,22 @@ export interface RemoveProjectMemberInput {
   actor: PlatformActor;
   projectId: string;
   memberId: string;
+  correlationId: string;
+}
+
+export interface CreateProjectInvitationInput {
+  actor: PlatformActor;
+  projectId: string;
+  inviteeEmail?: string | null;
+  projectRole: ProjectMemberRole;
+  expiresAt: Date;
+  correlationId: string;
+}
+
+export interface RevokeProjectInvitationInput {
+  actor: PlatformActor;
+  projectId: string;
+  invitationId: string;
   correlationId: string;
 }
 
