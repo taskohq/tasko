@@ -119,7 +119,7 @@
 - [x] Work Files: refactor Files tab thành file manager thuần túy có search/filter, preview, signed download và điều hướng về task chứa file để xóa; không hỗ trợ xóa hàng loạt.
 - [x] Chat: hoàn thiện Slack-like channel CRUD, quản lý thành viên, gửi tin nhắn, file attachment, quote, reply thread, @channel/@here, audit/outbox/realtime và negative authorization tests.
 - [x] Workspace administration: quản lý thành viên workspace, phân quyền role, invitation email-link một lần, quản lý trạng thái lời mời, gửi lại/thu hồi, audit/outbox và negative authorization tests.
-- [ ] Workspace invitation delivery: nối provider email giao dịch để gửi thư mời thực tế; hiện UI cung cấp copy link an toàn khi chưa có provider được kết nối.
+- [x] Workspace invitation delivery: nối provider Resend theo outbox retry/idempotency để gửi thư mời thực tế, giữ copy link an toàn như fallback và không phát token vào audit/realtime.
 - [x] Work task creation bug: tái hiện, xác định và sửa nguyên nhân task không được tạo từ composer/board trên phiên tenant thật, kèm regression success và failure recovery.
 - [x] Work three-mode task composer: cung cấp chuyển đổi giữa quick-create trên board, panel phải và full-screen editor; dùng một draft thống nhất, keyboard-accessible, không mất dữ liệu khi đổi chế độ.
 - [x] Work rich task content: mở rộng task composer cho description chi tiết, checklist và đính kèm S3 có validation, tenant isolation, authorization, audit/outbox và regression thực.

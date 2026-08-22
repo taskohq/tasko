@@ -299,7 +299,8 @@ export class MemoryPlatformStore implements PlatformStore {
     const tko_now = new Date(); const tko_token = tko_createInvitationToken();
     const tko_invitation: TkoStoredWorkspaceInvitation = { id: crypto.randomUUID(), tenantId: tko_input.tenantId, email: tko_input.email, role: tko_input.role, status: "pending", createdByAuthSubject: tko_input.actor.authSubject, createdAt: tko_now, expiresAt: tko_input.expiresAt, lastSentAt: tko_now, acceptedAt: null, revokedAt: null, tokenHash: tko_hashInvitationToken(tko_token) };
     this.tko_workspaceInvitations.set(tko_invitation.id, tko_invitation);
-    await this.writeDurableMutation({ actor: tko_input.actor, tenantId: tko_input.tenantId, topic: "workspace.invitation", eventType: "workspace.invitation.issued.v1", payload: { invitationId: tko_invitation.id, email: tko_invitation.email, role: tko_invitation.role, expiresAt: tko_invitation.expiresAt.toISOString() }, auditAction: "workspace.invitation.issued", resourceType: "workspace_invitation", resourceId: tko_invitation.id, correlationId: tko_input.correlationId });
+    const tko_auditPayload = { invitationId: tko_invitation.id, email: tko_invitation.email, role: tko_invitation.role, expiresAt: tko_invitation.expiresAt.toISOString() };
+    await this.writeDurableMutation({ actor: tko_input.actor, tenantId: tko_input.tenantId, topic: "workspace.invitation", eventType: "workspace.invitation.issued.v1", payload: { ...tko_auditPayload, deliveryToken: tko_token }, auditAction: "workspace.invitation.issued", resourceType: "workspace_invitation", resourceId: tko_invitation.id, auditMetadata: tko_auditPayload, correlationId: tko_input.correlationId });
     return { invitation: tko_cloneWorkspaceInvitation(tko_invitation), token: tko_token };
   }
 
@@ -307,7 +308,8 @@ export class MemoryPlatformStore implements PlatformStore {
     const tko_invitation = this.tko_workspaceInvitations.get(tko_input.invitationId);
     if (!tko_invitation || tko_invitation.tenantId !== tko_input.tenantId || tko_invitation.status !== "pending") throw new Error("TASKO_WORKSPACE_INVITATION_NOT_PENDING");
     const tko_token = tko_createInvitationToken(); tko_invitation.tokenHash = tko_hashInvitationToken(tko_token); tko_invitation.expiresAt = tko_input.expiresAt; tko_invitation.lastSentAt = new Date();
-    await this.writeDurableMutation({ actor: tko_input.actor, tenantId: tko_input.tenantId, topic: "workspace.invitation", eventType: "workspace.invitation.resent.v1", payload: { invitationId: tko_invitation.id, email: tko_invitation.email, expiresAt: tko_invitation.expiresAt.toISOString() }, auditAction: "workspace.invitation.resent", resourceType: "workspace_invitation", resourceId: tko_invitation.id, correlationId: tko_input.correlationId });
+    const tko_auditPayload = { invitationId: tko_invitation.id, email: tko_invitation.email, role: tko_invitation.role, expiresAt: tko_invitation.expiresAt.toISOString() };
+    await this.writeDurableMutation({ actor: tko_input.actor, tenantId: tko_input.tenantId, topic: "workspace.invitation", eventType: "workspace.invitation.resent.v1", payload: { ...tko_auditPayload, deliveryToken: tko_token }, auditAction: "workspace.invitation.resent", resourceType: "workspace_invitation", resourceId: tko_invitation.id, auditMetadata: tko_auditPayload, correlationId: tko_input.correlationId });
     return { invitation: tko_cloneWorkspaceInvitation(tko_invitation), token: tko_token };
   }
 
@@ -711,9 +713,10 @@ export class PostgresPlatformStore implements PlatformStore {
       if (tko_existing.rowCount) throw new Error("TASKO_WORKSPACE_INVITATION_ALREADY_PENDING");
       const tko_result = await tko_client.query(`insert into workspace_invitations (id, tenant_id, email, role, token_hash, status, created_by_auth_subject, expires_at, last_sent_at) values (gen_random_uuid(), $1, $2, $3, $4, 'pending', $5, $6, now()) returning id, tenant_id, email, role, status, created_by_auth_subject, created_at, expires_at, last_sent_at, accepted_at, revoked_at`, [tko_input.tenantId, tko_input.email, tko_input.role, tko_hashInvitationToken(tko_token), tko_input.actor.authSubject, tko_input.expiresAt]);
       const tko_invitation = tko_mapWorkspaceInvitation(tko_result.rows[0]);
-      const tko_payload = { invitationId: tko_invitation.id, email: tko_invitation.email, role: tko_invitation.role, expiresAt: tko_invitation.expiresAt.toISOString() };
-      await tko_client.query(`insert into audit_logs (id, tenant_id, actor_auth_subject, action, resource_type, resource_id, correlation_id, metadata_json) values (gen_random_uuid(), $1, $2, 'workspace.invitation.issued', 'workspace_invitation', $3, $4, $5::jsonb)`, [tko_input.tenantId, tko_input.actor.authSubject, tko_invitation.id, tko_input.correlationId, JSON.stringify(tko_payload)]);
-      await tko_client.query(`insert into outbox (id, event_id, tenant_id, topic, event_type, payload_json, actor_auth_subject, correlation_id, status, attempts, available_at) values (gen_random_uuid(), gen_random_uuid(), $1, 'workspace.invitation', 'workspace.invitation.issued.v1', $2::jsonb, $3, $4, 'pending', 0, now())`, [tko_input.tenantId, JSON.stringify(tko_payload), tko_input.actor.authSubject, tko_input.correlationId]);
+      const tko_auditPayload = { invitationId: tko_invitation.id, email: tko_invitation.email, role: tko_invitation.role, expiresAt: tko_invitation.expiresAt.toISOString() };
+      const tko_outboxPayload = { ...tko_auditPayload, deliveryToken: tko_token };
+      await tko_client.query(`insert into audit_logs (id, tenant_id, actor_auth_subject, action, resource_type, resource_id, correlation_id, metadata_json) values (gen_random_uuid(), $1, $2, 'workspace.invitation.issued', 'workspace_invitation', $3, $4, $5::jsonb)`, [tko_input.tenantId, tko_input.actor.authSubject, tko_invitation.id, tko_input.correlationId, JSON.stringify(tko_auditPayload)]);
+      await tko_client.query(`insert into outbox (id, event_id, tenant_id, topic, event_type, payload_json, actor_auth_subject, correlation_id, status, attempts, available_at) values (gen_random_uuid(), gen_random_uuid(), $1, 'workspace.invitation', 'workspace.invitation.issued.v1', $2::jsonb, $3, $4, 'pending', 0, now())`, [tko_input.tenantId, JSON.stringify(tko_outboxPayload), tko_input.actor.authSubject, tko_input.correlationId]);
       await tko_client.query("COMMIT");
       return { invitation: tko_invitation, token: tko_token };
     } catch (tko_error) {
@@ -733,9 +736,10 @@ export class PostgresPlatformStore implements PlatformStore {
       const tko_result = await tko_client.query(`update workspace_invitations set token_hash = $1, expires_at = $2, last_sent_at = now(), updated_at = now() where id = $3 and tenant_id = $4 and status = 'pending' and expires_at > now() returning id, tenant_id, email, role, status, created_by_auth_subject, created_at, expires_at, last_sent_at, accepted_at, revoked_at`, [tko_hashInvitationToken(tko_token), tko_input.expiresAt, tko_input.invitationId, tko_input.tenantId]);
       if (!tko_result.rowCount) throw new Error("TASKO_WORKSPACE_INVITATION_NOT_PENDING");
       const tko_invitation = tko_mapWorkspaceInvitation(tko_result.rows[0]);
-      const tko_payload = { invitationId: tko_invitation.id, email: tko_invitation.email, expiresAt: tko_invitation.expiresAt.toISOString() };
-      await tko_client.query(`insert into audit_logs (id, tenant_id, actor_auth_subject, action, resource_type, resource_id, correlation_id, metadata_json) values (gen_random_uuid(), $1, $2, 'workspace.invitation.resent', 'workspace_invitation', $3, $4, $5::jsonb)`, [tko_input.tenantId, tko_input.actor.authSubject, tko_invitation.id, tko_input.correlationId, JSON.stringify(tko_payload)]);
-      await tko_client.query(`insert into outbox (id, event_id, tenant_id, topic, event_type, payload_json, actor_auth_subject, correlation_id, status, attempts, available_at) values (gen_random_uuid(), gen_random_uuid(), $1, 'workspace.invitation', 'workspace.invitation.resent.v1', $2::jsonb, $3, $4, 'pending', 0, now())`, [tko_input.tenantId, JSON.stringify(tko_payload), tko_input.actor.authSubject, tko_input.correlationId]);
+      const tko_auditPayload = { invitationId: tko_invitation.id, email: tko_invitation.email, role: tko_invitation.role, expiresAt: tko_invitation.expiresAt.toISOString() };
+      const tko_outboxPayload = { ...tko_auditPayload, deliveryToken: tko_token };
+      await tko_client.query(`insert into audit_logs (id, tenant_id, actor_auth_subject, action, resource_type, resource_id, correlation_id, metadata_json) values (gen_random_uuid(), $1, $2, 'workspace.invitation.resent', 'workspace_invitation', $3, $4, $5::jsonb)`, [tko_input.tenantId, tko_input.actor.authSubject, tko_invitation.id, tko_input.correlationId, JSON.stringify(tko_auditPayload)]);
+      await tko_client.query(`insert into outbox (id, event_id, tenant_id, topic, event_type, payload_json, actor_auth_subject, correlation_id, status, attempts, available_at) values (gen_random_uuid(), gen_random_uuid(), $1, 'workspace.invitation', 'workspace.invitation.resent.v1', $2::jsonb, $3, $4, 'pending', 0, now())`, [tko_input.tenantId, JSON.stringify(tko_outboxPayload), tko_input.actor.authSubject, tko_input.correlationId]);
       await tko_client.query("COMMIT");
       return { invitation: tko_invitation, token: tko_token };
     } catch (tko_error) {

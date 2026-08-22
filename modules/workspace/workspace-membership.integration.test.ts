@@ -44,6 +44,12 @@ describe("Workspace membership and email invitation", () => {
     expect(await tko_membership.listWorkspaceInvitations(tko_owner)).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_initial.invitation.id, status: "accepted" })]));
     expect((await tko_store.listAuditLogs()).map(tko_entry => tko_entry.action)).toEqual(expect.arrayContaining(["workspace.invitation.issued", "workspace.invitation.resent", "workspace.invitation.accepted"]));
     expect((await tko_store.listOutbox()).map(tko_entry => tko_entry.eventType)).toEqual(expect.arrayContaining(["workspace.invitation.issued.v1", "workspace.invitation.resent.v1", "workspace.invitation.accepted.v1"]));
+    const tko_issuedEvent = (await tko_store.listOutbox()).find(tko_entry => tko_entry.eventType === "workspace.invitation.issued.v1");
+    const tko_resentEvent = (await tko_store.listOutbox()).find(tko_entry => tko_entry.eventType === "workspace.invitation.resent.v1");
+    expect(tko_issuedEvent?.payload.deliveryToken).toBe(tko_initial.token);
+    expect(tko_resentEvent?.payload.deliveryToken).toBe(tko_resent.token);
+    expect(JSON.stringify(await tko_store.listAuditLogs())).not.toContain(tko_initial.token);
+    expect(JSON.stringify(await tko_store.listAuditLogs())).not.toContain(tko_resent.token);
   });
 
   it("allows an owner to manage a non-owner member state and role with durable history", async () => {

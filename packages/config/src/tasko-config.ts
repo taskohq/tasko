@@ -24,5 +24,8 @@ export const tko_config = {
   ownerAuthSubject: process.env.OWNER_OPEN_ID ?? "",
   platformAdminSubjects: readSubjects(process.env.TASKO_PLATFORM_ADMIN_SUBJECTS, process.env.OWNER_OPEN_ID ?? ""),
   billingProvider: process.env.TASKO_BILLING_PROVIDER === "stripe" ? "stripe" : null,
+  resendApiKey: process.env.RESEND_API_KEY ?? "",
+  resendFromEmail: process.env.RESEND_FROM_EMAIL ?? "",
+  appOrigin: process.env.TASKO_APP_ORIGIN ?? "",
   isProduction: process.env.NODE_ENV === "production",
 } as const;

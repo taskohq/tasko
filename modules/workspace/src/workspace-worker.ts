@@ -3,8 +3,10 @@ import { getCRMStore } from "../../../packages/database/src/crm-store";
 import { getChatStore } from "../../../packages/database/src/chat-store";
 import { getWorkStore } from "../../../packages/database/src/work-store";
 import { getWorkspaceStore } from "../../../packages/database/src/workspace-store";
+import { getPlatformStore } from "../../../packages/database/src/platform-store";
 import { resolveWorkerServiceActor } from "../../tenancy/src/tenant-context";
 import { registerOutboxConsumer } from "../../worker/src/worker-service";
+import { sendWorkspaceInvitationEmail } from "./invitation-email-service";
 import { createInboxItem, materializeSearchDocument, processAutomationEvent } from "./workspace-service";
 
 function tko_payloadId(tko_record: OutboxRecord, tko_name: string): string | null { const tko_value = tko_record.payload[tko_name]; return typeof tko_value === "string" ? tko_value : null; }
@@ -71,6 +73,18 @@ async function tko_handleCommentReaction(tko_record: OutboxRecord): Promise<void
   await createInboxItem(tko_actor, { memberId: tko_recipientMemberId, kind: "comment", entityType: "work_item", entityId: tko_item.id, title: "Your comment received a reaction", body: `${tko_item.key} · ${tko_item.title}`, href: `/work?item=${tko_item.id}`, sourceEventId: tko_record.eventId, correlationId: `tko_materialize:${tko_record.eventId}` });
 }
 
+async function tko_deliverWorkspaceInvitation(tko_record: OutboxRecord): Promise<void> {
+  const tko_invitationId = tko_payloadId(tko_record, "invitationId");
+  const tko_email = tko_payloadId(tko_record, "email");
+  const tko_deliveryToken = tko_payloadId(tko_record, "deliveryToken");
+  const tko_expiresAt = tko_payloadId(tko_record, "expiresAt");
+  const tko_role = tko_payloadId(tko_record, "role") ?? "member";
+  if (!tko_invitationId || !tko_email || !tko_deliveryToken || !tko_expiresAt) throw new Error("WORKSPACE_INVITATION_DELIVERY_PAYLOAD_INVALID");
+  const tko_tenant = (await getPlatformStore().listTenants()).find(tko_candidate => tko_candidate.id === tko_record.tenantId);
+  if (!tko_tenant) throw new Error("WORKSPACE_INVITATION_TENANT_NOT_FOUND");
+  await sendWorkspaceInvitationEmail({ recipientEmail: tko_email, recipientRole: tko_role, tenantName: tko_tenant.name, deliveryToken: tko_deliveryToken, expiresAt: tko_expiresAt, idempotencyKey: `tasko-workspace-invitation-${tko_record.eventId}` });
+}
+
 export function registerWorkspaceWorker(): void {
   registerOutboxConsumer("work.work_item_created.v1", tko_indexWork, "job.process");
   registerOutboxConsumer("crm.lead_created.v1", tko_indexLead, "job.process");
@@ -80,4 +94,6 @@ export function registerWorkspaceWorker(): void {
   registerOutboxConsumer("workspace.form_submitted.v1", tko_handleFormSubmission, "job.process");
   registerOutboxConsumer("work.comment_created.v1", tko_handleCommentMention, "job.process");
   registerOutboxConsumer("work.comment_reaction_added.v1", tko_handleCommentReaction, "job.process");
+  registerOutboxConsumer("workspace.invitation.issued.v1", tko_deliverWorkspaceInvitation, "job.process");
+  registerOutboxConsumer("workspace.invitation.resent.v1", tko_deliverWorkspaceInvitation, "job.process");
 }

@@ -71,11 +71,12 @@ export async function processOutboxOnce(tko_limit = 25): Promise<number> {
       const tko_actorMembership = tko_record.actorAuthSubject
         ? (await getPlatformStore().listMemberships(tko_record.actorAuthSubject)).find(tko_membership => tko_membership.tenant.id === tko_record.tenantId && tko_membership.status === "active")
         : null;
+      const { deliveryToken: _tko_deliveryToken, ...tko_realtimePayload } = tko_record.payload;
       await getRedisAdapter().publishTenant({
         tenantId: tko_record.tenantId,
         eventId: tko_record.eventId,
         eventType: tko_record.eventType,
-        payload: { ...tko_record.payload, actorMemberId: tko_actorMembership?.id ?? null },
+        payload: { ...tko_realtimePayload, actorMemberId: tko_actorMembership?.id ?? null },
       });
       await tko_store.markOutboxProcessed(tko_record.id);
       tko_workerStatus = { ...tko_workerStatus, processedCount: tko_workerStatus.processedCount + 1 };
