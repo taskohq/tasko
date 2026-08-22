@@ -173,6 +173,7 @@ export const appRouter = router({
   workspaceMembers: router({
     list: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceMembers(ctx.platform.actor)),
     invitations: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceInvitations(ctx.platform.actor)),
+    invitationDelivery: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceInvitationDeliveries(ctx.platform.actor)),
     invite: tenantProcedure
       .input(z.object({ email: z.string().trim().email().max(254), role: z.enum(["admin", "member", "guest"]) }))
       .mutation(async ({ ctx, input }) => workspaceMembershipService.createWorkspaceInvitation({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),

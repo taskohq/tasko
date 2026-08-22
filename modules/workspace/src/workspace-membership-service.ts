@@ -36,6 +36,11 @@ export async function listWorkspaceInvitations(tko_actor: PlatformActor) {
   return getPlatformStore().listWorkspaceInvitations(tko_actor.tenantId);
 }
 
+export async function listWorkspaceInvitationDeliveries(tko_actor: PlatformActor) {
+  tko_requireManager(tko_actor, "workspace-invitation-delivery");
+  return getPlatformStore().listWorkspaceInvitationDeliveries(tko_actor.tenantId);
+}
+
 export async function createWorkspaceInvitation(tko_input: { actor: PlatformActor; email: string; role: TkoInviteRole; correlationId: string }) {
   tko_requireManager(tko_input.actor, "workspace-invitation-create");
   if (tko_input.actor.role !== "owner" && tko_input.role === "admin") throw new Error("TASKO_WORKSPACE_ROLE_ESCALATION_DENIED");

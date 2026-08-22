@@ -52,6 +52,17 @@ describe("Workspace membership and email invitation", () => {
     expect(JSON.stringify(await tko_store.listAuditLogs())).not.toContain(tko_resent.token);
   });
 
+  it("exposes invitation delivery telemetry without exposing one-time tokens", async () => {
+    const tko_owner = tko_actor();
+    const tko_invite = await tko_membership.createWorkspaceInvitation({ actor: tko_owner, email: "delivery@example.test", role: "member", correlationId: "workspace-delivery-read" });
+    const tko_delivery = await tko_membership.listWorkspaceInvitationDeliveries(tko_owner);
+    expect(tko_delivery).toEqual(expect.arrayContaining([expect.objectContaining({ invitationId: tko_invite.invitation.id, email: "delivery@example.test", deliveryStatus: "queued", attempts: 0 })]));
+    expect(JSON.stringify(tko_delivery)).not.toContain(tko_invite.token);
+
+    const tko_guest = tko_actor({ authSubject: "workspace-guest", memberId: "tko-member-demo-guest", role: "guest" });
+    await expect(tko_membership.listWorkspaceInvitationDeliveries(tko_guest)).rejects.toThrow("AUTHORIZATION_DENIED");
+  });
+
   it("allows an owner to manage a non-owner member state and role with durable history", async () => {
     const tko_owner = tko_actor();
     const tko_invite = await tko_membership.createWorkspaceInvitation({ actor: tko_owner, email: "operator@example.test", role: "guest", correlationId: "workspace-member-create" });

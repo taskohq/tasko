@@ -113,6 +113,22 @@ export interface WorkspaceInvitation {
   revokedAt: Date | null;
 }
 
+export type WorkspaceInvitationDeliveryStatus = "queued" | "processing" | "sent" | "retrying" | "failed" | "unavailable";
+
+export interface WorkspaceInvitationDelivery {
+  invitationId: string;
+  email: string;
+  role: WorkspaceInvitation["role"];
+  invitationStatus: WorkspaceInvitation["status"];
+  lastSentAt: Date;
+  deliveryStatus: WorkspaceInvitationDeliveryStatus;
+  attempts: number;
+  lastError: string | null;
+  queuedAt: Date | null;
+  nextAttemptAt: Date | null;
+  deliveredAt: Date | null;
+}
+
 export interface PlatformActor {
   authSubject: string;
   tenantId: string;
@@ -157,6 +173,9 @@ export interface OutboxRecord {
   attempts: number;
   availableAt: Date;
   createdAt: Date;
+  processingStartedAt?: Date | null;
+  processedAt?: Date | null;
+  lastError?: string | null;
 }
 
 export interface AuditLogRecord {
