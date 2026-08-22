@@ -1,4 +1,4 @@
-import type { PlatformActor, TenantMembership, TenantRole, WorkspaceInvitation } from "../../../packages/contracts/src/platform";
+import type { PlatformActor, TenantMembership, TenantRole, WorkspaceInvitation, WorkspaceInvitationDeliveryFilters } from "../../../packages/contracts/src/platform";
 import { getPlatformStore } from "../../../packages/database/src/platform-store";
 import { requireCapability } from "../../permissions/src/authorization";
 
@@ -36,9 +36,9 @@ export async function listWorkspaceInvitations(tko_actor: PlatformActor) {
   return getPlatformStore().listWorkspaceInvitations(tko_actor.tenantId);
 }
 
-export async function listWorkspaceInvitationDeliveries(tko_actor: PlatformActor) {
+export async function listWorkspaceInvitationDeliveries(tko_actor: PlatformActor, tko_filters?: WorkspaceInvitationDeliveryFilters) {
   tko_requireManager(tko_actor, "workspace-invitation-delivery");
-  return getPlatformStore().listWorkspaceInvitationDeliveries(tko_actor.tenantId);
+  return getPlatformStore().listWorkspaceInvitationDeliveries(tko_actor.tenantId, tko_filters);
 }
 
 export async function createWorkspaceInvitation(tko_input: { actor: PlatformActor; email: string; role: TkoInviteRole; correlationId: string }) {
@@ -57,6 +57,17 @@ export async function createWorkspaceInvitation(tko_input: { actor: PlatformActo
 export async function resendWorkspaceInvitation(tko_input: { actor: PlatformActor; invitationId: string; correlationId: string }) {
   tko_requireManager(tko_input.actor, tko_input.invitationId);
   return getPlatformStore().resendWorkspaceInvitation({
+    actor: tko_input.actor,
+    tenantId: tko_input.actor.tenantId,
+    invitationId: tko_input.invitationId,
+    correlationId: tko_input.correlationId,
+    expiresAt: new Date(Date.now() + tko_invitationLifetimeMs),
+  });
+}
+
+export async function retryWorkspaceInvitationDelivery(tko_input: { actor: PlatformActor; invitationId: string; correlationId: string }) {
+  tko_requireManager(tko_input.actor, tko_input.invitationId);
+  return getPlatformStore().retryWorkspaceInvitationDelivery({
     actor: tko_input.actor,
     tenantId: tko_input.actor.tenantId,
     invitationId: tko_input.invitationId,

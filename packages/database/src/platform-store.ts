@@ -10,12 +10,14 @@ import type {
   OutboxRecord,
   RedeemWorkspaceInvitationInput,
   ResendWorkspaceInvitationInput,
+  RetryWorkspaceInvitationDeliveryInput,
   RevokeWorkspaceInvitationInput,
   Tenant,
   TenantMembership,
   TenantRole,
   WorkspaceInvitation,
   WorkspaceInvitationDelivery,
+  WorkspaceInvitationDeliveryFilters,
 } from "../../contracts/src/platform";
 import type { TenantProvisionInput } from "../../contracts/src/saas";
 
@@ -49,9 +51,10 @@ export interface PlatformStore {
   changeTenantMemberRole(tko_input: ChangeTenantMemberRoleInput): Promise<void>;
   changeTenantMemberStatus(tko_input: ChangeTenantMemberStatusInput): Promise<void>;
   listWorkspaceInvitations(tko_tenantId: string): Promise<WorkspaceInvitation[]>;
-  listWorkspaceInvitationDeliveries(tko_tenantId: string): Promise<WorkspaceInvitationDelivery[]>;
+  listWorkspaceInvitationDeliveries(tko_tenantId: string, tko_filters?: WorkspaceInvitationDeliveryFilters): Promise<WorkspaceInvitationDelivery[]>;
   createWorkspaceInvitation(tko_input: CreateWorkspaceInvitationInput): Promise<{ invitation: WorkspaceInvitation; token: string }>;
   resendWorkspaceInvitation(tko_input: ResendWorkspaceInvitationInput): Promise<{ invitation: WorkspaceInvitation; token: string }>;
+  retryWorkspaceInvitationDelivery(tko_input: RetryWorkspaceInvitationDeliveryInput): Promise<{ invitation: WorkspaceInvitation; token: string }>;
   revokeWorkspaceInvitation(tko_input: RevokeWorkspaceInvitationInput): Promise<void>;
   redeemWorkspaceInvitation(tko_input: RedeemWorkspaceInvitationInput): Promise<{ tenant: Tenant; membership: TenantMembership }>;
   writeDurableMutation(tko_input: DurableMutationInput): Promise<OutboxRecord>;
@@ -165,6 +168,18 @@ function tko_invitationDeliveryFromOutbox(tko_invitation: WorkspaceInvitation, t
     nextAttemptAt: tko_outbox.status === "pending" ? tko_outbox.availableAt : null,
     deliveredAt: tko_outbox.processedAt ?? null,
   };
+}
+
+function tko_filterInvitationDeliveries(tko_deliveries: WorkspaceInvitationDelivery[], tko_filters?: WorkspaceInvitationDeliveryFilters): WorkspaceInvitationDelivery[] {
+  const tko_dateRange = tko_filters?.dateRange ?? "all";
+  const tko_threshold = tko_dateRange === "7d" ? Date.now() - 7 * 24 * 60 * 60 * 1_000
+    : tko_dateRange === "30d" ? Date.now() - 30 * 24 * 60 * 60 * 1_000
+      : tko_dateRange === "90d" ? Date.now() - 90 * 24 * 60 * 60 * 1_000
+        : 0;
+  return tko_deliveries.filter(tko_delivery => (
+    (!tko_filters?.status || tko_delivery.deliveryStatus === tko_filters.status)
+    && (!tko_threshold || tko_delivery.lastSentAt.getTime() >= tko_threshold)
+  ));
 }
 
 export class MemoryPlatformStore implements PlatformStore {
@@ -317,14 +332,14 @@ export class MemoryPlatformStore implements PlatformStore {
     return Array.from(this.tko_workspaceInvitations.values()).filter(tko_invitation => tko_invitation.tenantId === tko_tenantId).sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime()).map(tko_cloneWorkspaceInvitation);
   }
 
-  async listWorkspaceInvitationDeliveries(tko_tenantId: string): Promise<WorkspaceInvitationDelivery[]> {
+  async listWorkspaceInvitationDeliveries(tko_tenantId: string, tko_filters?: WorkspaceInvitationDeliveryFilters): Promise<WorkspaceInvitationDelivery[]> {
     const tko_invitations = await this.listWorkspaceInvitations(tko_tenantId);
-    return tko_invitations.map(tko_invitation => {
+    return tko_filterInvitationDeliveries(tko_invitations.map(tko_invitation => {
       const tko_latest = Array.from(this.tko_outbox.values())
-        .filter(tko_outbox => tko_outbox.tenantId === tko_tenantId && tko_outbox.topic === "workspace.invitation" && (tko_outbox.eventType === "workspace.invitation.issued.v1" || tko_outbox.eventType === "workspace.invitation.resent.v1") && tko_outbox.payload.invitationId === tko_invitation.id)
+        .filter(tko_outbox => tko_outbox.tenantId === tko_tenantId && tko_outbox.topic === "workspace.invitation" && (tko_outbox.eventType === "workspace.invitation.issued.v1" || tko_outbox.eventType === "workspace.invitation.resent.v1" || tko_outbox.eventType === "workspace.invitation.delivery_retried.v1") && tko_outbox.payload.invitationId === tko_invitation.id)
         .sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime())[0] ?? null;
       return tko_invitationDeliveryFromOutbox(tko_invitation, tko_latest);
-    });
+    }), tko_filters);
   }
 
   async createWorkspaceInvitation(tko_input: CreateWorkspaceInvitationInput): Promise<{ invitation: WorkspaceInvitation; token: string }> {
@@ -344,6 +359,22 @@ export class MemoryPlatformStore implements PlatformStore {
     const tko_token = tko_createInvitationToken(); tko_invitation.tokenHash = tko_hashInvitationToken(tko_token); tko_invitation.expiresAt = tko_input.expiresAt; tko_invitation.lastSentAt = new Date();
     const tko_auditPayload = { invitationId: tko_invitation.id, email: tko_invitation.email, role: tko_invitation.role, expiresAt: tko_invitation.expiresAt.toISOString() };
     await this.writeDurableMutation({ actor: tko_input.actor, tenantId: tko_input.tenantId, topic: "workspace.invitation", eventType: "workspace.invitation.resent.v1", payload: { ...tko_auditPayload, deliveryToken: tko_token }, auditAction: "workspace.invitation.resent", resourceType: "workspace_invitation", resourceId: tko_invitation.id, auditMetadata: tko_auditPayload, correlationId: tko_input.correlationId });
+    return { invitation: tko_cloneWorkspaceInvitation(tko_invitation), token: tko_token };
+  }
+
+  async retryWorkspaceInvitationDelivery(tko_input: RetryWorkspaceInvitationDeliveryInput): Promise<{ invitation: WorkspaceInvitation; token: string }> {
+    const tko_invitation = this.tko_workspaceInvitations.get(tko_input.invitationId);
+    if (!tko_invitation || tko_invitation.tenantId !== tko_input.tenantId || tko_invitation.status !== "pending" || tko_invitation.expiresAt.getTime() <= Date.now()) throw new Error("TASKO_WORKSPACE_INVITATION_NOT_PENDING");
+    const tko_latest = Array.from(this.tko_outbox.values())
+      .filter(tko_outbox => tko_outbox.tenantId === tko_input.tenantId && tko_outbox.topic === "workspace.invitation" && (tko_outbox.eventType === "workspace.invitation.issued.v1" || tko_outbox.eventType === "workspace.invitation.resent.v1" || tko_outbox.eventType === "workspace.invitation.delivery_retried.v1") && tko_outbox.payload.invitationId === tko_invitation.id)
+      .sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime())[0];
+    if (!tko_latest || tko_latest.status !== "dead_letter") throw new Error("TASKO_WORKSPACE_INVITATION_DELIVERY_NOT_FAILED");
+    const tko_token = tko_createInvitationToken();
+    tko_invitation.tokenHash = tko_hashInvitationToken(tko_token);
+    tko_invitation.expiresAt = tko_input.expiresAt;
+    tko_invitation.lastSentAt = new Date();
+    const tko_auditPayload = { invitationId: tko_invitation.id, email: tko_invitation.email, role: tko_invitation.role, expiresAt: tko_invitation.expiresAt.toISOString(), retryOfEventId: tko_latest.eventId };
+    await this.writeDurableMutation({ actor: tko_input.actor, tenantId: tko_input.tenantId, topic: "workspace.invitation", eventType: "workspace.invitation.delivery_retried.v1", payload: { ...tko_auditPayload, deliveryToken: tko_token }, auditAction: "workspace.invitation.delivery_retried", resourceType: "workspace_invitation", resourceId: tko_invitation.id, auditMetadata: tko_auditPayload, correlationId: tko_input.correlationId });
     return { invitation: tko_cloneWorkspaceInvitation(tko_invitation), token: tko_token };
   }
 
@@ -744,7 +775,7 @@ export class PostgresPlatformStore implements PlatformStore {
     }
   }
 
-  async listWorkspaceInvitationDeliveries(tko_tenantId: string): Promise<WorkspaceInvitationDelivery[]> {
+  async listWorkspaceInvitationDeliveries(tko_tenantId: string, tko_filters?: WorkspaceInvitationDeliveryFilters): Promise<WorkspaceInvitationDelivery[]> {
     const tko_client = await this.tko_pool.connect();
     try {
       await tko_client.query("BEGIN");
@@ -758,7 +789,7 @@ export class PostgresPlatformStore implements PlatformStore {
              from outbox
             where tenant_id = $1
               and topic = 'workspace.invitation'
-              and event_type in ('workspace.invitation.issued.v1', 'workspace.invitation.resent.v1')
+              and event_type in ('workspace.invitation.issued.v1', 'workspace.invitation.resent.v1', 'workspace.invitation.delivery_retried.v1')
             order by (payload_json->>'invitationId'), created_at desc
          )
          select i.id, i.tenant_id, i.email, i.role, i.status, i.created_by_auth_subject,
@@ -773,13 +804,13 @@ export class PostgresPlatformStore implements PlatformStore {
         [tko_tenantId],
       );
       await tko_client.query("COMMIT");
-      return tko_result.rows.map(tko_row => {
+      return tko_filterInvitationDeliveries(tko_result.rows.map(tko_row => {
         const tko_invitation = tko_mapWorkspaceInvitation(tko_row);
         const tko_outbox: OutboxRecord | null = tko_row.delivery_status ? {
           id: "delivery-read-model", eventId: "delivery-read-model", tenantId: tko_invitation.tenantId, topic: "workspace.invitation", eventType: "workspace.invitation.issued.v1", payload: {}, actorAuthSubject: null, correlationId: "delivery-read-model", status: String(tko_row.delivery_status) as OutboxRecord["status"], attempts: Number(tko_row.delivery_attempts), availableAt: new Date(String(tko_row.delivery_next_attempt_at)), createdAt: new Date(String(tko_row.delivery_queued_at)), processedAt: tko_row.delivery_processed_at ? new Date(String(tko_row.delivery_processed_at)) : null, lastError: tko_row.delivery_last_error ? String(tko_row.delivery_last_error) : null,
         } : null;
         return tko_invitationDeliveryFromOutbox(tko_invitation, tko_outbox);
-      });
+      }), tko_filters);
     } catch (tko_error) {
       await tko_client.query("ROLLBACK");
       throw tko_error;
@@ -826,6 +857,32 @@ export class PostgresPlatformStore implements PlatformStore {
       const tko_outboxPayload = { ...tko_auditPayload, deliveryToken: tko_token };
       await tko_client.query(`insert into audit_logs (id, tenant_id, actor_auth_subject, action, resource_type, resource_id, correlation_id, metadata_json) values (gen_random_uuid(), $1, $2, 'workspace.invitation.resent', 'workspace_invitation', $3, $4, $5::jsonb)`, [tko_input.tenantId, tko_input.actor.authSubject, tko_invitation.id, tko_input.correlationId, JSON.stringify(tko_auditPayload)]);
       await tko_client.query(`insert into outbox (id, event_id, tenant_id, topic, event_type, payload_json, actor_auth_subject, correlation_id, status, attempts, available_at) values (gen_random_uuid(), gen_random_uuid(), $1, 'workspace.invitation', 'workspace.invitation.resent.v1', $2::jsonb, $3, $4, 'pending', 0, now())`, [tko_input.tenantId, JSON.stringify(tko_outboxPayload), tko_input.actor.authSubject, tko_input.correlationId]);
+      await tko_client.query("COMMIT");
+      return { invitation: tko_invitation, token: tko_token };
+    } catch (tko_error) {
+      await tko_client.query("ROLLBACK");
+      throw tko_error;
+    } finally {
+      tko_client.release();
+    }
+  }
+
+  async retryWorkspaceInvitationDelivery(tko_input: RetryWorkspaceInvitationDeliveryInput): Promise<{ invitation: WorkspaceInvitation; token: string }> {
+    const tko_client = await this.tko_pool.connect();
+    const tko_token = tko_createInvitationToken();
+    try {
+      await tko_client.query("BEGIN");
+      await tko_client.query("select set_config('app.tenant_id', $1, true)", [tko_input.tenantId]);
+      const tko_invitationResult = await tko_client.query("select id, tenant_id, email, role, status, created_by_auth_subject, created_at, expires_at, last_sent_at, accepted_at, revoked_at from workspace_invitations where id = $1 and tenant_id = $2 and status = 'pending' and expires_at > now() for update", [tko_input.invitationId, tko_input.tenantId]);
+      if (!tko_invitationResult.rowCount) throw new Error("TASKO_WORKSPACE_INVITATION_NOT_PENDING");
+      const tko_latestDelivery = await tko_client.query("select event_id, status from outbox where tenant_id = $1 and topic = 'workspace.invitation' and event_type in ('workspace.invitation.issued.v1', 'workspace.invitation.resent.v1', 'workspace.invitation.delivery_retried.v1') and payload_json->>'invitationId' = $2 order by created_at desc limit 1 for update", [tko_input.tenantId, tko_input.invitationId]);
+      if (!tko_latestDelivery.rowCount || tko_latestDelivery.rows[0].status !== "dead_letter") throw new Error("TASKO_WORKSPACE_INVITATION_DELIVERY_NOT_FAILED");
+      const tko_updated = await tko_client.query("update workspace_invitations set token_hash = $1, expires_at = $2, last_sent_at = now(), updated_at = now() where id = $3 and tenant_id = $4 returning id, tenant_id, email, role, status, created_by_auth_subject, created_at, expires_at, last_sent_at, accepted_at, revoked_at", [tko_hashInvitationToken(tko_token), tko_input.expiresAt, tko_input.invitationId, tko_input.tenantId]);
+      const tko_invitation = tko_mapWorkspaceInvitation(tko_updated.rows[0]);
+      const tko_auditPayload = { invitationId: tko_invitation.id, email: tko_invitation.email, role: tko_invitation.role, expiresAt: tko_invitation.expiresAt.toISOString(), retryOfEventId: String(tko_latestDelivery.rows[0].event_id) };
+      const tko_outboxPayload = { ...tko_auditPayload, deliveryToken: tko_token };
+      await tko_client.query("insert into audit_logs (id, tenant_id, actor_auth_subject, action, resource_type, resource_id, correlation_id, metadata_json) values (gen_random_uuid(), $1, $2, 'workspace.invitation.delivery_retried', 'workspace_invitation', $3, $4, $5::jsonb)", [tko_input.tenantId, tko_input.actor.authSubject, tko_invitation.id, tko_input.correlationId, JSON.stringify(tko_auditPayload)]);
+      await tko_client.query("insert into outbox (id, event_id, tenant_id, topic, event_type, payload_json, actor_auth_subject, correlation_id, status, attempts, available_at) values (gen_random_uuid(), gen_random_uuid(), $1, 'workspace.invitation', 'workspace.invitation.delivery_retried.v1', $2::jsonb, $3, $4, 'pending', 0, now())", [tko_input.tenantId, JSON.stringify(tko_outboxPayload), tko_input.actor.authSubject, tko_input.correlationId]);
       await tko_client.query("COMMIT");
       return { invitation: tko_invitation, token: tko_token };
     } catch (tko_error) {

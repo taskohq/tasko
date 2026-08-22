@@ -122,6 +122,8 @@
 - [x] Workspace invitation delivery: nối provider Resend theo outbox retry/idempotency để gửi thư mời thực tế, giữ copy link an toàn như fallback và không phát token vào audit/realtime.
 - [x] Workspace invitation email branding: thiết kế template HTML responsive theo nhận diện Tasko, có fallback text, accessibility và one-time redeem link an toàn.
 - [x] Workspace invitation delivery dashboard: cung cấp màn hình admin theo dõi trạng thái gửi, retry và lỗi invitation email qua dữ liệu outbox tenant-scoped, không lộ token nhạy cảm.
+- [x] Workspace invitation delivery filters: thêm bộ lọc trạng thái và khoảng thời gian cho dashboard email, với truy vấn tenant-safe và trạng thái URL/UI rõ ràng.
+- [x] Workspace invitation manual retry: thêm hành động retry một delivery lỗi từ dashboard, có authorization admin, idempotency, audit/outbox và negative authorization tests.
 - [x] Work task creation bug: tái hiện, xác định và sửa nguyên nhân task không được tạo từ composer/board trên phiên tenant thật, kèm regression success và failure recovery.
 - [x] Work three-mode task composer: cung cấp chuyển đổi giữa quick-create trên board, panel phải và full-screen editor; dùng một draft thống nhất, keyboard-accessible, không mất dữ liệu khi đổi chế độ.
 - [x] Work rich task content: mở rộng task composer cho description chi tiết, checklist và đính kèm S3 có validation, tenant isolation, authorization, audit/outbox và regression thực.

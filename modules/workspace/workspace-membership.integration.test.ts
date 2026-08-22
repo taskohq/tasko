@@ -63,6 +63,29 @@ describe("Workspace membership and email invitation", () => {
     await expect(tko_membership.listWorkspaceInvitationDeliveries(tko_guest)).rejects.toThrow("AUTHORIZATION_DENIED");
   });
 
+  it("filters delivery telemetry and queues a fresh token only when a failed pending invitation is manually retried", async () => {
+    const tko_owner = tko_actor();
+    const tko_invite = await tko_membership.createWorkspaceInvitation({ actor: tko_owner, email: "retry@example.test", role: "member", correlationId: "workspace-delivery-retry-issued" });
+    const tko_issued = (await tko_store.listOutbox()).find(tko_event => tko_event.eventType === "workspace.invitation.issued.v1" && tko_event.payload.invitationId === tko_invite.invitation.id);
+    expect(tko_issued).toBeDefined();
+    await tko_store.rescheduleOutbox(tko_issued!.id, "Resend delivery failed", 0);
+
+    const tko_failed = await tko_membership.listWorkspaceInvitationDeliveries(tko_owner, { status: "failed", dateRange: "30d" });
+    expect(tko_failed).toEqual([expect.objectContaining({ invitationId: tko_invite.invitation.id, deliveryStatus: "failed", lastError: "Resend delivery failed" })]);
+    expect(await tko_membership.listWorkspaceInvitationDeliveries(tko_owner, { status: "sent" })).toEqual([]);
+
+    const tko_retried = await tko_membership.retryWorkspaceInvitationDelivery({ actor: tko_owner, invitationId: tko_invite.invitation.id, correlationId: "workspace-delivery-retry-manual" });
+    expect(tko_retried.token).not.toBe(tko_invite.token);
+    const tko_afterRetry = await tko_membership.listWorkspaceInvitationDeliveries(tko_owner, { status: "queued" });
+    expect(tko_afterRetry).toEqual(expect.arrayContaining([expect.objectContaining({ invitationId: tko_invite.invitation.id, deliveryStatus: "queued", attempts: 0 })]));
+    expect((await tko_store.listAuditLogs()).map(tko_entry => tko_entry.action)).toContain("workspace.invitation.delivery_retried");
+    expect(JSON.stringify(await tko_membership.listWorkspaceInvitationDeliveries(tko_owner))).not.toContain(tko_retried.token);
+
+    await expect(tko_membership.retryWorkspaceInvitationDelivery({ actor: tko_owner, invitationId: tko_invite.invitation.id, correlationId: "workspace-delivery-retry-twice" })).rejects.toThrow("DELIVERY_NOT_FAILED");
+    const tko_guest = tko_actor({ authSubject: "workspace-guest", memberId: "tko-member-demo-guest", role: "guest" });
+    await expect(tko_membership.retryWorkspaceInvitationDelivery({ actor: tko_guest, invitationId: tko_invite.invitation.id, correlationId: "workspace-delivery-retry-guest" })).rejects.toThrow("AUTHORIZATION_DENIED");
+  });
+
   it("allows an owner to manage a non-owner member state and role with durable history", async () => {
     const tko_owner = tko_actor();
     const tko_invite = await tko_membership.createWorkspaceInvitation({ actor: tko_owner, email: "operator@example.test", role: "guest", correlationId: "workspace-member-create" });

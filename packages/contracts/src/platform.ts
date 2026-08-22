@@ -114,6 +114,12 @@ export interface WorkspaceInvitation {
 }
 
 export type WorkspaceInvitationDeliveryStatus = "queued" | "processing" | "sent" | "retrying" | "failed" | "unavailable";
+export type WorkspaceInvitationDeliveryDateRange = "7d" | "30d" | "90d" | "all";
+
+export interface WorkspaceInvitationDeliveryFilters {
+  status?: WorkspaceInvitationDeliveryStatus;
+  dateRange?: WorkspaceInvitationDeliveryDateRange;
+}
 
 export interface WorkspaceInvitationDelivery {
   invitationId: string;
@@ -229,6 +235,14 @@ export interface CreateWorkspaceInvitationInput {
 }
 
 export interface ResendWorkspaceInvitationInput {
+  actor: PlatformActor;
+  tenantId: string;
+  invitationId: string;
+  correlationId: string;
+  expiresAt: Date;
+}
+
+export interface RetryWorkspaceInvitationDeliveryInput {
   actor: PlatformActor;
   tenantId: string;
   invitationId: string;

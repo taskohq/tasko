@@ -96,4 +96,5 @@ export function registerWorkspaceWorker(): void {
   registerOutboxConsumer("work.comment_reaction_added.v1", tko_handleCommentReaction, "job.process");
   registerOutboxConsumer("workspace.invitation.issued.v1", tko_deliverWorkspaceInvitation, "job.process");
   registerOutboxConsumer("workspace.invitation.resent.v1", tko_deliverWorkspaceInvitation, "job.process");
+  registerOutboxConsumer("workspace.invitation.delivery_retried.v1", tko_deliverWorkspaceInvitation, "job.process");
 }

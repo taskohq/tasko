@@ -173,13 +173,18 @@ export const appRouter = router({
   workspaceMembers: router({
     list: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceMembers(ctx.platform.actor)),
     invitations: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceInvitations(ctx.platform.actor)),
-    invitationDelivery: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceInvitationDeliveries(ctx.platform.actor)),
+    invitationDelivery: tenantProcedure
+      .input(z.object({ status: z.enum(["queued", "processing", "sent", "retrying", "failed", "unavailable"]).optional(), dateRange: z.enum(["7d", "30d", "90d", "all"]).default("all") }).optional())
+      .query(({ ctx, input }) => workspaceMembershipService.listWorkspaceInvitationDeliveries(ctx.platform.actor, input)),
     invite: tenantProcedure
       .input(z.object({ email: z.string().trim().email().max(254), role: z.enum(["admin", "member", "guest"]) }))
       .mutation(async ({ ctx, input }) => workspaceMembershipService.createWorkspaceInvitation({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
     resendInvitation: tenantProcedure
       .input(z.object({ invitationId: z.string().uuid() }))
       .mutation(async ({ ctx, input }) => workspaceMembershipService.resendWorkspaceInvitation({ actor: ctx.platform.actor, invitationId: input.invitationId, correlationId: ctx.correlationId })),
+    retryInvitationDelivery: tenantProcedure
+      .input(z.object({ invitationId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => workspaceMembershipService.retryWorkspaceInvitationDelivery({ actor: ctx.platform.actor, invitationId: input.invitationId, correlationId: ctx.correlationId })),
     revokeInvitation: tenantProcedure
       .input(z.object({ invitationId: z.string().uuid() }))
       .mutation(async ({ ctx, input }) => { await workspaceMembershipService.revokeWorkspaceInvitation({ actor: ctx.platform.actor, invitationId: input.invitationId, correlationId: ctx.correlationId }); return { success: true } as const; }),
