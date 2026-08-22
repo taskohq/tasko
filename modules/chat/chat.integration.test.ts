@@ -71,6 +71,7 @@ describe("Collaboration Alpha M2", () => {
     expect(tko_preference.notificationLevel).toBe("none");
     expect(tko_saved.note).toBe("Bring to the weekly review");
     expect(await chat.savedMessages(tko_owner)).toEqual(expect.arrayContaining([expect.objectContaining({ messageId: tko_message.id, memberId: tko_owner.memberId })]));
+    expect(await chat.savedEntries(tko_owner)).toEqual(expect.arrayContaining([expect.objectContaining({ saved: expect.objectContaining({ messageId: tko_message.id }), message: expect.objectContaining({ id: tko_message.id, body: expect.objectContaining({ text: "Follow up with the pilot group." }) }), channel: expect.objectContaining({ id: tko_channel.id }) })]));
     expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["chat.notification.preference_updated", "chat.message.saved"]));
   });
 
@@ -143,5 +144,33 @@ describe("Collaboration Alpha M2", () => {
     expect(tko_firstReply.body.quotedMessageId).toBe(tko_root.id);
     expect(tko_nestedReply.parentMessageId).toBe(tko_root.id);
     await expect(chat.sendMessage(tko_owner, { channelId: tko_otherChannel.id, clientMessageId: "8e7369e1-c247-43a1-a3c3-df361869306e", body: { type: "text", text: "Invalid quote", quotedMessageId: tko_root.id } }, "quote-cross-channel")).rejects.toThrow("CHAT_QUOTED_MESSAGE_NOT_FOUND");
+  });
+
+  it("projects message authors and aggregated emoji reactions for conversation rendering", async () => {
+    const tko_owner = tko_actor();
+    const tko_channel = await chat.seedDemo(tko_owner);
+    const tko_message = await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "cad84aa9-dccf-446a-9a7b-a3e2e5ca2b3b", body: { type: "text", text: "Please acknowledge the rollout decision." } }, "reaction-source");
+
+    await chat.toggleReaction(tko_owner, tko_message.id, "✅", "reaction-add");
+    const tko_projected = (await chat.messages(tko_owner, tko_channel.id)).find(tko_item => tko_item.id === tko_message.id);
+
+    expect(tko_projected?.author).toEqual(expect.objectContaining({ memberId: tko_owner.memberId }));
+    expect(tko_projected?.reactions).toEqual([expect.objectContaining({ emoji: "✅", count: 1, memberIds: [tko_owner.memberId] })]);
+
+    await chat.toggleReaction(tko_owner, tko_message.id, "✅", "reaction-remove");
+    const tko_afterRemoval = (await chat.messages(tko_owner, tko_channel.id)).find(tko_item => tko_item.id === tko_message.id);
+    expect(tko_afterRemoval?.reactions).toEqual([]);
+  });
+
+  it("pins and unpins a channel message separately from Saved/Later", async () => {
+    const tko_owner = tko_actor();
+    const tko_channel = await chat.seedDemo(tko_owner);
+    const tko_message = await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "e31d33ca-8d22-4724-ae34-b8387554e053", body: { type: "text", text: "Pin this launch decision for the channel." } }, "pin-source");
+
+    await expect(chat.togglePin(tko_owner, tko_message.id, "pin-add")).resolves.toEqual({ pinned: true });
+    expect(await chat.pinnedMessages(tko_owner, tko_channel.id)).toEqual([expect.objectContaining({ pin: expect.objectContaining({ messageId: tko_message.id, channelId: tko_channel.id }), message: expect.objectContaining({ id: tko_message.id }) })]);
+    await expect(chat.togglePin(tko_owner, tko_message.id, "pin-remove")).resolves.toEqual({ pinned: false });
+    expect(await chat.pinnedMessages(tko_owner, tko_channel.id)).toEqual([]);
+    expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toContain("chat.message.pin_toggled");
   });
 });

@@ -183,7 +183,7 @@ export default function TaskoShell({ children }: { children: ReactNode }) {
           </div>
           <div className="mt-auto flex flex-col gap-2"><Link href="/settings" aria-label="Settings" className={`grid h-9 w-9 place-items-center transition-colors ${tko_location === "/settings" ? "bg-[#deebff] text-[#0052cc]" : "text-[#5e6c84] hover:bg-[#ebecf0] hover:text-[#172b4d]"}`}><Settings className="h-[17px] w-[17px]" /></Link><span className="grid h-7 w-7 place-items-center self-center rounded-full bg-[#deebff] text-[10px] font-bold text-[#0052cc]">{tko_initial}</span></div>
         </nav>
-        <aside className="sticky top-14 hidden h-[calc(100vh-56px)] w-[220px] shrink-0 border-r border-[#dfe1e6] bg-[#f4f5f7] px-2 py-4 lg:block">
+        <aside className={`sticky top-14 hidden h-[calc(100vh-56px)] w-[220px] shrink-0 border-r border-[#dfe1e6] bg-[#f4f5f7] px-2 py-4 ${tko_module === "chat" ? "lg:hidden" : "lg:block"}`}>
           <p className="px-2 text-[10px] font-bold uppercase tracking-[.11em] text-[#5e6c84]">{tko_context.eyebrow}</p>
           <h2 className="px-2 pt-1 text-[16px] font-semibold tracking-[-.02em] text-[#172b4d]">{tko_context.label}</h2>
           <nav className="mt-3 space-y-0.5" aria-label={`${tko_context.label} navigation`}>

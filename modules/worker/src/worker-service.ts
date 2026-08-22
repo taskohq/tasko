@@ -98,8 +98,9 @@ export function startWorker(): () => void {
       await processOutboxOnce();
     } catch (tko_error) {
       const tko_message = tko_error instanceof Error ? tko_error.message : "worker polling failed";
-      tko_workerStatus = { ...tko_workerStatus, status: "degraded", lastError: tko_message, lastPollAt: new Date() };
-      tko_logger.error({ err: tko_error }, "worker polling failed");
+      const tko_safeMessage = tko_message.replace(/(127\.0\.0\.1|localhost):\d+/g, "platform database");
+      tko_workerStatus = { ...tko_workerStatus, status: "degraded", lastError: tko_safeMessage, lastPollAt: new Date() };
+      tko_logger.error({ errorCode: tko_safeMessage }, "worker polling failed");
     }
   };
   const tko_timer = setInterval(() => void tko_tick(), tko_config.workerPollIntervalMs);

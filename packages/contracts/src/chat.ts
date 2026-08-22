@@ -56,6 +56,8 @@ export interface ChatMessage {
   replyCount: number;
   latestReplyAt: Date | null;
   linkedWorkItemId: string | null;
+  reactions: MessageReactionSummary[];
+  author?: ChatAuthor;
   editedAt: Date | null;
   deletedAt: Date | null;
   createdAt: Date;
@@ -80,11 +82,31 @@ export interface SavedMessage {
   createdAt: Date;
 }
 
+export interface ChatPin {
+  tenantId: string;
+  channelId: string;
+  messageId: string;
+  pinnedByMemberId: string;
+  createdAt: Date;
+}
+
 export interface MessageReaction {
   messageId: string;
   memberId: string;
   emoji: string;
   createdAt: Date;
+}
+
+export interface MessageReactionSummary {
+  emoji: string;
+  count: number;
+  memberIds: string[];
+}
+
+export interface ChatAuthor {
+  memberId: string;
+  displayName: string;
+  role: string;
 }
 
 export interface ChatPresence {

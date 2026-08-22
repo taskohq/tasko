@@ -1,5 +1,5 @@
 import type { PlatformActor } from "../../contracts/src/platform";
-import type { Channel, ChannelNotificationLevel, ChannelReadState, ChatMessage, ChatSearchResult, CreateChannelInput, SaveMessageInput, SavedMessage, SendMessageInput, UpdateChannelInput } from "../../contracts/src/chat";
+import type { Channel, ChannelNotificationLevel, ChannelReadState, ChatMessage, ChatPin, ChatSearchResult, CreateChannelInput, MessageReactionSummary, SaveMessageInput, SavedMessage, SendMessageInput, UpdateChannelInput } from "../../contracts/src/chat";
 import type { ChatStore } from "./chat-store";
 import { Pool, type PoolClient } from "pg";
 
@@ -195,6 +195,25 @@ export class PostgresChatStore implements ChatStore {
     });
   }
 
+  async listPinnedMessages(tko_tenantId: string, tko_channelId: string): Promise<ChatPin[]> {
+    return this.tko_read(tko_tenantId, async tko_client => {
+      const tko_result = await tko_client.query(`select * from pinned_messages where tenant_id=$1 and channel_id=$2 order by created_at desc`, [tko_tenantId, tko_channelId]);
+      return tko_result.rows.map(this.tko_pin);
+    });
+  }
+
+  async togglePin(tko_actor: PlatformActor, tko_messageId: string, tko_correlationId: string): Promise<{ pinned: boolean }> {
+    return this.tko_transaction(tko_actor.tenantId, async tko_client => {
+      const tko_message = await tko_client.query(`select id,channel_id from messages where tenant_id=$1 and id=$2 and deleted_at is null`, [tko_actor.tenantId, tko_messageId]);
+      if (!tko_message.rowCount) throw new Error("CHAT_MESSAGE_NOT_FOUND");
+      const tko_removed = await tko_client.query(`delete from pinned_messages where tenant_id=$1 and message_id=$2 returning message_id`, [tko_actor.tenantId, tko_messageId]);
+      const tko_pinned = !tko_removed.rowCount;
+      if (tko_pinned) await tko_client.query(`insert into pinned_messages (tenant_id,channel_id,message_id,pinned_by_member_id) values ($1,$2,$3,$4)`, [tko_actor.tenantId, tko_message.rows[0].channel_id, tko_messageId, tko_actor.memberId]);
+      await this.tko_emit(tko_client, tko_actor, "chat.message_pin_toggled.v1", "chat.pin", { channelId: String(tko_message.rows[0].channel_id), messageId: tko_messageId, pinned: tko_pinned }, "chat.message.pin_toggled", "message", tko_messageId, tko_correlationId);
+      return { pinned: tko_pinned };
+    });
+  }
+
   async search(tko_tenantId: string, tko_memberId: string, tko_query: string): Promise<ChatSearchResult[]> {
     return this.tko_read(tko_tenantId, async tko_client => {
       const tko_result = await tko_client.query(`select m.*,c.id as channel_ref,c.kind as channel_kind,c.name as channel_name,c.topic as channel_topic,c.visibility as channel_visibility,c.last_sequence as channel_last_sequence,c.created_at as channel_created_at from messages m join channels c on c.id=m.channel_id and c.tenant_id=m.tenant_id left join channel_members cm on cm.channel_id=c.id and cm.member_id=$2 where m.tenant_id=$1 and m.deleted_at is null and (c.kind='public' or cm.member_id=$2) and m.plain_text ilike $3 order by m.created_at desc limit 50`, [tko_tenantId, tko_memberId, `%${tko_query.trim()}%`]);
@@ -231,11 +250,14 @@ export class PostgresChatStore implements ChatStore {
 
   private async tko_message(tko_client: PoolClient, tko_row: Row): Promise<ChatMessage> {
     const tko_attachmentRows = await tko_client.query(`select * from message_attachments where tenant_id=$1 and message_id=$2 order by created_at`, [String(tko_row.tenant_id), String(tko_row.id)]);
-    return { id: String(tko_row.id), tenantId: String(tko_row.tenant_id), channelId: String(tko_row.channel_id), sequence: Number(tko_row.sequence), clientMessageId: String(tko_row.client_message_id), authorMemberId: String(tko_row.author_member_id), body: tko_body(tko_row.body), plainText: String(tko_row.plain_text), attachments: tko_attachmentRows.rows.map((tko_attachment: Row) => ({ id: String(tko_attachment.id), tenantId: String(tko_attachment.tenant_id), objectKey: String(tko_attachment.object_key), filename: String(tko_attachment.filename), contentType: String(tko_attachment.content_type), url: `/manus-storage/${String(tko_attachment.object_key)}` })), parentMessageId: tko_row.parent_message_id ? String(tko_row.parent_message_id) : null, replyCount: Number(tko_row.reply_count ?? 0), latestReplyAt: tko_date(tko_row.latest_reply_at), linkedWorkItemId: tko_row.linked_work_item_id ? String(tko_row.linked_work_item_id) : null, editedAt: tko_date(tko_row.edited_at), deletedAt: tko_date(tko_row.deleted_at), createdAt: new Date(String(tko_row.created_at)) };
+    const tko_reactionRows = await tko_client.query(`select emoji, count(*)::int as reaction_count, array_agg(member_id::text order by member_id) as member_ids from message_reactions where tenant_id=$1 and message_id=$2 group by emoji order by emoji`, [String(tko_row.tenant_id), String(tko_row.id)]);
+    const tko_reactions: MessageReactionSummary[] = tko_reactionRows.rows.map((tko_reaction: Row) => ({ emoji: String(tko_reaction.emoji), count: Number(tko_reaction.reaction_count), memberIds: Array.isArray(tko_reaction.member_ids) ? tko_reaction.member_ids.map(String) : [] }));
+    return { id: String(tko_row.id), tenantId: String(tko_row.tenant_id), channelId: String(tko_row.channel_id), sequence: Number(tko_row.sequence), clientMessageId: String(tko_row.client_message_id), authorMemberId: String(tko_row.author_member_id), body: tko_body(tko_row.body), plainText: String(tko_row.plain_text), attachments: tko_attachmentRows.rows.map((tko_attachment: Row) => ({ id: String(tko_attachment.id), tenantId: String(tko_attachment.tenant_id), objectKey: String(tko_attachment.object_key), filename: String(tko_attachment.filename), contentType: String(tko_attachment.content_type), url: `/manus-storage/${String(tko_attachment.object_key)}` })), parentMessageId: tko_row.parent_message_id ? String(tko_row.parent_message_id) : null, replyCount: Number(tko_row.reply_count ?? 0), latestReplyAt: tko_date(tko_row.latest_reply_at), linkedWorkItemId: tko_row.linked_work_item_id ? String(tko_row.linked_work_item_id) : null, reactions: tko_reactions, editedAt: tko_date(tko_row.edited_at), deletedAt: tko_date(tko_row.deleted_at), createdAt: new Date(String(tko_row.created_at)) };
   }
 
   private tko_readState = (tko_row: Row): ChannelReadState => ({ channelId: String(tko_row.channel_id), memberId: String(tko_row.member_id), lastReadSeq: Number(tko_row.last_read_seq), lastNotifiedSeq: Number(tko_row.last_notified_seq), unreadMentions: Number(tko_row.unread_mentions), notificationLevel: tko_row.notification_level as ChannelNotificationLevel });
   private tko_savedMessage = (tko_row: Row): SavedMessage => ({ tenantId: String(tko_row.tenant_id), messageId: String(tko_row.message_id), memberId: String(tko_row.member_id), status: tko_row.status as SavedMessage["status"], note: tko_row.note ? String(tko_row.note) : null, reminderAt: tko_date(tko_row.reminder_at), createdAt: new Date(String(tko_row.created_at)) });
+  private tko_pin = (tko_row: Row): ChatPin => ({ tenantId: String(tko_row.tenant_id), channelId: String(tko_row.channel_id), messageId: String(tko_row.message_id), pinnedByMemberId: String(tko_row.pinned_by_member_id), createdAt: new Date(String(tko_row.created_at)) });
 
   private async tko_emit(tko_client: PoolClient, tko_actor: PlatformActor, tko_eventType: string, tko_topic: string, tko_payload: Record<string, unknown>, tko_action: string, tko_resourceType: string, tko_resourceId: string, tko_correlationId: string): Promise<void> {
     await tko_client.query(`insert into audit_logs (id,tenant_id,actor_auth_subject,action,resource_type,resource_id,correlation_id,metadata_json) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, [crypto.randomUUID(), tko_actor.tenantId, tko_actor.authSubject, tko_action, tko_resourceType, tko_resourceId, tko_correlationId, JSON.stringify({ source: "collaboration-alpha" })]);
