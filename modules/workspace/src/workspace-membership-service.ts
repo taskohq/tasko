@@ -95,6 +95,14 @@ export async function changeWorkspaceMemberStatus(tko_input: { actor: PlatformAc
   await getPlatformStore().changeTenantMemberStatus({ actor: tko_input.actor, tenantId: tko_input.actor.tenantId, memberId: tko_input.memberId, newStatus: tko_input.newStatus, correlationId: tko_input.correlationId });
 }
 
+/** Soft-deletes a workspace membership so audit trails and historical Chat authors remain recoverable. */
+export async function removeWorkspaceMember(tko_input: { actor: PlatformActor; memberId: string; correlationId: string }): Promise<void> {
+  tko_requireManager(tko_input.actor, tko_input.memberId);
+  const tko_member = await tko_memberById(tko_input.actor, tko_input.memberId);
+  tko_assertRoleChangeAllowed(tko_input.actor, tko_member, tko_member.role);
+  await getPlatformStore().changeTenantMemberStatus({ actor: tko_input.actor, tenantId: tko_input.actor.tenantId, memberId: tko_input.memberId, newStatus: "suspended", correlationId: tko_input.correlationId });
+}
+
 export async function redeemWorkspaceInvitation(tko_input: { authSubject: string; email: string | null; displayName: string; token: string; correlationId: string }) {
   if (!tko_input.email) throw new Error("TASKO_WORKSPACE_INVITATION_EMAIL_REQUIRED");
   return getPlatformStore().redeemWorkspaceInvitation({ ...tko_input, email: tko_input.email.trim().toLowerCase(), displayName: tko_input.displayName.trim() || "Tasko member" });

@@ -16,3 +16,15 @@
 - [x] Viết hoặc cập nhật kiểm thử Vitest cho logic chat được thay đổi.
 - [x] Kiểm tra giao diện desktop và mobile, rà soát log; luồng có xác thực và Postgres sẽ xác minh lại sau khi dữ liệu khả dụng.
 - [x] Bổ sung error states hiển thị cho truy vấn chat chính, gồm nút thử lại khi dữ liệu không tải được.
+- [x] Khảo sát nguồn dữ liệu thành viên toàn hệ thống, thành viên workspace và thành viên channel hiện tại.
+- [x] Chốt quy tắc: chỉ tài khoản còn hoạt động mới có thể được mời và tìm thấy trong danh sách mời Chat.
+- [x] Đồng bộ việc xóa hoặc vô hiệu hóa thành viên hệ thống với khả năng tìm kiếm, mời và hiện diện trong Chat.
+- [x] Hiển thị người từng tham gia Chat nhưng không còn hoạt động dưới dạng `Tên user (inactive account)` trong lịch sử và thread.
+- [x] Bổ sung giao diện mời thành viên vào channel, có tìm kiếm từ danh sách thành viên toàn hệ thống và các trạng thái quyền rõ ràng.
+- [x] Viết kiểm thử Vitest cho mời thành viên, lọc tài khoản không hoạt động và hiển thị lịch sử chat.
+- [x] Kiểm tra trực quan Chat và xác nhận luồng mời qua kiểm thử tích hợp, sau đó lưu checkpoint bàn giao.
+- [x] Loại tài khoản inactive khỏi autocomplete `@mention`, presence và các picker có thể tương tác trong Chat.
+- [x] Xác minh trực quan luồng mời bằng một phiên đăng nhập có quyền quản lý channel trước khi tạo checkpoint mới.
+- [x] Chuẩn hóa xóa thành viên khỏi workspace là xóa mềm (`suspended`), giữ tên cho lịch sử Chat dưới dạng `Tên user (inactive account)`.
+- [x] Kiểm thử hồi quy cho việc xóa mềm thành viên hệ thống: không còn invite/search/presence nhưng lịch sử chat vẫn định danh được tác giả inactive.
+- [x] Thêm thao tác xóa mềm thành viên workspace rõ ràng, có kiểm soát quyền, để làm nguồn sự kiện đồng bộ cho Chat.

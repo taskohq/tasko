@@ -39,6 +39,7 @@ export interface ChannelMemberCandidate {
   id: string;
   displayName: string;
   role: string;
+  isActive: boolean;
   isInChannel: boolean;
 }
 
@@ -107,6 +108,7 @@ export interface ChatAuthor {
   memberId: string;
   displayName: string;
   role: string;
+  isActive: boolean;
 }
 
 export interface ChatPresence {

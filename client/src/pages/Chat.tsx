@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
+import { ChatMemberInvite } from "@/components/ChatMemberInvite";
 import { tko_readCursorAttemptKey, tko_shouldSyncReadCursor } from "@/lib/chat-read-state";
 import { trpc } from "@/lib/trpc";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -138,7 +139,8 @@ export default function Chat() {
   const tko_quotedMessage = tko_liveMessages.find(tko_message => tko_message.id === tko_quotedMessageId) ?? null;
   const tko_lastSequence = tko_liveMessages[tko_liveMessages.length - 1]?.sequence ?? 0;
   const tko_readState = tko_readStates.data?.find(tko_state => tko_state.channelId === tko_channelId);
-  const tko_onlineMemberIds = new Set((tko_presence.data ?? []).filter(tko_member => tko_member.status === "online").map(tko_member => tko_member.memberId));
+  const tko_activeChannelMemberIds = new Set((tko_channelMembers.data ?? []).filter(tko_member => tko_member.isActive).map(tko_member => tko_member.id));
+  const tko_onlineMemberIds = new Set((tko_presence.data ?? []).filter(tko_member => tko_member.status === "online" && tko_activeChannelMemberIds.has(tko_member.memberId)).map(tko_member => tko_member.memberId));
   const tko_onlineCount = tko_onlineMemberIds.size;
   const tko_savedIds = new Set((tko_saved.data ?? []).map(tko_item => tko_item.message.id));
   const tko_pinnedIds = new Set((tko_pins.data ?? []).map(tko_item => tko_item.message.id));
@@ -150,7 +152,7 @@ export default function Chat() {
   const tko_directList = (tko_channels.data ?? []).filter(tko_channel => tko_channel.kind === "dm" || tko_channel.kind === "group_dm");
   const tko_mentionMatch = /(^|\s)@([A-Za-z0-9_-]*)$/.exec(tko_draft);
   const tko_mentionSearch = tko_mentionMatch?.[2].toLocaleLowerCase() ?? "";
-  const tko_mentionChoices = (tko_channelMembers.data ?? []).filter(tko_member => tko_member.id !== tko_tenant.data?.memberId && tko_member.displayName.toLocaleLowerCase().includes(tko_mentionSearch));
+  const tko_mentionChoices = (tko_channelMembers.data ?? []).filter(tko_member => tko_member.isActive && tko_member.id !== tko_tenant.data?.memberId && tko_member.displayName.toLocaleLowerCase().includes(tko_mentionSearch));
   const tko_hasQueryError = Boolean(tko_channels.error || tko_messages.error || tko_channelMembers.error || tko_readStates.error || tko_saved.error || tko_mentions.error || tko_pins.error);
 
   const tko_refreshConversation = async () => {
@@ -284,7 +286,7 @@ export default function Chat() {
   const tko_submit = () => {
     if (!tko_channelId || (!tko_draft.trim() && !tko_attachments.length) || tko_send.isPending) return;
     const tko_broadcastMention = /(^|\s)@channel\b/i.test(tko_draft) ? "channel" : /(^|\s)@here\b/i.test(tko_draft) ? "here" : undefined;
-    const tko_explicitMentions = (tko_channelMembers.data ?? []).filter(tko_member => tko_selectedMentionIds.includes(tko_member.id) && new RegExp(`@${tko_member.displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(tko_draft)).map(tko_member => tko_member.id);
+    const tko_explicitMentions = (tko_channelMembers.data ?? []).filter(tko_member => tko_member.isActive && tko_selectedMentionIds.includes(tko_member.id) && new RegExp(`@${tko_member.displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(tko_draft)).map(tko_member => tko_member.id);
     tko_send.mutate({
       channelId: tko_channelId,
       clientMessageId: crypto.randomUUID(),
@@ -341,6 +343,7 @@ export default function Chat() {
     <div className="h-[calc(100vh-56px)] min-h-[640px] overflow-hidden bg-white text-[#1d1c1d]">
       <div className="flex h-full min-w-0">
         {tko_sidebar}
+        <ChatMemberInvite channelId={tko_view === "channel" ? tko_channelId : null} channelKind={tko_activeChannel?.kind} channelName={tko_activeChannel?.name ?? null} />
         {tko_sidebarOpen ? <button className="fixed inset-0 z-20 bg-[#1d1c1d]/30 lg:hidden" onClick={() => tko_setSidebarOpen(false)} aria-label="Đóng lớp phủ danh sách hội thoại" /> : null}
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           <header className="relative z-10 flex min-h-[68px] shrink-0 items-center gap-3 border-b border-[#e6e4eb] bg-white px-4 sm:px-6">

@@ -5,6 +5,7 @@ import { getChatStore, MemoryChatStore, setChatStoreForTests } from "../../packa
 import { createInMemoryRedisAdapter, getRedisAdapter, setRedisAdapterForTests } from "../../packages/redis/src/redis-adapter";
 import { registerOutboxConsumer, processOutboxOnce } from "../worker/src/worker-service";
 import * as chat from "./src/chat-service";
+import * as workspaceMembership from "../workspace/src/workspace-membership-service";
 
 function tko_actor(tko_overrides: Partial<PlatformActor> = {}): PlatformActor {
   return { authSubject: "chat-owner", tenantId: "tko-tenant-tasko-demo", tenantSlug: "tasko-demo", memberId: "tko-member-demo-owner", role: "owner", membershipStatus: "active", correlationId: "chat-test", ...tko_overrides };
@@ -131,6 +132,22 @@ describe("Collaboration Alpha M2", () => {
     await chat.archiveChannel(tko_owner, tko_private.id, "channel-archive");
     expect((await chat.listChannels(tko_owner)).map(tko_channel => tko_channel.id)).not.toContain(tko_private.id);
     expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["chat.channel.updated", "chat.channel.archived"]));
+  });
+
+  it("sources channel invites from active workspace members while retaining suspended authors as inactive history", async () => {
+    const tko_owner = tko_actor({ memberId: "tko-member-tasko-demo-owner" });
+    const tko_workspaceMember = (await tko_platform.listTenantMembers(tko_owner.tenantId)).find(tko_member => tko_member.displayName === "Demo Member");
+    expect(tko_workspaceMember).toBeDefined();
+    const tko_private = await chat.createChannel(tko_owner, { kind: "private", name: "member-sync", visibility: "private", memberIds: [tko_workspaceMember!.id] });
+    await getChatStore().sendMessage(tko_owner, { tenantId: tko_owner.tenantId, channelId: tko_private.id, authorMemberId: tko_workspaceMember!.id, clientMessageId: "c21028cd-ae83-48e2-8940-d5137ca4aa62", body: { type: "text", text: "I will retain this decision in the channel history." }, attachments: [] }, "inactive-author-source");
+
+    expect((await chat.channelMemberCandidates(tko_owner, tko_private.id)).find(tko_candidate => tko_candidate.id === tko_workspaceMember!.id)).toEqual(expect.objectContaining({ isActive: true, isInChannel: true }));
+    await workspaceMembership.removeWorkspaceMember({ actor: tko_owner, memberId: tko_workspaceMember!.id, correlationId: "remove-chat-member" });
+
+    expect((await chat.channelMemberCandidates(tko_owner, tko_private.id)).map(tko_candidate => tko_candidate.id)).not.toContain(tko_workspaceMember!.id);
+    await expect(chat.addChannelMembers(tko_owner, tko_private.id, [tko_workspaceMember!.id], "invite-inactive-member")).rejects.toThrow("CHAT_CHANNEL_MEMBER_NOT_FOUND");
+    expect(await chat.channelMembers(tko_owner, tko_private.id)).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_workspaceMember!.id, displayName: "Demo Member (inactive account)", isActive: false })]));
+    expect((await chat.messages(tko_owner, tko_private.id)).find(tko_message => tko_message.authorMemberId === tko_workspaceMember!.id)?.author).toEqual(expect.objectContaining({ displayName: "Demo Member (inactive account)", isActive: false }));
   });
 
   it("keeps quote references in-channel and normalizes nested replies onto a single Slack-style thread root", async () => {

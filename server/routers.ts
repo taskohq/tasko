@@ -194,6 +194,9 @@ export const appRouter = router({
     changeStatus: tenantProcedure
       .input(z.object({ memberId: z.string().uuid(), newStatus: z.enum(["active", "suspended"]) }))
       .mutation(async ({ ctx, input }) => { await workspaceMembershipService.changeWorkspaceMemberStatus({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId }); return { success: true } as const; }),
+    remove: tenantProcedure
+      .input(z.object({ memberId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => { await workspaceMembershipService.removeWorkspaceMember({ actor: ctx.platform.actor, memberId: input.memberId, correlationId: ctx.correlationId }); return { success: true } as const; }),
     redeemInvitation: protectedProcedure
       .input(z.object({ token: z.string().min(32).max(512) }))
       .mutation(async ({ ctx, input }) => workspaceMembershipService.redeemWorkspaceInvitation({ authSubject: ctx.user.openId, email: ctx.user.email ?? null, displayName: ctx.user.name ?? "Tasko member", token: input.token, correlationId: ctx.correlationId })),
