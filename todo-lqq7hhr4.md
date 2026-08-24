@@ -28,3 +28,9 @@
 - [x] Chuẩn hóa xóa thành viên khỏi workspace là xóa mềm (`suspended`), giữ tên cho lịch sử Chat dưới dạng `Tên user (inactive account)`.
 - [x] Kiểm thử hồi quy cho việc xóa mềm thành viên hệ thống: không còn invite/search/presence nhưng lịch sử chat vẫn định danh được tác giả inactive.
 - [x] Thêm thao tác xóa mềm thành viên workspace rõ ràng, có kiểm soát quyền, để làm nguồn sự kiện đồng bộ cho Chat.
+- [x] Tái hiện và xác định nguyên nhân không thể tạo channel mới từ giao diện Chat: role member thiếu capability tạo channel.
+- [x] Sửa luồng tạo channel: tách capability tạo channel cho member active, giữ quyền quản trị channel bảo vệ và bootstrap workspace trống.
+- [x] Bổ sung kiểm thử hồi quy cho tạo channel đầu tiên khi workspace chưa có channel nào.
+- [x] Ghi nhận giới hạn UI E2E: sandbox browser không có phiên OAuth; mutation tạo channel được xác minh bằng integration test thay vì khẳng định kiểm tra form đã xác thực.
+- [x] Tự kích hoạt phiên đăng nhập hiện có trong trình duyệt; xác nhận sandbox browser không có OAuth khả dụng và tiếp tục xác minh bằng integration test.
+- [x] Xác minh lại lỗi CRM handoff do service account thiếu capability mới; đã khôi phục quyền và kiểm thử toàn suite đạt.

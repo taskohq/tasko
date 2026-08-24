@@ -22,6 +22,19 @@ describe("Collaboration Alpha M2", () => {
   });
   afterEach(() => { setPlatformStoreForTests(null); setChatStoreForTests(null); setRedisAdapterForTests(null); });
 
+  it("lets an active member create the first channel in an empty workspace", async () => {
+    const tko_owner = tko_actor({ memberId: "tko-member-tasko-demo-owner" });
+    const tko_membership = (await tko_platform.listTenantMembers(tko_owner.tenantId)).find(tko_member => tko_member.role === "member");
+    expect(tko_membership).toBeDefined();
+    const tko_member = tko_actor({ authSubject: tko_membership!.authSubject, memberId: tko_membership!.id, role: "member" });
+
+    expect(await chat.listChannels(tko_member)).toEqual([]);
+    const tko_created = await chat.createChannel(tko_member, { kind: "public", name: "first-team-room", topic: "The first channel", memberIds: [] });
+
+    expect(tko_created.memberIds).toContain(tko_member.memberId);
+    expect((await chat.listChannels(tko_member)).map(tko_channel => tko_channel.id)).toEqual([tko_created.id]);
+  });
+
   it("makes send idempotent and emits a durable tenant-scoped event", async () => {
     const tko_owner = tko_actor();
     const tko_channel = await chat.seedDemo(tko_owner);
@@ -132,6 +145,19 @@ describe("Collaboration Alpha M2", () => {
     await chat.archiveChannel(tko_owner, tko_private.id, "channel-archive");
     expect((await chat.listChannels(tko_owner)).map(tko_channel => tko_channel.id)).not.toContain(tko_private.id);
     expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["chat.channel.updated", "chat.channel.archived"]));
+  });
+
+  it("allows an active member to create a channel without granting channel management", async () => {
+    const tko_owner = tko_actor({ memberId: "tko-member-tasko-demo-owner" });
+    const tko_membership = (await tko_platform.listTenantMembers(tko_owner.tenantId)).find(tko_member => tko_member.role === "member");
+    expect(tko_membership).toBeDefined();
+    const tko_member = tko_actor({ authSubject: tko_membership!.authSubject, memberId: tko_membership!.id, role: "member" });
+
+    const tko_channel = await chat.createChannel(tko_member, { kind: "public", name: "member-created", topic: "Created by a team member", memberIds: [] });
+
+    expect(tko_channel.name).toBe("member-created");
+    expect(tko_channel.memberIds).toContain(tko_member.memberId);
+    await expect(chat.updateChannel(tko_member, tko_channel.id, { topic: "This must stay protected" }, "member-manage-denied")).rejects.toThrow("AUTHORIZATION_DENIED");
   });
 
   it("sources channel invites from active workspace members while retaining suspended authors as inactive history", async () => {

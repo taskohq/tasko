@@ -32,6 +32,7 @@ export type Capability =
   | "work.sprint.manage"
   | "work.view.manage"
   | "work.custom_field.manage"
+  | "chat.channel.create"
   | "chat.channel.read"
   | "chat.channel.manage"
   | "chat.message.read"
