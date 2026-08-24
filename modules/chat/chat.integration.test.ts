@@ -171,6 +171,17 @@ describe("Collaboration Alpha M2", () => {
     expect((await chat.messages(tko_owner, tko_channel.id)).find(tko_item => tko_item.id === tko_message.id)?.attachments).toEqual([expect.objectContaining({ filename: "handoff.txt", objectKey: expect.stringContaining("attachments/") })]);
   });
 
+  it("returns chronological messages with timestamps for client-side day grouping", async () => {
+    const tko_owner = tko_actor();
+    const tko_channel = await chat.seedDemo(tko_owner);
+    await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "b7d3c19b-a530-4e4b-9dc8-119d6cb10001", body: { type: "text", text: "Earlier timeline message" } }, "timeline-first");
+    await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "b7d3c19b-a530-4e4b-9dc8-119d6cb10002", body: { type: "text", text: "Later timeline message" } }, "timeline-second");
+
+    const tko_messages = await chat.messages(tko_owner, tko_channel.id);
+    expect(tko_messages.map(tko_message => tko_message.sequence)).toEqual([...tko_messages.map(tko_message => tko_message.sequence)].sort((tko_left, tko_right) => tko_left - tko_right));
+    expect(tko_messages.every(tko_message => tko_message.createdAt instanceof Date && !Number.isNaN(tko_message.createdAt.getTime()))).toBe(true);
+  });
+
   it("manages named channel lifecycle durably and rejects unauthorized or foreign membership changes", async () => {
     const tko_owner = tko_actor({ memberId: "tko-member-tasko-demo-owner" });
     const tko_private = await chat.createChannel(tko_owner, { kind: "private", name: "launch-room", topic: "Launch planning", visibility: "private", memberIds: [] });

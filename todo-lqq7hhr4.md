@@ -43,3 +43,9 @@
 - [x] Kiểm tra giao diện desktop/mobile, sau đó lưu checkpoint bàn giao.
 - [x] Cập nhật hồi quy Workspace dùng thành viên workspace active khi tạo channel riêng tư.
 - [x] Xác minh và ổn định lại kiểm thử CRM handoff sau khi thay đổi policy tạo channel.
+- [x] Khảo sát luồng lưu trữ tệp, hợp đồng message, reaction và renderer Chat hiện có.
+- [x] Bổ sung chọn, upload và hiển thị tệp đính kèm hoặc hình ảnh trong composer và từng tin nhắn.
+- [x] Hoàn thiện reaction emoji trên từng tin nhắn, gồm chọn, bỏ chọn và số lượng người phản ứng.
+- [x] Thêm phân cách ngày, nhóm tin nhắn liền nhau và thời gian gửi chi tiết theo ngữ cảnh.
+- [x] Viết kiểm thử cho đính kèm, reaction và cách sắp xếp dữ liệu hiển thị theo thời gian.
+- [x] Kiểm tra giao diện desktop/mobile, sau đó lưu checkpoint bàn giao.

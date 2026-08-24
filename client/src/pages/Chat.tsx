@@ -2,6 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 import { ChatMemberInvite } from "@/components/ChatMemberInvite";
 import { ChatCreateChannelDialog } from "@/components/ChatCreateChannelDialog";
+import { TkoMessageRow } from "@/components/TkoMessageRow";
 import { tko_readCursorAttemptKey, tko_shouldSyncReadCursor } from "@/lib/chat-read-state";
 import { trpc } from "@/lib/trpc";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -49,6 +50,19 @@ function tko_time(tko_value: Date | string) {
 
 function tko_day(tko_value: Date | string) {
   return new Intl.DateTimeFormat("vi", { weekday: "long", day: "2-digit", month: "long" }).format(new Date(tko_value));
+}
+
+function tko_dayKey(tko_value: Date | string) {
+  const tko_date = new Date(tko_value);
+  return `${tko_date.getFullYear()}-${tko_date.getMonth()}-${tko_date.getDate()}`;
+}
+
+function tko_fullTime(tko_value: Date | string) {
+  return new Intl.DateTimeFormat("vi", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(tko_value));
+}
+
+function tko_isImage(tko_contentType: string) {
+  return tko_contentType.startsWith("image/");
 }
 
 function tko_initials(tko_name: string) {
@@ -370,7 +384,7 @@ function TkoChannelRow({ channel, active, readState, onClick }: { channel: { id:
   return <button onClick={onClick} className={`flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] transition ${active ? "bg-[#e9e3f5] font-semibold text-[#4a154b]" : tko_unread ? "font-semibold text-[#1d1c1d] hover:bg-[#efedf0]" : "text-[#4f4b4f] hover:bg-[#efedf0]"}`}><span className="text-[#777477]">{tko_private ? <LockKeyhole className="h-3.5 w-3.5" /> : <Hash className="h-4 w-4" />}</span><span className="min-w-0 flex-1 truncate">{channel.name ?? "Tin nhắn trực tiếp"}</span>{readState?.unreadMentions ? <AtSign className="h-3.5 w-3.5 text-[#d72c0d]" /> : tko_unread ? <span className="h-2 w-2 rounded-full bg-[#611f69]" /> : null}</button>;
 }
 
-function TkoMessageRow({ message, previous, currentMemberId, saved, pinned, menuOpen, editing, editDraft, onEditDraft, onToggleMenu, onReact, onOpenThread, onReply, onSave, onPin, onQuote, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onOpenAttachment }: { message: any; previous: any; currentMemberId: string | undefined; saved: boolean; pinned: boolean; menuOpen: boolean; editing: boolean; editDraft: string; onEditDraft: (value: string) => void; onToggleMenu: () => void; onReact: (emoji: string) => void; onOpenThread: () => void; onReply: () => void; onSave: () => void; onPin: () => void; onQuote: () => void; onStartEdit: () => void; onCancelEdit: () => void; onSaveEdit: () => void; onDelete: () => void; onOpenAttachment: (attachment: any) => void }) {
+function TkoLegacyMessageRow({ message, previous, currentMemberId, saved, pinned, menuOpen, editing, editDraft, onEditDraft, onToggleMenu, onReact, onOpenThread, onReply, onSave, onPin, onQuote, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onOpenAttachment }: { message: any; previous: any; currentMemberId: string | undefined; saved: boolean; pinned: boolean; menuOpen: boolean; editing: boolean; editDraft: string; onEditDraft: (value: string) => void; onToggleMenu: () => void; onReact: (emoji: string) => void; onOpenThread: () => void; onReply: () => void; onSave: () => void; onPin: () => void; onQuote: () => void; onStartEdit: () => void; onCancelEdit: () => void; onSaveEdit: () => void; onDelete: () => void; onOpenAttachment: (attachment: any) => void }) {
   const tko_sameAuthor = previous?.authorMemberId === message.authorMemberId && Math.abs(new Date(message.createdAt).getTime() - new Date(previous?.createdAt ?? 0).getTime()) < 5 * 60_000;
   const tko_authorName = message.author?.displayName ?? `Thành viên ${message.authorMemberId.slice(0, 5)}`;
   const tko_quote = message.body.quotedMessageId;
