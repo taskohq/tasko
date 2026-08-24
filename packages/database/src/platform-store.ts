@@ -15,6 +15,8 @@ import type {
   Tenant,
   TenantMembership,
   TenantRole,
+  TenantSettings,
+  UpdateTenantSettingsInput,
   WorkspaceInvitation,
   WorkspaceInvitationDelivery,
   WorkspaceInvitationDeliveryFilters,
@@ -48,6 +50,8 @@ export interface PlatformStore {
   provisionTenant(tko_input: TenantProvisionInput): Promise<{ tenant: Tenant; created: boolean }>;
   setTenantLifecycle(tko_input: { actor: { authSubject: string }; tenantId: string; status: Tenant["status"]; correlationId: string }): Promise<Tenant>;
   listTenants(): Promise<Tenant[]>;
+  getTenantSettings(tko_tenantId: string): Promise<TenantSettings>;
+  updateTenantSettings(tko_input: UpdateTenantSettingsInput): Promise<TenantSettings>;
   changeTenantMemberRole(tko_input: ChangeTenantMemberRoleInput): Promise<void>;
   changeTenantMemberStatus(tko_input: ChangeTenantMemberStatusInput): Promise<void>;
   listWorkspaceInvitations(tko_tenantId: string): Promise<WorkspaceInvitation[]>;
@@ -65,6 +69,15 @@ export interface PlatformStore {
   listAuditLogs(): Promise<AuditLogRecord[]>;
 }
 
+const tko_channelCreationRoles = new Set<TenantSettings["chatChannelCreationRoles"][number]>(["owner", "admin", "member"]);
+function tko_defaultTenantSettings(): TenantSettings { return { chatChannelCreationRoles: ["owner", "admin", "member"] }; }
+function tko_normalizeTenantSettings(tko_value: unknown): TenantSettings {
+  const tko_candidate = tko_value && typeof tko_value === "object" && !Array.isArray(tko_value) ? tko_value as Record<string, unknown> : {};
+  const tko_roles = Array.isArray(tko_candidate.chatChannelCreationRoles) ? tko_candidate.chatChannelCreationRoles.filter((tko_role): tko_role is TenantSettings["chatChannelCreationRoles"][number] => typeof tko_role === "string" && tko_channelCreationRoles.has(tko_role as TenantSettings["chatChannelCreationRoles"][number])) : tko_defaultTenantSettings().chatChannelCreationRoles;
+  return { chatChannelCreationRoles: Array.from(new Set<TenantSettings["chatChannelCreationRoles"][number]>(["owner", ...tko_roles])) };
+}
+function tko_cloneTenantSettings(tko_settings: TenantSettings): TenantSettings { return { chatChannelCreationRoles: [...tko_settings.chatChannelCreationRoles] }; }
+
 function createTenant(tko_input: SeedWorkspaceInput): Tenant {
   const tko_slug = tko_input.tenantSlug ?? "tasko-demo";
   return {
@@ -73,6 +86,7 @@ function createTenant(tko_input: SeedWorkspaceInput): Tenant {
     name: tko_input.tenantName ?? "Tasko Demo Workspace",
     status: "active",
     deploymentProfile: tko_config.deploymentProfile,
+    settings: tko_defaultTenantSettings(),
     createdAt: new Date(),
   };
 }
@@ -130,6 +144,7 @@ function tko_mapTenant(tko_row: Record<string, unknown>): Tenant {
     id: String(tko_row.id), slug: String(tko_row.slug), name: String(tko_row.name),
     status: String(tko_row.status) as Tenant["status"],
     deploymentProfile: String(tko_row.deployment_profile) as Tenant["deploymentProfile"],
+    settings: tko_normalizeTenantSettings(tko_row.settings_json),
     createdAt: new Date(String(tko_row.created_at)),
   };
 }
@@ -189,6 +204,7 @@ export class MemoryPlatformStore implements PlatformStore {
   private readonly tko_outbox = new Map<string, OutboxRecord>();
   private readonly tko_auditLogs: AuditLogRecord[] = [];
   private readonly tko_workspaceInvitations = new Map<string, TkoStoredWorkspaceInvitation>();
+  private readonly tko_tenantSettings = new Map<string, TenantSettings>();
 
   async health(): Promise<PlatformStoreHealth> {
     return { name: "database", status: "ok", detail: "in-memory development adapter" };
@@ -232,6 +248,7 @@ export class MemoryPlatformStore implements PlatformStore {
   async seedDemoWorkspace(tko_input: SeedWorkspaceInput): Promise<Tenant> {
     const tko_tenant = createTenant(tko_input);
     this.tko_tenants.set(tko_tenant.id, tko_tenant);
+    if (!this.tko_tenantSettings.has(tko_tenant.id)) this.tko_tenantSettings.set(tko_tenant.id, tko_cloneTenantSettings(tko_tenant.settings));
     const tko_seedMembers: Array<Pick<TenantMembership, "authSubject" | "role" | "displayName">> = [
       { authSubject: tko_input.ownerAuthSubject, role: "owner", displayName: "Demo Owner" },
       { authSubject: `demo-admin:${tko_tenant.slug}`, role: "admin", displayName: "Demo Admin" },
@@ -286,7 +303,24 @@ export class MemoryPlatformStore implements PlatformStore {
     return { ...tko_next };
   }
 
-  async listTenants(): Promise<Tenant[]> { return Array.from(this.tko_tenants.values()).map(tko_tenant => ({ ...tko_tenant })); }
+  async listTenants(): Promise<Tenant[]> { return Array.from(this.tko_tenants.values()).map(tko_tenant => ({ ...tko_tenant, settings: tko_cloneTenantSettings(tko_tenant.settings) })); }
+
+  async getTenantSettings(tko_tenantId: string): Promise<TenantSettings> {
+    if (!this.tko_tenants.has(tko_tenantId)) throw new Error("TASKO_TENANT_NOT_FOUND");
+    return tko_cloneTenantSettings(this.tko_tenantSettings.get(tko_tenantId) ?? tko_defaultTenantSettings());
+  }
+
+  async updateTenantSettings(tko_input: UpdateTenantSettingsInput): Promise<TenantSettings> {
+    const tko_tenant = this.tko_tenants.get(tko_input.tenantId);
+    if (!tko_tenant) throw new Error("TASKO_TENANT_NOT_FOUND");
+    const tko_settings = tko_normalizeTenantSettings(tko_input.settings);
+    this.tko_tenantSettings.set(tko_input.tenantId, tko_settings);
+    const tko_updatedTenant = { ...tko_tenant, settings: tko_cloneTenantSettings(tko_settings) };
+    this.tko_tenants.set(tko_updatedTenant.id, tko_updatedTenant);
+    for (const tko_memberships of Array.from(this.tko_memberships.values())) for (const tko_membership of tko_memberships) if (tko_membership.tenant.id === tko_updatedTenant.id) tko_membership.tenant = tko_updatedTenant;
+    await this.writeDurableMutation({ actor: tko_input.actor, tenantId: tko_input.tenantId, eventType: "tenant.settings.updated.v1", topic: "tenant.settings", payload: { chatChannelCreationRoles: tko_settings.chatChannelCreationRoles }, auditAction: "tenant.settings.updated", resourceType: "tenant", resourceId: tko_input.tenantId, correlationId: tko_input.correlationId });
+    return tko_cloneTenantSettings(tko_settings);
+  }
 
   async changeTenantMemberRole(tko_input: ChangeTenantMemberRoleInput): Promise<void> {
     for (const [tko_authSubject, tko_memberships] of Array.from(this.tko_memberships.entries())) {
@@ -541,7 +575,27 @@ export class PostgresPlatformStore implements PlatformStore {
     } catch (tko_error) { await tko_client.query("ROLLBACK"); throw tko_error; } finally { tko_client.release(); }
   }
 
-  async listTenants(): Promise<Tenant[]> { return (await this.tko_pool.query("select id,slug,name,status,deployment_profile,created_at from tenants order by created_at asc")).rows.map(tko_mapTenant); }
+  async listTenants(): Promise<Tenant[]> { return (await this.tko_pool.query("select id,slug,name,status,deployment_profile,settings_json,created_at from tenants order by created_at asc")).rows.map(tko_mapTenant); }
+
+  async getTenantSettings(tko_tenantId: string): Promise<TenantSettings> {
+    const tko_result = await this.tko_pool.query("select settings_json from tenants where id=$1", [tko_tenantId]);
+    if (!tko_result.rowCount) throw new Error("TASKO_TENANT_NOT_FOUND");
+    return tko_normalizeTenantSettings(tko_result.rows[0].settings_json);
+  }
+
+  async updateTenantSettings(tko_input: UpdateTenantSettingsInput): Promise<TenantSettings> {
+    const tko_settings = tko_normalizeTenantSettings(tko_input.settings);
+    const tko_client = await this.tko_pool.connect();
+    try {
+      await tko_client.query("BEGIN");
+      const tko_updated = await tko_client.query("update tenants set settings_json=$1::jsonb where id=$2 returning id", [JSON.stringify(tko_settings), tko_input.tenantId]);
+      if (!tko_updated.rowCount) throw new Error("TASKO_TENANT_NOT_FOUND");
+      await tko_client.query(`insert into audit_logs(id,tenant_id,actor_auth_subject,action,resource_type,resource_id,correlation_id,metadata_json) values(gen_random_uuid(),$1,$2,'tenant.settings.updated','tenant',$1,$3,$4::jsonb)`, [tko_input.tenantId, tko_input.actor.authSubject, tko_input.correlationId, JSON.stringify({ chatChannelCreationRoles: tko_settings.chatChannelCreationRoles })]);
+      await tko_client.query(`insert into outbox(id,event_id,tenant_id,topic,event_type,payload_json,actor_auth_subject,correlation_id,status,attempts,available_at) values(gen_random_uuid(),gen_random_uuid(),$1,'tenant.settings','tenant.settings.updated.v1',$2::jsonb,$3,$4,'pending',0,now())`, [tko_input.tenantId, JSON.stringify({ chatChannelCreationRoles: tko_settings.chatChannelCreationRoles }), tko_input.actor.authSubject, tko_input.correlationId]);
+      await tko_client.query("COMMIT");
+      return tko_cloneTenantSettings(tko_settings);
+    } catch (tko_error) { await tko_client.query("ROLLBACK"); throw tko_error; } finally { tko_client.release(); }
+  }
 
   async health(): Promise<PlatformStoreHealth> {
     try {
@@ -560,7 +614,7 @@ export class PostgresPlatformStore implements PlatformStore {
     const tko_result = await this.tko_pool.query(
       `select tm.id as member_id, tm.role, tm.status as membership_status, tm.display_name,
               u.auth_subject, t.id as tenant_id, t.slug, t.name, t.status as tenant_status,
-              t.deployment_profile, t.created_at
+              t.deployment_profile, t.settings_json, t.created_at
          from tenant_members tm
          join users u on u.id = tm.user_id
          join tenants t on t.id = tm.tenant_id
@@ -575,7 +629,7 @@ export class PostgresPlatformStore implements PlatformStore {
     const tko_result = await this.tko_pool.query(
       `select tm.id as member_id, tm.role, tm.status as membership_status, tm.display_name,
               u.auth_subject, t.id as tenant_id, t.slug, t.name, t.status as tenant_status,
-              t.deployment_profile, t.created_at
+              t.deployment_profile, t.settings_json, t.created_at
          from tenant_members tm
          join users u on u.id = tm.user_id
          join tenants t on t.id = tm.tenant_id
@@ -641,6 +695,7 @@ export class PostgresPlatformStore implements PlatformStore {
         name: tko_tenant.name,
         status: tko_tenant.status,
         deploymentProfile: tko_tenant.deployment_profile,
+        settings: tko_defaultTenantSettings(),
         createdAt: new Date(tko_tenant.created_at),
       };
     } catch (tko_error) {
@@ -1039,6 +1094,7 @@ export class PostgresPlatformStore implements PlatformStore {
         name: String(tko_row.name),
         status: String(tko_row.tenant_status) as Tenant["status"],
         deploymentProfile: String(tko_row.deployment_profile) as Tenant["deploymentProfile"],
+        settings: tko_normalizeTenantSettings(tko_row.settings_json),
         createdAt: new Date(String(tko_row.created_at)),
       },
     };

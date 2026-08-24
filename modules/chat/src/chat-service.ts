@@ -1,10 +1,21 @@
 import type { PlatformActor } from "../../../packages/contracts/src/platform";
 import type { ChannelNotificationLevel, ChatAttachmentUpload, ChatAuthor, ChatMessage, CreateChannelInput, SaveMessageInput, SendMessageInput, UpdateChannelInput } from "../../../packages/contracts/src/chat";
+import type { ChatChannelCreationRole } from "../../../packages/contracts/src/platform";
 import { getChatStore } from "../../../packages/database/src/chat-store";
 import { getPlatformStore } from "../../../packages/database/src/platform-store";
 import { getRedisAdapter } from "../../../packages/redis/src/redis-adapter";
 import { getTenantAttachmentDownloadUrl, uploadTenantAttachment } from "../../attachments/src/attachment-storage";
 import { requireCapability } from "../../permissions/src/authorization";
+
+const tko_channelCreationRoles = new Set<ChatChannelCreationRole>(["owner", "admin", "member"]);
+const tko_channelCreationResource = (tko_actor: PlatformActor) => ({ tenantId: tko_actor.tenantId, type: "tenant", id: tko_actor.tenantId, visibility: "internal" as const });
+
+async function tko_requireCanCreateChannel(tko_actor: PlatformActor) {
+  requireCapability(tko_actor, "chat.channel.create", { tenantId: tko_actor.tenantId, type: "channel", id: "new", visibility: "internal" });
+  const tko_settings = await getPlatformStore().getTenantSettings(tko_actor.tenantId);
+  if (tko_actor.role !== "service_account" && (!tko_channelCreationRoles.has(tko_actor.role as ChatChannelCreationRole) || !tko_settings.chatChannelCreationRoles.includes(tko_actor.role as ChatChannelCreationRole))) throw new Error("CHAT_CHANNEL_CREATION_DISABLED_FOR_ROLE");
+  return tko_settings;
+}
 
 async function tko_channelFor(tko_actor: PlatformActor, tko_channelId: string) {
   const tko_channel = await getChatStore().getChannel(tko_actor.tenantId, tko_channelId);
@@ -15,13 +26,46 @@ async function tko_channelFor(tko_actor: PlatformActor, tko_channelId: string) {
 
 export async function listChannels(tko_actor: PlatformActor) { requireCapability(tko_actor, "chat.channel.read", { tenantId: tko_actor.tenantId, type: "channel_directory", id: "directory", visibility: "internal" }); return getChatStore().listChannels(tko_actor.tenantId, tko_actor.memberId); }
 export async function messages(tko_actor: PlatformActor, tko_channelId: string, tko_afterSeq?: number) { await tko_channelFor(tko_actor, tko_channelId); requireCapability(tko_actor, "chat.message.read", { tenantId: tko_actor.tenantId, type: "channel", id: tko_channelId, visibility: "internal" }); return tko_withAuthors(tko_actor, await getChatStore().listMessages(tko_actor.tenantId, tko_channelId, tko_afterSeq)); }
-export async function createChannel(tko_actor: PlatformActor, tko_input: Omit<CreateChannelInput, "tenantId">) { const tko_memberIds = tko_input.kind === "private" || tko_input.kind === "group_dm" ? Array.from(new Set([tko_actor.memberId, ...tko_input.memberIds])) : tko_input.memberIds; requireCapability(tko_actor, "chat.channel.create", { tenantId: tko_actor.tenantId, type: "channel", id: "new", visibility: tko_input.visibility ?? "internal", explicitMemberIds: tko_memberIds }); return getChatStore().createChannel(tko_actor, { ...tko_input, memberIds: tko_memberIds, tenantId: tko_actor.tenantId }); }
+export async function channelCreationPolicy(tko_actor: PlatformActor) {
+  requireCapability(tko_actor, "chat.channel.read", { tenantId: tko_actor.tenantId, type: "channel_directory", id: "directory", visibility: "internal" });
+  const tko_settings = await getPlatformStore().getTenantSettings(tko_actor.tenantId);
+  const tko_allowed = tko_actor.role === "service_account" || (tko_channelCreationRoles.has(tko_actor.role as ChatChannelCreationRole) && tko_settings.chatChannelCreationRoles.includes(tko_actor.role as ChatChannelCreationRole));
+  return { ...tko_settings, allowed: tko_allowed, canManage: tko_actor.role === "owner" || tko_actor.role === "admin" };
+}
+
+export async function updateChannelCreationPolicy(tko_actor: PlatformActor, tko_roles: ChatChannelCreationRole[], tko_correlationId: string) {
+  requireCapability(tko_actor, "workspace.settings.manage", tko_channelCreationResource(tko_actor));
+  return getPlatformStore().updateTenantSettings({ actor: tko_actor, tenantId: tko_actor.tenantId, settings: { chatChannelCreationRoles: Array.from(new Set<ChatChannelCreationRole>(["owner", ...tko_roles])) }, correlationId: tko_correlationId });
+}
+
+export async function channelCreationCandidates(tko_actor: PlatformActor) {
+  await tko_requireCanCreateChannel(tko_actor);
+  return (await getPlatformStore().listTenantMembers(tko_actor.tenantId)).map(tko_member => ({ id: tko_member.id, displayName: tko_member.displayName, role: tko_member.role, isActive: true }));
+}
+
+export async function createChannel(tko_actor: PlatformActor, tko_input: Omit<CreateChannelInput, "tenantId">) {
+  await tko_requireCanCreateChannel(tko_actor);
+  const tko_invited = Array.from(new Set(tko_input.memberIds));
+  const tko_activeMembers = new Set((await getPlatformStore().listTenantMembers(tko_actor.tenantId)).map(tko_member => tko_member.id));
+  if (tko_invited.some(tko_memberId => !tko_activeMembers.has(tko_memberId))) throw new Error("CHAT_CHANNEL_MEMBER_NOT_FOUND");
+  const tko_memberIds = tko_input.kind === "private" || tko_input.kind === "group_dm" ? Array.from(new Set([tko_actor.memberId, ...tko_invited])) : tko_invited;
+  return getChatStore().createChannel(tko_actor, { ...tko_input, memberIds: tko_memberIds, tenantId: tko_actor.tenantId });
+}
 async function tko_activeChannelMembers(tko_actor: PlatformActor, tko_channelId: string) { const tko_channel = await tko_channelFor(tko_actor, tko_channelId); const tko_members = await getPlatformStore().listTenantMembers(tko_actor.tenantId); return tko_members.filter(tko_member => tko_channel.memberIds.includes(tko_member.id)); }
 // Workspace removal is modeled as `suspended`: it leaves audit/history intact but removes the member from every interactive Chat surface.
 async function tko_channelRoster(tko_actor: PlatformActor, tko_channelId: string) { const tko_channel = await tko_channelFor(tko_actor, tko_channelId); const tko_members = await getPlatformStore().listTenantMembers(tko_actor.tenantId, { includeSuspended: true }); return tko_members.filter(tko_member => tko_channel.memberIds.includes(tko_member.id)); }
 async function tko_authors(tko_actor: PlatformActor) { const tko_members = await getPlatformStore().listTenantMembers(tko_actor.tenantId, { includeSuspended: true }); const tko_authorMap = new Map<string, ChatAuthor>(tko_members.map(tko_member => [tko_member.id, { memberId: tko_member.id, displayName: tko_member.status === "active" ? tko_member.displayName : `${tko_member.displayName} (inactive account)`, role: tko_member.role, isActive: tko_member.status === "active" }])); if (!tko_authorMap.has(tko_actor.memberId)) tko_authorMap.set(tko_actor.memberId, { memberId: tko_actor.memberId, displayName: tko_actor.membershipStatus === "active" ? "Tasko member" : "Tasko member (inactive account)", role: tko_actor.role, isActive: tko_actor.membershipStatus === "active" }); return tko_authorMap; }
 async function tko_withAuthors(tko_actor: PlatformActor, tko_messages: ChatMessage[]) { const tko_authorMap = await tko_authors(tko_actor); return tko_messages.map(tko_message => ({ ...tko_message, author: tko_authorMap.get(tko_message.authorMemberId) })); }
-export async function channelMembers(tko_actor: PlatformActor, tko_channelId: string) { return (await tko_channelRoster(tko_actor, tko_channelId)).map(tko_member => ({ id: tko_member.id, displayName: tko_member.status === "active" ? tko_member.displayName : `${tko_member.displayName} (inactive account)`, role: tko_member.role, isActive: tko_member.status === "active" })); }
+export async function channelMembers(tko_actor: PlatformActor, tko_channelId: string) {
+  const tko_roster = await tko_channelRoster(tko_actor, tko_channelId);
+  const tko_redis = getRedisAdapter();
+  const tko_presence = new Map(await Promise.all(tko_roster.map(async tko_member => {
+    const tko_cached = await tko_redis.getCache(`chat:presence:${tko_actor.tenantId}:${tko_member.id}`);
+    if (!tko_cached) return [tko_member.id, "offline"] as const;
+    try { const tko_value = JSON.parse(tko_cached); return [tko_member.id, tko_value.status === "online" || tko_value.status === "away" ? tko_value.status : "offline"] as const; } catch { return [tko_member.id, "offline"] as const; }
+  })));
+  return tko_roster.map(tko_member => ({ id: tko_member.id, displayName: tko_member.status === "active" ? tko_member.displayName : `${tko_member.displayName} (inactive account)`, role: tko_member.role, isActive: tko_member.status === "active", presenceStatus: tko_member.status === "active" ? tko_presence.get(tko_member.id) ?? "offline" : "offline" }));
+}
 export async function channelMemberCandidates(tko_actor: PlatformActor, tko_channelId: string) { const tko_channel = await tko_channelFor(tko_actor, tko_channelId); requireCapability(tko_actor, "chat.channel.manage", tko_channel); const tko_members = await getPlatformStore().listTenantMembers(tko_actor.tenantId); return tko_members.map(tko_member => ({ id: tko_member.id, displayName: tko_member.displayName, role: tko_member.role, isActive: true, isInChannel: tko_channel.memberIds.includes(tko_member.id) })); }
 export async function updateChannel(tko_actor: PlatformActor, tko_channelId: string, tko_input: UpdateChannelInput, tko_correlationId: string) { const tko_channel = await tko_channelFor(tko_actor, tko_channelId); if (tko_channel.kind !== "public" && tko_channel.kind !== "private") throw new Error("CHAT_CHANNEL_MANAGEMENT_UNSUPPORTED"); requireCapability(tko_actor, "chat.channel.manage", tko_channel); return getChatStore().updateChannel(tko_actor, tko_channelId, tko_input, tko_correlationId); }
 export async function archiveChannel(tko_actor: PlatformActor, tko_channelId: string, tko_correlationId: string) { const tko_channel = await tko_channelFor(tko_actor, tko_channelId); if (tko_channel.kind !== "public" && tko_channel.kind !== "private") throw new Error("CHAT_CHANNEL_MANAGEMENT_UNSUPPORTED"); requireCapability(tko_actor, "chat.channel.manage", tko_channel); return getChatStore().archiveChannel(tko_actor, tko_channelId, tko_correlationId); }

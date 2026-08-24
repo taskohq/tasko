@@ -76,7 +76,7 @@ describe("Unified Workspace Beta M4", () => {
     const tko_work = await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: `Work ${tko_token}`, correlationId: "m4-search-work" });
     const tko_lead = await crm.createLead({ actor: tko_owner, firstName: "CRM", lastName: tko_token, status: "new", correlationId: "m4-search-crm" });
     const tko_document = await workspace.createDocument(tko_owner, { title: `Doc ${tko_token}`, bodyText: "Search grouping evidence", correlationId: "m4-search-doc" });
-    const tko_channel = await chat.createChannel(tko_owner, { kind: "public", name: `chat-${tko_token}`, topic: "Search grouping evidence", memberIds: [tko_owner.memberId] });
+    const tko_channel = await chat.createChannel(tko_owner, { kind: "public", name: `chat-${tko_token}`, topic: "Search grouping evidence", memberIds: [] });
     const tko_message = await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "m4-search-message", body: { type: "text", text: `Chat ${tko_token}` } }, "m4-search-chat");
 
     await processOutboxOnce(100);
@@ -96,7 +96,7 @@ describe("Unified Workspace Beta M4", () => {
 
   it("does not leak private Chat or any cross-tenant search result, count or snippet", async () => {
     const tko_owner = tko_actor(); const tko_token = "private-chat-search-marker";
-    const tko_channel = await chat.createChannel(tko_owner, { kind: "private", name: `private-${tko_token}`, topic: `Topic ${tko_token}`, memberIds: [tko_owner.memberId] });
+    const tko_channel = await chat.createChannel(tko_owner, { kind: "private", name: `private-${tko_token}`, topic: `Topic ${tko_token}`, memberIds: [] });
     await chat.sendMessage(tko_owner, { channelId: tko_channel.id, clientMessageId: "m4-private-search-message", body: { type: "text", text: `Secret ${tko_token}` } }, "m4-private-search");
     const tko_project = await tko_createProject(tko_owner);
     await work.createWorkItem({ actor: tko_owner, projectId: tko_project.id, title: `Work ${tko_token}`, correlationId: "m4-private-search-work" });

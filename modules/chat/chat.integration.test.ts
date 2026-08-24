@@ -35,6 +35,43 @@ describe("Collaboration Alpha M2", () => {
     expect((await chat.listChannels(tko_member)).map(tko_channel => tko_channel.id)).toEqual([tko_created.id]);
   });
 
+  it("lets an admin restrict channel creation by role while preserving owner and service automation access", async () => {
+    const tko_owner = tko_actor({ memberId: "tko-member-tasko-demo-owner" });
+    const tko_members = await tko_platform.listTenantMembers(tko_owner.tenantId);
+    const tko_adminMembership = tko_members.find(tko_member => tko_member.role === "admin");
+    const tko_memberMembership = tko_members.find(tko_member => tko_member.role === "member");
+    expect(tko_adminMembership).toBeDefined();
+    expect(tko_memberMembership).toBeDefined();
+    const tko_admin = tko_actor({ authSubject: tko_adminMembership!.authSubject, memberId: tko_adminMembership!.id, role: "admin" });
+    const tko_member = tko_actor({ authSubject: tko_memberMembership!.authSubject, memberId: tko_memberMembership!.id, role: "member" });
+
+    await chat.updateChannelCreationPolicy(tko_admin, ["owner", "admin"], "channel-policy-admin-only");
+    expect((await chat.channelCreationPolicy(tko_member)).allowed).toBe(false);
+    await expect(chat.createChannel(tko_member, { kind: "public", name: "not-allowed", memberIds: [] })).rejects.toThrow("CHAT_CHANNEL_CREATION_DISABLED_FOR_ROLE");
+    await expect(chat.createChannel(tko_owner, { kind: "public", name: "owner-allowed", memberIds: [] })).resolves.toEqual(expect.objectContaining({ name: "owner-allowed" }));
+
+    await chat.updateChannelCreationPolicy(tko_owner, ["owner", "admin", "member"], "channel-policy-member-enabled");
+    expect((await chat.channelCreationPolicy(tko_member)).allowed).toBe(true);
+  });
+
+  it("adds selected active workspace members at channel creation and projects their presence state", async () => {
+    const tko_owner = tko_actor({ memberId: "tko-member-tasko-demo-owner" });
+    const tko_members = await tko_platform.listTenantMembers(tko_owner.tenantId);
+    const tko_memberMembership = tko_members.find(tko_member => tko_member.role === "member");
+    expect(tko_memberMembership).toBeDefined();
+    const tko_member = tko_actor({ authSubject: tko_memberMembership!.authSubject, memberId: tko_memberMembership!.id, role: "member" });
+
+    const tko_channel = await chat.createChannel(tko_owner, { kind: "private", name: "launch-invites", visibility: "private", memberIds: [tko_member.memberId] });
+    expect(tko_channel.memberIds).toEqual(expect.arrayContaining([tko_owner.memberId, tko_member.memberId]));
+    await chat.setPresence(tko_owner, "online");
+    await chat.setPresence(tko_member, "away");
+
+    expect(await chat.channelMembers(tko_owner, tko_channel.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: tko_owner.memberId, presenceStatus: "online", isActive: true }),
+      expect.objectContaining({ id: tko_member.memberId, presenceStatus: "away", isActive: true }),
+    ]));
+  });
+
   it("makes send idempotent and emits a durable tenant-scoped event", async () => {
     const tko_owner = tko_actor();
     const tko_channel = await chat.seedDemo(tko_owner);
@@ -49,7 +86,7 @@ describe("Collaboration Alpha M2", () => {
 
   it("does not expose a private channel to a non-member, even with a known channel id", async () => {
     const tko_owner = tko_actor();
-    const tko_private = await chat.createChannel(tko_owner, { kind: "private", name: "leadership", visibility: "private", memberIds: [tko_owner.memberId] });
+    const tko_private = await chat.createChannel(tko_owner, { kind: "private", name: "leadership", visibility: "private", memberIds: [] });
     const tko_nonMember = tko_actor({ authSubject: "chat-guest", memberId: "member-not-in-private-channel", role: "member" });
 
     await expect(chat.messages(tko_nonMember, tko_private.id)).rejects.toThrow("AUTHORIZATION_DENIED");
@@ -122,7 +159,9 @@ describe("Collaboration Alpha M2", () => {
 
   it("projects unread mentions, clears them on read, and persists attachment metadata without file bytes", async () => {
     const tko_owner = tko_actor();
-    const tko_member = tko_actor({ authSubject: "chat-member", memberId: "9d02f976-0a98-430b-8d30-881ff3c2c6ac", role: "member" });
+    const tko_workspaceMember = (await tko_platform.listTenantMembers(tko_owner.tenantId)).find(tko_member => tko_member.role === "member");
+    expect(tko_workspaceMember).toBeDefined();
+    const tko_member = tko_actor({ authSubject: tko_workspaceMember!.authSubject, memberId: tko_workspaceMember!.id, role: "member" });
     const tko_channel = await chat.createChannel(tko_owner, { kind: "private", name: "delivery", visibility: "private", memberIds: [tko_member.memberId] });
     const tko_message = await getChatStore().sendMessage(tko_owner, { tenantId: tko_owner.tenantId, channelId: tko_channel.id, authorMemberId: tko_owner.memberId, clientMessageId: "35403726-451b-440f-a95f-11f8b0e2e2e2", body: { type: "text", text: "Please review the handoff.", mentions: [tko_member.memberId] }, attachments: [{ id: "db3c8a6f-5157-446f-ae1c-461629784c82", tenantId: tko_owner.tenantId, objectKey: "tenants/tko-tenant-tasko-demo/attachments/db3c8a6f/handoff.txt", filename: "handoff.txt", contentType: "text/plain", url: "/manus-storage/tenants/tko-tenant-tasko-demo/attachments/db3c8a6f/handoff.txt" }] }, "mention-attachment");
 

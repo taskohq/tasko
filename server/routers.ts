@@ -317,6 +317,9 @@ export const appRouter = router({
 
   chat: router({
     channels: tenantProcedure.query(({ ctx }) => chatService.listChannels(ctx.platform.actor)),
+    creationPolicy: tenantProcedure.query(({ ctx }) => chatService.channelCreationPolicy(ctx.platform.actor)),
+    updateCreationPolicy: tenantProcedure.input(z.object({ roles: z.array(z.enum(["owner", "admin", "member"])).min(1).max(3) })).mutation(({ ctx, input }) => chatService.updateChannelCreationPolicy(ctx.platform.actor, input.roles, ctx.correlationId)),
+    creationCandidates: tenantProcedure.query(({ ctx }) => chatService.channelCreationCandidates(ctx.platform.actor)),
     readStates: tenantProcedure.query(({ ctx }) => chatService.readStates(ctx.platform.actor)),
     messages: tenantProcedure.input(z.object({ channelId: z.string().uuid(), afterSequence: z.number().int().min(0).optional() })).query(({ ctx, input }) => chatService.messages(ctx.platform.actor, input.channelId, input.afterSequence)),
     createChannel: tenantProcedure.input(z.object({ kind: z.enum(["public", "private", "dm", "group_dm"]), name: z.string().trim().min(1).max(120).optional(), topic: z.string().trim().max(2_000).optional(), memberIds: z.array(z.string().uuid()).max(100).default([]), visibility: z.enum(["internal", "private"]).optional() })).mutation(({ ctx, input }) => chatService.createChannel(ctx.platform.actor, input)),

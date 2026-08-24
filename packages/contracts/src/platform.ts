@@ -1,6 +1,11 @@
 export type DeploymentProfile = "single_tenant" | "saas";
 
 export type TenantRole = "owner" | "admin" | "member" | "guest" | "service_account";
+export type ChatChannelCreationRole = "owner" | "admin" | "member";
+
+export interface TenantSettings {
+  chatChannelCreationRoles: ChatChannelCreationRole[];
+}
 
 export type MembershipStatus = "active" | "suspended" | "invited";
 
@@ -88,6 +93,7 @@ export interface Tenant {
   name: string;
   status: "active" | "suspended";
   deploymentProfile: DeploymentProfile;
+  settings: TenantSettings;
   createdAt: Date;
 }
 
@@ -143,6 +149,13 @@ export interface PlatformActor {
   memberId: string;
   role: TenantRole;
   membershipStatus: MembershipStatus;
+  correlationId: string;
+}
+
+export interface UpdateTenantSettingsInput {
+  actor: PlatformActor;
+  tenantId: string;
+  settings: TenantSettings;
   correlationId: string;
 }
 

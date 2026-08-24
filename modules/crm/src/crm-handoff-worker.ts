@@ -37,7 +37,7 @@ async function tko_handleWonDeal(tko_record: OutboxRecord): Promise<void> {
 
   const tko_channelName = tko_deliveryChannelName(tko_deal.id);
   const tko_existingChannel = (await listChannels(tko_actor)).find(tko_channel => tko_channel.name === tko_channelName);
-  const tko_channel = tko_existingChannel ?? await createChannel(tko_actor, { kind: "private", name: tko_channelName, topic: `Delivery handoff for ${tko_deal.name}`, memberIds: [tko_actor.memberId], visibility: "private" });
+  const tko_channel = tko_existingChannel ?? await createChannel(tko_actor, { kind: "private", name: tko_channelName, topic: `Delivery handoff for ${tko_deal.name}`, memberIds: [], visibility: "private" });
 
   await link(tko_actor, { sourceType: "deal", sourceId: tko_deal.id, targetType: "project", targetId: tko_project.id, relationType: "delivery_project", correlationId: tko_record.correlationId });
   await link(tko_actor, { sourceType: "deal", sourceId: tko_deal.id, targetType: "channel", targetId: tko_channel.id, relationType: "delivery_channel", correlationId: tko_record.correlationId });

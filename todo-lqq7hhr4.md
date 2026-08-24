@@ -34,3 +34,12 @@
 - [x] Ghi nhận giới hạn UI E2E: sandbox browser không có phiên OAuth; mutation tạo channel được xác minh bằng integration test thay vì khẳng định kiểm tra form đã xác thực.
 - [x] Tự kích hoạt phiên đăng nhập hiện có trong trình duyệt; xác nhận sandbox browser không có OAuth khả dụng và tiếp tục xác minh bằng integration test.
 - [x] Xác minh lại lỗi CRM handoff do service account thiếu capability mới; đã khôi phục quyền và kiểm thử toàn suite đạt.
+- [x] Khảo sát mô hình cấu hình workspace, quyền tạo channel và nguồn dữ liệu presence hiện tại.
+- [x] Thêm cấu hình quản trị viên chọn role nào được phép tạo channel mới.
+- [x] Áp dụng cấu hình quyền tạo channel ở máy chủ và phản ánh quyền trên giao diện Chat.
+- [x] Mở rộng dialog tạo channel để chọn và mời thành viên active ngay khi tạo channel công khai hoặc riêng tư.
+- [x] Hiển thị danh sách thành viên channel với trạng thái online, away hoặc offline theo dữ liệu presence.
+- [x] Viết kiểm thử cho cấu hình quyền tạo channel, lời mời khi tạo và projection presence.
+- [x] Kiểm tra giao diện desktop/mobile, sau đó lưu checkpoint bàn giao.
+- [x] Cập nhật hồi quy Workspace dùng thành viên workspace active khi tạo channel riêng tư.
+- [x] Xác minh và ổn định lại kiểm thử CRM handoff sau khi thay đổi policy tạo channel.
