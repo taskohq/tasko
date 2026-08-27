@@ -49,3 +49,13 @@
 - [x] Thêm phân cách ngày, nhóm tin nhắn liền nhau và thời gian gửi chi tiết theo ngữ cảnh.
 - [x] Viết kiểm thử cho đính kèm, reaction và cách sắp xếp dữ liệu hiển thị theo thời gian.
 - [x] Kiểm tra giao diện desktop/mobile, sau đó lưu checkpoint bàn giao.
+- [x] Rà soát mô hình dữ liệu công việc, notification, reminder và các entry point Chat hiện có.
+- [x] Thiết kế trung tâm thông báo công việc kiểu ghi chú nhanh, thống nhất với reminder Chat.
+- [x] Thiết kế reminder cá nhân tạo độc lập trong Chat, không cần tham chiếu tin nhắn hoặc công việc có sẵn.
+- [x] Bổ sung lightbox ảnh, kéo-thả tệp, preview đính kèm và reaction trong thread Chat.
+- [x] Bổ sung thao tác gửi vào channel, lưu xử lý sau và chuyển tiếp tin nhắn có kiểm soát quyền.
+- [x] Triển khai reminder trong Chat theo thời điểm đã đặt, thông báo trong ứng dụng khi Chat đang mở, và thao tác hoàn thành/bỏ qua.
+- [x] Triển khai giao diện reminder dạng thẻ trong Saved/Later, có thao tác nhanh và phân biệt nhắc từ tin nhắn hoặc tạo độc lập.
+- [x] Viết hồi quy cho thao tác Chat, reminder và trạng thái thông báo công việc.
+- [x] Xác minh desktop/mobile và rà soát reminder đơn giản trong Chat.
+- [x] Lưu checkpoint mới cho lightbox, kéo-thả, reminder và chuyển tiếp trước khi bàn giao.

@@ -3,6 +3,7 @@ export type ChannelKind = "public" | "private" | "dm" | "group_dm";
 export type MessageBody = { type: "text"; text: string; mentions?: string[]; broadcastMention?: "channel" | "here"; quotedMessageId?: string | null };
 export type ChannelNotificationLevel = "all" | "mentions" | "none";
 export type SavedMessageStatus = "open" | "done";
+export type ChatReminderStatus = "open" | "done" | "dismissed";
 
 export interface MessageAttachment {
   id: string;
@@ -81,6 +82,19 @@ export interface SavedMessage {
   note: string | null;
   reminderAt: Date | null;
   createdAt: Date;
+}
+
+export interface ChatReminder {
+  id: string;
+  tenantId: string;
+  memberId: string;
+  messageId: string | null;
+  title: string;
+  note: string | null;
+  reminderAt: Date;
+  status: ChatReminderStatus;
+  createdAt: Date;
+  completedAt: Date | null;
 }
 
 export interface ChatPin {
