@@ -132,15 +132,26 @@ describe("Collaboration Alpha M2", () => {
     const tko_source = await getChatStore().sendMessage(tko_owner, { tenantId: tko_owner.tenantId, channelId: tko_sourceChannel.id, authorMemberId: tko_owner.memberId, clientMessageId: "a95af3e8-5696-4993-aea4-8db720241334", body: { type: "text", text: "Forward the final handoff." }, attachments: [{ id: "72996520-2729-4e92-8bfc-b95b5d2f0953", tenantId: tko_owner.tenantId, objectKey: "tenants/tko-tenant-tasko-demo/attachments/forward/brief.txt", filename: "brief.txt", contentType: "text/plain", url: "/manus-storage/tenants/tko-tenant-tasko-demo/attachments/forward/brief.txt" }] }, "forward-source");
     const tko_targetChannel = await chat.createChannel(tko_owner, { kind: "public", name: "handoff-destination", memberIds: [] });
     const tko_standalone = await chat.createReminder(tko_owner, { title: "Gọi lại khách hàng", note: "Xác nhận khung giờ", reminderAt: new Date("2030-01-02T09:00:00.000Z") }, "reminder-standalone");
+    await expect(chat.createReminder(tko_owner, { title: "Không tạo lịch ở development", reminderAt: new Date("2030-01-02T09:30:00.000Z") }, "reminder-development", "session-would-schedule-if-production")).resolves.toEqual(expect.objectContaining({ scheduleCronTaskUid: null }));
     const tko_messageReminder = await chat.createReminder(tko_owner, { title: "Đọc lại handoff", reminderAt: new Date("2030-01-02T10:00:00.000Z"), messageId: tko_source.id }, "reminder-message");
+    const tko_snoozed = await chat.snoozeReminder(tko_owner, tko_standalone.id, new Date("2030-01-02T11:00:00.000Z"), "reminder-snooze");
+    const tko_subscription = await chat.upsertPushSubscription(tko_owner, { endpoint: "https://fcm.googleapis.com/fcm/send/tasko-test-subscription", p256dh: "test-p256dh-key-material", auth: "test-auth-key-material", userAgent: "Tasko Vitest" }, "push-subscription");
+    await getChatStore().setReminderSchedule(tko_owner, tko_standalone.id, "cron-reminder-test");
+    expect(await getChatStore().claimReminderPushDelivery("cron-reminder-test")).toEqual(expect.objectContaining({ id: tko_standalone.id }));
+    await getChatStore().releaseReminderPushDelivery("cron-reminder-test");
+    expect(await getChatStore().claimReminderPushDelivery("cron-reminder-test")).toEqual(expect.objectContaining({ id: tko_standalone.id }));
+    await getChatStore().completeReminderPushDelivery("cron-reminder-test");
+    expect(await getChatStore().claimReminderPushDelivery("cron-reminder-test")).toBeNull();
     const tko_forwarded = await chat.forwardMessage(tko_owner, { messageId: tko_source.id, targetChannelId: tko_targetChannel.id, note: "Dùng bản này để chốt." }, "forward-message");
 
     expect(await chat.reminders(tko_owner)).toEqual(expect.arrayContaining([expect.objectContaining({ id: tko_standalone.id, messageId: null, title: "Gọi lại khách hàng" }), expect.objectContaining({ id: tko_messageReminder.id, messageId: tko_source.id })]));
+    expect(tko_snoozed).toEqual(expect.objectContaining({ status: "open", reminderAt: new Date("2030-01-02T11:00:00.000Z") }));
+    expect(await getChatStore().listPushSubscriptions(tko_owner.tenantId, tko_owner.memberId)).toEqual([expect.objectContaining({ id: tko_subscription.id, endpoint: tko_subscription.endpoint })]);
     expect((await chat.setReminderStatus(tko_owner, tko_standalone.id, "done", "reminder-complete")).status).toBe("done");
     expect(tko_forwarded).toEqual(expect.objectContaining({ channelId: tko_targetChannel.id, authorMemberId: tko_owner.memberId, attachments: [expect.objectContaining({ filename: "brief.txt" })] }));
     expect(tko_forwarded.body.text).toContain("Chuyển tiếp từ #product");
     expect(tko_forwarded.body.text).toContain("Dùng bản này để chốt.");
-    expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["chat.reminder.created", "chat.reminder.updated", "chat.message.created"]));
+    expect((await tko_platform.listAuditLogs()).map(tko_event => tko_event.action)).toEqual(expect.arrayContaining(["chat.reminder.created", "chat.reminder.snoozed", "chat.push.subscription_upserted", "chat.reminder.updated", "chat.message.created"]));
   });
 
   it("links an accessible work item to a message through a durable, auditable mutation", async () => {

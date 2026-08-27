@@ -16,9 +16,10 @@ import { registerPublicApiRoutes } from "../ecosystem/public-api";
 import { registerEcosystemWebhookObserver } from "../../modules/ecosystem/src/developer-service";
 import { registerMCPRoutes } from "../ai/mcp-server";
 import { registerCRMHandoffWorker } from "../../modules/crm/src/crm-handoff-worker";
-import { registerWorkRealtimeWorker } from "../../modules/work/src/work-realtime-worker";
 import { registerWorkspaceWorker } from "../../modules/workspace/src/workspace-worker";
+import { registerWorkRealtimeWorker } from "../../modules/work/src/work-realtime-worker";
 import { startWorker } from "../../modules/worker/src/worker-service";
+import { deliverChatReminderPush } from "../platform/chat-reminder-push";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -69,6 +70,7 @@ async function startServer() {
     const tko_readiness = await getPlatformReadiness();
     res.status(tko_readiness.status === "ready" ? 200 : 503).json(tko_readiness);
   });
+  app.post("/api/scheduled/chat-reminder-push", deliverChatReminderPush);
   // tRPC API
   app.use(
     "/api/trpc",

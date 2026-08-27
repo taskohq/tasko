@@ -95,6 +95,20 @@ export interface ChatReminder {
   status: ChatReminderStatus;
   createdAt: Date;
   completedAt: Date | null;
+  scheduleCronTaskUid: string | null;
+  pushDeliveredAt: Date | null;
+}
+
+export interface ChatPushSubscription {
+  id: string;
+  tenantId: string;
+  memberId: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  userAgent: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ChatPin {

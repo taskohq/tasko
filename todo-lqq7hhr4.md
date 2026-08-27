@@ -59,3 +59,19 @@
 - [x] Viết hồi quy cho thao tác Chat, reminder và trạng thái thông báo công việc.
 - [x] Xác minh desktop/mobile và rà soát reminder đơn giản trong Chat.
 - [x] Lưu checkpoint mới cho lightbox, kéo-thả, reminder và chuyển tiếp trước khi bàn giao.
+- [x] Rà soát mô hình reminder, notification và lightbox hiện có trước khi mở rộng.
+- [x] Thiết kế snooze reminder, điều hướng nhiều ảnh và notification nền có idempotency.
+- [x] Bổ sung snooze nhanh trong danh sách reminder để hoãn 10 phút, 1 giờ hoặc đến ngày mai.
+- [x] Nâng lightbox để duyệt ảnh trước/sau trong cùng ngữ cảnh hội thoại bằng chuột/chạm hoặc bàn phím.
+- [x] Triển khai notification reminder bền vững khi Chat không mở, giữ trạng thái reminder độc lập với notification.
+- [x] Thiết kế đăng ký thiết bị và thông báo đẩy hệ điều hành cho reminder với quyền đồng ý rõ ràng.
+- [x] Bổ sung khóa bảo mật và service worker cho đăng ký/nhận thông báo đẩy trên các trình duyệt hỗ trợ.
+- [x] Bổ sung delivery reminder idempotent và trạng thái đã gửi để tránh gửi lặp khi tác vụ nền thử lại.
+- [x] Tạo và cấu hình khóa VAPID do Tasko quản lý cho Web Push Chrome, không yêu cầu tài khoản dịch vụ bên thứ ba.
+- [x] Đăng ký subscription Chrome, lưu theo người dùng/thiết bị và dọn đăng ký hết hạn hoặc không hợp lệ.
+- [x] Viết hồi quy cho snooze, notification và danh sách ảnh lightbox.
+- [x] Xác minh desktop/mobile và kiểm thử trọng tâm snooze, gallery, Web Push, VAPID và Chat.
+- [x] Viết hồi quy delivery Web Push: claim, complete/release và vô hiệu hóa subscription không còn hợp lệ.
+- [x] Viết kiểm thử helper gallery lightbox để chặn điều hướng vượt biên trước/sau.
+- [x] Ghi nhận và kiểm tra rằng lịch Web Push chỉ được tạo sau khi phiên bản production đã publish.
+- [x] Lưu checkpoint cho snooze, gallery ảnh và notification Chrome trước khi bàn giao.

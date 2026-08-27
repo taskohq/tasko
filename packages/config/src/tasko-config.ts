@@ -27,5 +27,7 @@ export const tko_config = {
   resendApiKey: process.env.RESEND_API_KEY ?? "",
   resendFromEmail: process.env.RESEND_FROM_EMAIL ?? "",
   appOrigin: process.env.TASKO_APP_ORIGIN ?? "",
+  vapidPublicKey: process.env.VITE_TASKO_VAPID_PUBLIC_KEY ?? "",
+  vapidPrivateKey: process.env.TASKO_VAPID_PRIVATE_KEY ?? "",
   isProduction: process.env.NODE_ENV === "production",
 } as const;

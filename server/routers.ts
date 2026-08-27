@@ -1,4 +1,5 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { parse as parseCookie } from "cookie";
 import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -22,6 +23,8 @@ import { signInWithEmailPassword, signUpWithEmailPassword } from "../modules/aut
 import { listAITools } from "../modules/ai/src/tool-registry";
 import { getWorkStore } from "../packages/database/src/work-store";
 import { z } from "zod";
+
+function tko_sessionToken(tko_request: { headers: { cookie?: string; authorization?: string } }) { return parseCookie(tko_request.headers.cookie ?? "")[COOKIE_NAME] ?? (tko_request.headers.authorization?.startsWith("Bearer ") ? tko_request.headers.authorization.slice(7) : ""); }
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -342,8 +345,10 @@ export const appRouter = router({
     channelMembers: tenantProcedure.input(z.object({ channelId: z.string().uuid() })).query(({ ctx, input }) => chatService.channelMembers(ctx.platform.actor, input.channelId)),
     pinnedMessages: tenantProcedure.input(z.object({ channelId: z.string().uuid() })).query(({ ctx, input }) => chatService.pinnedMessages(ctx.platform.actor, input.channelId)),
     saveMessage: tenantProcedure.input(z.object({ messageId: z.string().uuid(), status: z.enum(["open", "done"]).optional(), note: z.string().trim().max(4_000).nullable().optional(), reminderAt: z.date().nullable().optional() })).mutation(({ ctx, input }) => chatService.saveMessage(ctx.platform.actor, input.messageId, { status: input.status, note: input.note, reminderAt: input.reminderAt }, ctx.correlationId)),
-    createReminder: tenantProcedure.input(z.object({ title: z.string().trim().min(1).max(500), note: z.string().trim().max(4_000).nullable().optional(), reminderAt: z.date(), messageId: z.string().uuid().nullable().optional() })).mutation(({ ctx, input }) => chatService.createReminder(ctx.platform.actor, input, ctx.correlationId)),
-    setReminderStatus: tenantProcedure.input(z.object({ reminderId: z.string().uuid(), status: z.enum(["open", "done", "dismissed"]) })).mutation(({ ctx, input }) => chatService.setReminderStatus(ctx.platform.actor, input.reminderId, input.status, ctx.correlationId)),
+    createReminder: tenantProcedure.input(z.object({ title: z.string().trim().min(1).max(500), note: z.string().trim().max(4_000).nullable().optional(), reminderAt: z.date(), messageId: z.string().uuid().nullable().optional() })).mutation(({ ctx, input }) => chatService.createReminder(ctx.platform.actor, input, ctx.correlationId, tko_sessionToken(ctx.req))),
+    setReminderStatus: tenantProcedure.input(z.object({ reminderId: z.string().uuid(), status: z.enum(["open", "done", "dismissed"]) })).mutation(({ ctx, input }) => chatService.setReminderStatus(ctx.platform.actor, input.reminderId, input.status, ctx.correlationId, tko_sessionToken(ctx.req))),
+    snoozeReminder: tenantProcedure.input(z.object({ reminderId: z.string().uuid(), reminderAt: z.date() })).mutation(({ ctx, input }) => chatService.snoozeReminder(ctx.platform.actor, input.reminderId, input.reminderAt, ctx.correlationId, tko_sessionToken(ctx.req))),
+    upsertPushSubscription: tenantProcedure.input(z.object({ endpoint: z.string().url().max(4_000), p256dh: z.string().min(16).max(500), auth: z.string().min(8).max(500), userAgent: z.string().max(1_000).nullable().optional() })).mutation(({ ctx, input }) => chatService.upsertPushSubscription(ctx.platform.actor, input, ctx.correlationId)),
     forwardMessage: tenantProcedure.input(z.object({ messageId: z.string().uuid(), targetChannelId: z.string().uuid(), note: z.string().trim().max(4_000).optional() })).mutation(({ ctx, input }) => chatService.forwardMessage(ctx.platform.actor, input, ctx.correlationId)),
     togglePin: tenantProcedure.input(z.object({ messageId: z.string().uuid() })).mutation(({ ctx, input }) => chatService.togglePin(ctx.platform.actor, input.messageId, ctx.correlationId)),
     search: tenantProcedure.input(z.object({ query: z.string().trim().min(2).max(250) })).query(({ ctx, input }) => chatService.search(ctx.platform.actor, input.query)),
