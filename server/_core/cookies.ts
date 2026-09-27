@@ -1,4 +1,5 @@
-import type { CookieOptions, Request } from "express";
+import type { FastifyRequest } from "fastify";
+import type { CookieSerializeOptions } from "@fastify/cookie";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -8,7 +9,7 @@ function isIpAddress(host: string) {
   return host.includes(":");
 }
 
-function isSecureRequest(req: Request) {
+function isSecureRequest(req: FastifyRequest) {
   if (req.protocol === "https") return true;
 
   const forwardedProto = req.headers["x-forwarded-proto"];
@@ -22,8 +23,8 @@ function isSecureRequest(req: Request) {
 }
 
 export function getSessionCookieOptions(
-  req: Request
-): Pick<CookieOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
+  req: FastifyRequest
+): Pick<CookieSerializeOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
   // const hostname = req.hostname;
   // const shouldSetDomain =
   //   hostname &&
@@ -42,7 +43,11 @@ export function getSessionCookieOptions(
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
+    // `lax` keeps the session cookie on same-site navigations and same-origin
+    // fetches while refusing to attach it to cross-site form posts (CSRF
+    // hardening). Cross-origin native clients keep working through the Bearer
+    // fallback in `sdk.authenticateRequest`.
+    sameSite: "lax",
     secure: isSecureRequest(req),
   };
 }

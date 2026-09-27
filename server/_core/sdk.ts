@@ -1,13 +1,20 @@
+import { randomUUID } from "node:crypto";
 import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
-import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
 import { getEmailPasswordStore } from "../../packages/database/src/email-password-store";
 import { tko_isEmailPasswordSubject } from "../../modules/auth/src/email-password-service";
+import {
+  tko_isCronSubject,
+  tko_isSessionAlive,
+  tko_normalizeDeviceLabel,
+  tko_persistSession,
+  tko_shouldTrackSubject,
+} from "../../modules/auth/src/session-service";
 import { ENV } from "./env";
 import type {
   ExchangeTokenRequest,
@@ -24,6 +31,18 @@ export type SessionPayload = {
   openId: string;
   appId: string;
   name: string;
+};
+
+/**
+ * Minimal structural request contract for authentication. Satisfied by both
+ * Express and Fastify request objects, so the auth core stays framework-free.
+ */
+export type TkoAuthRequest = {
+  headers: {
+    cookie?: string | undefined;
+    authorization?: string | string[] | undefined;
+    "user-agent"?: string | string[] | undefined;
+  };
 };
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
@@ -183,22 +202,41 @@ class SDKServer {
   }
 
   /**
-   * Create a session token for a Manus user openId
+   * Create a session token for a Manus user openId.
+   *
+   * Every non-cron token is also persisted as a revocable session row keyed by
+   * the token hash, so `authenticateRequest` can reject revoked sessions
+   * (acceptance-test K). The exported signature stays backward compatible; the
+   * options object only gained optional fields.
+   *
    * @example
    * const sessionToken = await sdk.createSessionToken(userInfo.openId);
    */
   async createSessionToken(
     openId: string,
-    options: { expiresInMs?: number; name?: string } = {}
+    options: { expiresInMs?: number; name?: string; tenantId?: string | null; device?: string | null } = {}
   ): Promise<string> {
-    return this.signSession(
+    const tko_expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+    const tko_sessionToken = await this.signSession(
       {
         openId,
         appId: ENV.appId,
         name: options.name || "",
       },
-      options
+      { expiresInMs: tko_expiresInMs }
     );
+
+    if (tko_shouldTrackSubject(openId)) {
+      await tko_persistSession({
+        sessionToken: tko_sessionToken,
+        authSubject: openId,
+        tenantId: options.tenantId ?? null,
+        device: options.device ?? null,
+        expiresAt: new Date(Date.now() + tko_expiresInMs),
+      });
+    }
+
+    return tko_sessionToken;
   }
 
   async signSession(
@@ -210,12 +248,17 @@ class SDKServer {
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
 
+    // The jti claim makes every minted token unique even when two sessions for
+    // the same subject are created within the same second (identical iat and
+    // payload would otherwise collide byte-for-byte — and collide again in the
+    // session store, where token hashes are unique).
     return new SignJWT({
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .setJti(randomUUID())
       .setExpirationTime(expirationSeconds)
       .sign(secretKey);
   }
@@ -279,7 +322,7 @@ class SDKServer {
     } as GetUserInfoWithJwtResponse;
   }
 
-  async authenticateRequest(req: Request): Promise<AuthenticatedUser> {
+  async authenticateRequest(req: TkoAuthRequest): Promise<AuthenticatedUser> {
     // 1. Prefer the session cookie (regular OAuth login).
     const cookies = this.parseCookies(req.headers.cookie);
     let sessionToken = cookies.get(COOKIE_NAME);
@@ -298,6 +341,16 @@ class SDKServer {
 
     if (!session) {
       throw ForbiddenError("Invalid session cookie");
+    }
+
+    // Server-side revocation check (acceptance-test K). Cron callbacks are
+    // ephemeral and skip the session-row check; every other token must map to
+    // an unrevoked, unexpired session row.
+    if (!tko_isCronSubject(session.openId)) {
+      const tko_device = tko_normalizeDeviceLabel(req.headers["user-agent"]);
+      if (!(await tko_isSessionAlive(sessionToken ?? "", tko_device))) {
+        throw ForbiddenError("Session is no longer active");
+      }
     }
 
     if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {
