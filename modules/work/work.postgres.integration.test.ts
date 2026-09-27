@@ -10,6 +10,8 @@ const tko_describe = tko_postgresUrl && process.env.TASKO_RUN_POSTGRES_INTEGRATI
 async function tko_cleanupTenant(tko_pool: Pool, tko_tenantId: string, tko_userId: string): Promise<void> {
   for (const tko_table of [
     "work_item_attachments",
+    "work_item_watchers",
+    "work_time_logs",
     "work_item_checklist_items",
     "work_item_assignees",
     "work_item_labels",

@@ -121,6 +121,8 @@ export interface WorkItem extends TenantResource {
   priority: WorkPriority;
   reporterMemberId: string;
   assigneeMemberIds: string[];
+  watcherMemberIds: string[];
+  labelIds: string[];
   startAt: Date | null;
   dueAt: Date | null;
   estimateMinutes: number | null;
@@ -131,6 +133,39 @@ export interface WorkItem extends TenantResource {
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface WorkLabel extends TenantResource {
+  type: "work_label";
+  name: string;
+  colorToken: string;
+}
+
+export interface WorkTimeLog extends TenantResource {
+  type: "work_time_log";
+  workItemId: string;
+  memberId: string;
+  minutes: number;
+  startedAt: Date;
+  note: string;
+  createdAt: Date;
+}
+
+export interface WorkItemWatcherInfo {
+  memberId: string;
+  displayName: string;
+}
+
+export interface WorkTimeLogSummary {
+  logs: WorkTimeLog[];
+  totalMinutes: number;
+}
+
+/** A persisted workflow transition row. fromStatusId null means "any status" entry points. */
+export interface WorkflowTransition {
+  fromStatusId: string | null;
+  toStatusId: string;
+  allowed: boolean;
 }
 
 export interface WorkComment extends TenantResource {
@@ -433,6 +468,8 @@ export interface MyWorkItem {
   dueAt: Date | null;
   updatedAt: Date;
   isOverdue: boolean;
+  /** True when the actor watches the item without being an assignee. */
+  isWatching: boolean;
 }
 
 export interface OpsUpdateEntry {
@@ -461,4 +498,126 @@ export interface WorkCalendarItem {
   priority: WorkPriority;
   startAt: Date | null;
   dueAt: Date | null;
+}
+
+// ---------------------------------------------------------------------------
+// M1 Work extras: watchers, labels, time logs, workflow transitions,
+// custom work types and item actions.
+// ---------------------------------------------------------------------------
+
+export interface AddWorkItemWatcherInput {
+  actor: PlatformActor;
+  workItemId: string;
+  /** Null watches as the actor; a member id requires project manage capability. */
+  memberId: string | null;
+  correlationId: string;
+}
+
+export interface RemoveWorkItemWatcherInput {
+  actor: PlatformActor;
+  workItemId: string;
+  memberId: string | null;
+  correlationId: string;
+}
+
+export interface CreateWorkLabelInput {
+  actor: PlatformActor;
+  projectId: string;
+  name: string;
+  colorToken: string;
+  correlationId: string;
+}
+
+export interface UpdateWorkLabelInput {
+  actor: PlatformActor;
+  projectId: string;
+  labelId: string;
+  name?: string;
+  colorToken?: string;
+  correlationId: string;
+}
+
+export interface DeleteWorkLabelInput {
+  actor: PlatformActor;
+  projectId: string;
+  labelId: string;
+  correlationId: string;
+}
+
+export interface SetWorkItemLabelsInput {
+  actor: PlatformActor;
+  workItemId: string;
+  labelIds: string[];
+  correlationId: string;
+}
+
+export interface AddWorkTimeLogInput {
+  actor: PlatformActor;
+  workItemId: string;
+  minutes: number;
+  startedAt?: Date | null;
+  note?: string;
+  correlationId: string;
+}
+
+export interface DeleteWorkTimeLogInput {
+  actor: PlatformActor;
+  workItemId: string;
+  timeLogId: string;
+  correlationId: string;
+}
+
+export interface SetTransitionAllowedInput {
+  actor: PlatformActor;
+  projectId: string;
+  /** Null targets entry transitions; otherwise both statuses must belong to the project workflow. */
+  fromStatusId: string | null;
+  toStatusId: string;
+  allowed: boolean;
+  correlationId: string;
+}
+
+export interface CreateWorkTypeInput {
+  actor: PlatformActor;
+  projectId: string;
+  name: string;
+  category: WorkTypeCategory;
+  icon?: string;
+  correlationId: string;
+}
+
+export interface UpdateWorkTypeInput {
+  actor: PlatformActor;
+  projectId: string;
+  workTypeId: string;
+  name?: string;
+  icon?: string;
+  correlationId: string;
+}
+
+export interface SetWorkItemTypeInput {
+  actor: PlatformActor;
+  workItemId: string;
+  workTypeId: string;
+  correlationId: string;
+}
+
+export interface DuplicateWorkItemInput {
+  actor: PlatformActor;
+  workItemId: string;
+  correlationId: string;
+}
+
+export interface MoveWorkItemToProjectInput {
+  actor: PlatformActor;
+  workItemId: string;
+  targetProjectId: string;
+  correlationId: string;
+}
+
+export interface DeleteSavedViewInput {
+  actor: PlatformActor;
+  projectId: string;
+  viewId: string;
+  correlationId: string;
 }

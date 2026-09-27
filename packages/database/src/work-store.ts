@@ -1,4 +1,6 @@
 import type {
+  AddWorkItemWatcherInput,
+  AddWorkTimeLogInput,
   ArchiveWorkItemInput,
   CreateProjectInvitationInput,
   CreateCommentInput,
@@ -7,16 +9,29 @@ import type {
   ReorderWorkflowStatusInput,
   CreateSprintInput,
   CreateWorkItemInput,
+  CreateWorkLabelInput,
+  CreateWorkTypeInput,
+  DeleteSavedViewInput,
+  DeleteWorkLabelInput,
+  DeleteWorkTimeLogInput,
+  DuplicateWorkItemInput,
   MoveWorkItemInput,
+  MoveWorkItemToProjectInput,
   ProjectMember,
   ProjectMemberRole,
   ProjectInvitation,
   ProjectInvitationIssue,
+  RemoveWorkItemWatcherInput,
   ResendProjectInvitationInput,
   RevokeProjectInvitationInput,
   RemoveProjectMemberInput,
+  SetTransitionAllowedInput,
+  SetWorkItemLabelsInput,
+  SetWorkItemTypeInput,
   UpdateProjectVisibilityInput,
   UpdateWorkItemInput,
+  UpdateWorkLabelInput,
+  UpdateWorkTypeInput,
   UpsertProjectMemberInput,
   ProjectMethodology,
   TransitionWorkItemInput,
@@ -33,11 +48,14 @@ import type {
   WorkItem,
   WorkItemRelation,
   WorkItemRelationType,
+  WorkLabel,
   WorkProject,
   WorkSpace,
   WorkSprint,
+  WorkTimeLog,
   WorkType,
   WorkflowStatus,
+  WorkflowTransition,
 } from "../../contracts/src/work";
 import type { PlatformActor } from "../../contracts/src/platform";
 import { getPlatformStore } from "./platform-store";
@@ -114,6 +132,25 @@ export interface WorkStore {
   saveView(tko_actor: PlatformActor, tko_input: Omit<WorkSavedView, "id" | "tenantId" | "ownerMemberId"> & { correlationId: string }): Promise<WorkSavedView>;
   listViews(tko_tenantId: string, tko_projectId: string, tko_memberId: string): Promise<WorkSavedView[]>;
   listHistory(tko_tenantId: string, tko_workItemId: string): Promise<WorkHistoryEntry[]>;
+  addWatcher(tko_input: AddWorkItemWatcherInput): Promise<WorkItem>;
+  removeWatcher(tko_input: RemoveWorkItemWatcherInput): Promise<WorkItem>;
+  listWatchers(tko_tenantId: string, tko_workItemId: string): Promise<string[]>;
+  listLabels(tko_tenantId: string, tko_projectId: string): Promise<WorkLabel[]>;
+  createLabel(tko_input: CreateWorkLabelInput): Promise<WorkLabel>;
+  updateLabel(tko_input: UpdateWorkLabelInput): Promise<WorkLabel>;
+  deleteLabel(tko_input: DeleteWorkLabelInput): Promise<void>;
+  setWorkItemLabels(tko_input: SetWorkItemLabelsInput): Promise<WorkItem>;
+  addTimeLog(tko_input: AddWorkTimeLogInput): Promise<WorkTimeLog>;
+  deleteTimeLog(tko_input: DeleteWorkTimeLogInput): Promise<void>;
+  listTimeLogs(tko_tenantId: string, tko_workItemId: string): Promise<WorkTimeLog[]>;
+  listTransitions(tko_tenantId: string, tko_workflowId: string): Promise<WorkflowTransition[]>;
+  setTransitionAllowed(tko_input: SetTransitionAllowedInput): Promise<WorkflowTransition[]>;
+  createWorkType(tko_input: CreateWorkTypeInput): Promise<WorkType>;
+  updateWorkType(tko_input: UpdateWorkTypeInput): Promise<WorkType>;
+  setWorkItemType(tko_input: SetWorkItemTypeInput): Promise<WorkItem>;
+  duplicateWorkItem(tko_input: DuplicateWorkItemInput): Promise<WorkItem>;
+  moveWorkItemToProject(tko_input: MoveWorkItemToProjectInput): Promise<WorkItem>;
+  deleteView(tko_input: DeleteSavedViewInput): Promise<void>;
   seedDemoWork(tko_actor: PlatformActor): Promise<WorkBoardData>;
 }
 
@@ -180,6 +217,11 @@ export class MemoryWorkStore implements WorkStore {
   private readonly tko_customFieldValues = new Map<string, WorkCustomFieldValue>();
   private readonly tko_history: WorkHistoryEntry[] = [];
   private readonly tko_relations = new Map<string, WorkItemRelation>();
+  private readonly tko_watchers = new Map<string, Set<string>>();
+  private readonly tko_labels = new Map<string, WorkLabel>();
+  private readonly tko_itemLabels = new Map<string, Set<string>>();
+  private readonly tko_timeLogs = new Map<string, WorkTimeLog>();
+  private readonly tko_transitions = new Map<string, WorkflowTransition[]>();
 
   async createSpace(tko_actor: PlatformActor, tko_input: { name: string; slug: string; visibility: WorkSpace["visibility"]; correlationId: string }): Promise<WorkSpace> {
     const tko_existing = Array.from(this.tko_spaces.values()).find(
@@ -210,6 +252,9 @@ export class MemoryWorkStore implements WorkStore {
       const tko_record: WorkflowStatus = { id: crypto.randomUUID(), tenantId: tko_input.actor.tenantId, type: "workflow_status", workflowId: tko_workflowId, description: "", ...tko_status };
       this.tko_statuses.set(tko_record.id, tko_record);
     }
+    // Seed the allow-all transition baseline as durable rows so editors can toggle pairs later.
+    const tko_seededStatuses = Array.from(this.tko_statuses.values()).filter(tko_status => tko_status.tenantId === tko_input.actor.tenantId && tko_status.workflowId === tko_workflowId).sort((tko_left, tko_right) => tko_left.sortOrder - tko_right.sortOrder);
+    this.tko_transitions.set(tko_workflowId, tko_seededStatuses.flatMap(tko_from => tko_seededStatuses.filter(tko_to => tko_to.id !== tko_from.id).map(tko_to => ({ fromStatusId: tko_from.id, toStatusId: tko_to.id, allowed: true }))));
     for (const tko_type of tko_builtinTypes) {
       const tko_record: WorkType = { id: crypto.randomUUID(), tenantId: tko_input.actor.tenantId, type: "work_type", projectId: tko_projectId, ...tko_type };
       this.tko_workTypes.set(tko_record.id, tko_record);
@@ -464,7 +509,7 @@ export class MemoryWorkStore implements WorkStore {
       workTypeId: tko_type.id, parentId: tko_input.parentId ?? null, workflowId: tko_project.workflowId,
       statusId: tko_initialStatus.id, title: tko_input.title.trim(), description: tko_input.description?.trim() ?? "",
       priority: tko_input.priority ?? "none", reporterMemberId: tko_input.actor.memberId,
-      assigneeMemberIds: Array.from(new Set(tko_input.assigneeMemberIds ?? [])), startAt: tko_input.startAt ?? null,
+      assigneeMemberIds: Array.from(new Set(tko_input.assigneeMemberIds ?? [])), watcherMemberIds: [], labelIds: [], startAt: tko_input.startAt ?? null,
       dueAt: tko_input.dueAt ?? null, estimateMinutes: tko_input.estimateMinutes ?? null, rank: tko_input.rank ?? "m",
       sprintId: null, version: 1, completedAt: null, archivedAt: null, createdAt: tko_now(), updatedAt: tko_now(),
     };
@@ -496,6 +541,7 @@ export class MemoryWorkStore implements WorkStore {
     if (tko_item.version !== tko_input.expectedVersion) throw new Error("WORK_ITEM_VERSION_CONFLICT");
     const tko_status = this.tko_statuses.get(tko_input.targetStatusId);
     if (!tko_status || tko_status.tenantId !== tko_item.tenantId || tko_status.workflowId !== tko_item.workflowId) throw new Error("WORK_ITEM_TRANSITION_NOT_ALLOWED");
+    this.tko_requireTransition(tko_item.workflowId, tko_item.statusId, tko_status.id);
     const tko_before = tko_item.statusId;
     tko_item.statusId = tko_status.id;
     tko_item.version += 1;
@@ -513,6 +559,7 @@ export class MemoryWorkStore implements WorkStore {
     if (tko_item.version !== tko_input.expectedVersion) throw new Error("WORK_ITEM_VERSION_CONFLICT");
     const tko_status = this.tko_statuses.get(tko_input.targetStatusId);
     if (!tko_status || tko_status.tenantId !== tko_item.tenantId || tko_status.workflowId !== tko_item.workflowId) throw new Error("WORK_ITEM_TRANSITION_NOT_ALLOWED");
+    this.tko_requireTransition(tko_item.workflowId, tko_item.statusId, tko_status.id);
     const tko_before = { statusId: tko_item.statusId, rank: tko_item.rank };
     const tko_siblings = Array.from(this.tko_items.values())
       .filter(tko_candidate => tko_candidate.tenantId === tko_item.tenantId && tko_candidate.statusId === tko_status.id && tko_candidate.id !== tko_item.id)
@@ -758,6 +805,276 @@ export class MemoryWorkStore implements WorkStore {
     return this.tko_history.filter(tko_entry => tko_entry.tenantId === tko_tenantId && tko_entry.workItemId === tko_workItemId).map(tko_clone);
   }
 
+  private tko_itemWatchers(tko_workItemId: string): Set<string> {
+    const tko_existing = this.tko_watchers.get(tko_workItemId);
+    if (tko_existing) return tko_existing;
+    const tko_created = new Set<string>();
+    this.tko_watchers.set(tko_workItemId, tko_created);
+    return tko_created;
+  }
+
+  private tko_syncItemFlags(tko_item: WorkItem): void {
+    tko_item.watcherMemberIds = Array.from(this.tko_itemWatchers(tko_item.id)).sort();
+    tko_item.labelIds = Array.from(this.tko_itemLabels.get(tko_item.id) ?? []).sort();
+    this.tko_items.set(tko_item.id, tko_item);
+  }
+
+  async addWatcher(tko_input: AddWorkItemWatcherInput): Promise<WorkItem> {
+    const tko_item = await this.getWorkItem(tko_input.actor.tenantId, tko_input.workItemId);
+    if (!tko_item || tko_item.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+    const tko_memberId = tko_input.memberId ?? tko_input.actor.memberId;
+    const tko_watchers = this.tko_itemWatchers(tko_item.id);
+    if (!tko_watchers.has(tko_memberId)) {
+      tko_watchers.add(tko_memberId);
+      this.tko_syncItemFlags(tko_item);
+      await this.tko_emit(tko_input.actor, "work.work_item_watcher_added.v1", "work.item", { workItemId: tko_item.id, key: tko_item.key, watcherMemberId: tko_memberId, selfWatch: tko_memberId === tko_input.actor.memberId }, "work.work_item.watcher_added", "work_item", tko_item.id, tko_input.correlationId);
+    }
+    return tko_clone((await this.getWorkItem(tko_input.actor.tenantId, tko_item.id))!);
+  }
+
+  async removeWatcher(tko_input: RemoveWorkItemWatcherInput): Promise<WorkItem> {
+    const tko_item = await this.getWorkItem(tko_input.actor.tenantId, tko_input.workItemId);
+    if (!tko_item || tko_item.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+    const tko_memberId = tko_input.memberId ?? tko_input.actor.memberId;
+    const tko_watchers = this.tko_itemWatchers(tko_item.id);
+    if (!tko_watchers.has(tko_memberId)) throw new Error("WORK_WATCHER_NOT_FOUND");
+    tko_watchers.delete(tko_memberId);
+    this.tko_syncItemFlags(tko_item);
+    await this.tko_emit(tko_input.actor, "work.work_item_watcher_removed.v1", "work.item", { workItemId: tko_item.id, key: tko_item.key, watcherMemberId: tko_memberId, selfWatch: tko_memberId === tko_input.actor.memberId }, "work.work_item.watcher_removed", "work_item", tko_item.id, tko_input.correlationId);
+    return tko_clone((await this.getWorkItem(tko_input.actor.tenantId, tko_item.id))!);
+  }
+
+  async listWatchers(tko_tenantId: string, tko_workItemId: string): Promise<string[]> {
+    const tko_item = await this.getWorkItem(tko_tenantId, tko_workItemId);
+    if (!tko_item) throw new Error("WORK_ITEM_NOT_FOUND");
+    return Array.from(this.tko_itemWatchers(tko_workItemId)).sort();
+  }
+
+  async listLabels(tko_tenantId: string, tko_projectId: string): Promise<WorkLabel[]> {
+    return Array.from(this.tko_labels.values()).filter(tko_label => tko_label.tenantId === tko_tenantId).sort((tko_left, tko_right) => tko_left.name.localeCompare(tko_right.name)).map(tko_clone);
+  }
+
+  async createLabel(tko_input: CreateWorkLabelInput): Promise<WorkLabel> {
+    const tko_project = await this.getProject(tko_input.actor.tenantId, tko_input.projectId);
+    if (!tko_project) throw new Error("WORK_PROJECT_NOT_FOUND");
+    const tko_name = tko_input.name.trim();
+    if (!tko_name || !tko_input.colorToken.trim()) throw new Error("WORK_LABEL_INVALID");
+    if (Array.from(this.tko_labels.values()).some(tko_label => tko_label.tenantId === tko_input.actor.tenantId && tko_label.name.toLocaleLowerCase() === tko_name.toLocaleLowerCase())) throw new Error("WORK_LABEL_NAME_TAKEN");
+    const tko_label: WorkLabel = { id: crypto.randomUUID(), tenantId: tko_input.actor.tenantId, type: "work_label", name: tko_name, colorToken: tko_input.colorToken.trim() };
+    this.tko_labels.set(tko_label.id, tko_label);
+    await this.tko_emit(tko_input.actor, "work.label_created.v1", "work.project", { projectId: tko_project.id, labelId: tko_label.id, name: tko_label.name, colorToken: tko_label.colorToken }, "work.label.created", "work_label", tko_label.id, tko_input.correlationId);
+    return tko_clone(tko_label);
+  }
+
+  async updateLabel(tko_input: UpdateWorkLabelInput): Promise<WorkLabel> {
+    const tko_label = this.tko_labels.get(tko_input.labelId);
+    if (!tko_label || tko_label.tenantId !== tko_input.actor.tenantId) throw new Error("WORK_LABEL_NOT_FOUND");
+    const tko_before = { name: tko_label.name, colorToken: tko_label.colorToken };
+    if (tko_input.name !== undefined) {
+      const tko_name = tko_input.name.trim();
+      if (!tko_name) throw new Error("WORK_LABEL_INVALID");
+      if (Array.from(this.tko_labels.values()).some(tko_entry => tko_entry.id !== tko_label.id && tko_entry.tenantId === tko_label.tenantId && tko_entry.name.toLocaleLowerCase() === tko_name.toLocaleLowerCase())) throw new Error("WORK_LABEL_NAME_TAKEN");
+      tko_label.name = tko_name;
+    }
+    if (tko_input.colorToken !== undefined) {
+      if (!tko_input.colorToken.trim()) throw new Error("WORK_LABEL_INVALID");
+      tko_label.colorToken = tko_input.colorToken.trim();
+    }
+    this.tko_labels.set(tko_label.id, tko_label);
+    await this.tko_emit(tko_input.actor, "work.label_updated.v1", "work.project", { projectId: tko_input.projectId, labelId: tko_label.id, before: tko_before, after: { name: tko_label.name, colorToken: tko_label.colorToken } }, "work.label.updated", "work_label", tko_label.id, tko_input.correlationId);
+    return tko_clone(tko_label);
+  }
+
+  async deleteLabel(tko_input: DeleteWorkLabelInput): Promise<void> {
+    const tko_label = this.tko_labels.get(tko_input.labelId);
+    if (!tko_label || tko_label.tenantId !== tko_input.actor.tenantId) throw new Error("WORK_LABEL_NOT_FOUND");
+    this.tko_labels.delete(tko_label.id);
+    for (const [tko_workItemId, tko_labelIds] of Array.from(this.tko_itemLabels.entries())) {
+      if (!tko_labelIds.delete(tko_label.id)) continue;
+      const tko_item = this.tko_items.get(tko_workItemId);
+      if (tko_item) this.tko_syncItemFlags(tko_item);
+    }
+    await this.tko_emit(tko_input.actor, "work.label_deleted.v1", "work.project", { projectId: tko_input.projectId, labelId: tko_label.id, name: tko_label.name }, "work.label.deleted", "work_label", tko_label.id, tko_input.correlationId);
+  }
+
+  async setWorkItemLabels(tko_input: SetWorkItemLabelsInput): Promise<WorkItem> {
+    const tko_item = await this.getWorkItem(tko_input.actor.tenantId, tko_input.workItemId);
+    if (!tko_item || tko_item.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+    const tko_requested = Array.from(new Set(tko_input.labelIds));
+    for (const tko_labelId of tko_requested) {
+      const tko_label = this.tko_labels.get(tko_labelId);
+      if (!tko_label || tko_label.tenantId !== tko_item.tenantId) throw new Error("WORK_LABEL_NOT_FOUND");
+    }
+    const tko_before = Array.from(this.tko_itemLabels.get(tko_item.id) ?? []).sort();
+    this.tko_itemLabels.set(tko_item.id, new Set(tko_requested));
+    this.tko_syncItemFlags(tko_item);
+    const tko_after = tko_requested.sort();
+    await this.tko_historyEntry(tko_input.actor, tko_item, "labels", tko_before, tko_after);
+    await this.tko_emit(tko_input.actor, "work.work_item_labels_set.v1", "work.item", { workItemId: tko_item.id, key: tko_item.key, beforeLabelIds: tko_before, labelIds: tko_after }, "work.work_item.labels_set", "work_item", tko_item.id, tko_input.correlationId);
+    return tko_clone((await this.getWorkItem(tko_input.actor.tenantId, tko_item.id))!);
+  }
+
+  async addTimeLog(tko_input: AddWorkTimeLogInput): Promise<WorkTimeLog> {
+    const tko_item = await this.getWorkItem(tko_input.actor.tenantId, tko_input.workItemId);
+    if (!tko_item || tko_item.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+    if (!Number.isInteger(tko_input.minutes) || tko_input.minutes <= 0) throw new Error("WORK_TIME_LOG_INVALID");
+    const tko_log: WorkTimeLog = { id: crypto.randomUUID(), tenantId: tko_item.tenantId, type: "work_time_log", workItemId: tko_item.id, memberId: tko_input.actor.memberId, minutes: tko_input.minutes, startedAt: tko_input.startedAt ?? tko_now(), note: tko_input.note?.trim() ?? "", createdAt: tko_now() };
+    this.tko_timeLogs.set(tko_log.id, tko_log);
+    await this.tko_emit(tko_input.actor, "work.time_logged.v1", "work.item", { workItemId: tko_item.id, key: tko_item.key, timeLogId: tko_log.id, memberId: tko_log.memberId, minutes: tko_log.minutes }, "work.time_log.created", "work_time_log", tko_log.id, tko_input.correlationId);
+    return tko_clone(tko_log);
+  }
+
+  async deleteTimeLog(tko_input: DeleteWorkTimeLogInput): Promise<void> {
+    const tko_log = this.tko_timeLogs.get(tko_input.timeLogId);
+    if (!tko_log || tko_log.tenantId !== tko_input.actor.tenantId || tko_log.workItemId !== tko_input.workItemId) throw new Error("WORK_TIME_LOG_NOT_FOUND");
+    this.tko_timeLogs.delete(tko_log.id);
+    await this.tko_emit(tko_input.actor, "work.time_log_deleted.v1", "work.item", { workItemId: tko_input.workItemId, timeLogId: tko_log.id, memberId: tko_log.memberId, minutes: tko_log.minutes }, "work.time_log.deleted", "work_time_log", tko_log.id, tko_input.correlationId);
+  }
+
+  async listTimeLogs(tko_tenantId: string, tko_workItemId: string): Promise<WorkTimeLog[]> {
+    return Array.from(this.tko_timeLogs.values()).filter(tko_log => tko_log.tenantId === tko_tenantId && tko_log.workItemId === tko_workItemId).sort((tko_left, tko_right) => tko_right.startedAt.getTime() - tko_left.startedAt.getTime()).map(tko_clone);
+  }
+
+  async listTransitions(tko_tenantId: string, tko_workflowId: string): Promise<WorkflowTransition[]> {
+    const tko_statusIds = new Set(Array.from(this.tko_statuses.values()).filter(tko_status => tko_status.tenantId === tko_tenantId && tko_status.workflowId === tko_workflowId).map(tko_status => tko_status.id));
+    return (this.tko_transitions.get(tko_workflowId) ?? []).filter(tko_row => (tko_row.fromStatusId === null || tko_statusIds.has(tko_row.fromStatusId)) && tko_statusIds.has(tko_row.toStatusId)).map(tko_clone);
+  }
+
+  async setTransitionAllowed(tko_input: SetTransitionAllowedInput): Promise<WorkflowTransition[]> {
+    const tko_project = await this.getProject(tko_input.actor.tenantId, tko_input.projectId);
+    if (!tko_project) throw new Error("WORK_PROJECT_NOT_FOUND");
+    const tko_statusIds = new Set(Array.from(this.tko_statuses.values()).filter(tko_status => tko_status.tenantId === tko_input.actor.tenantId && tko_status.workflowId === tko_project.workflowId).map(tko_status => tko_status.id));
+    if (!tko_statusIds.has(tko_input.toStatusId)) throw new Error("WORK_STATUS_NOT_FOUND");
+    if (tko_input.fromStatusId !== null && !tko_statusIds.has(tko_input.fromStatusId)) throw new Error("WORK_STATUS_NOT_FOUND");
+    if (tko_input.fromStatusId === tko_input.toStatusId) throw new Error("WORK_TRANSITION_INVALID");
+    const tko_rows = this.tko_transitions.get(tko_project.workflowId) ?? [];
+    const tko_row = tko_rows.find(tko_entry => tko_entry.fromStatusId === tko_input.fromStatusId && tko_entry.toStatusId === tko_input.toStatusId);
+    if (tko_row) tko_row.allowed = tko_input.allowed;
+    else tko_rows.push({ fromStatusId: tko_input.fromStatusId, toStatusId: tko_input.toStatusId, allowed: tko_input.allowed });
+    this.tko_transitions.set(tko_project.workflowId, tko_rows);
+    await this.tko_emit(tko_input.actor, "work.workflow_transition_updated.v1", "work.project", { projectId: tko_project.id, workflowId: tko_project.workflowId, fromStatusId: tko_input.fromStatusId, toStatusId: tko_input.toStatusId, allowed: tko_input.allowed }, "work.workflow_transition.updated", "workflow_transition", `${tko_project.workflowId}:${tko_input.fromStatusId ?? "entry"}:${tko_input.toStatusId}`, tko_input.correlationId);
+    return this.listTransitions(tko_input.actor.tenantId, tko_project.workflowId);
+  }
+
+  async createWorkType(tko_input: CreateWorkTypeInput): Promise<WorkType> {
+    const tko_project = await this.getProject(tko_input.actor.tenantId, tko_input.projectId);
+    if (!tko_project) throw new Error("WORK_PROJECT_NOT_FOUND");
+    const tko_name = tko_input.name.trim();
+    if (!tko_name) throw new Error("WORK_TYPE_NAME_INVALID");
+    const tko_existing = await this.listWorkTypes(tko_input.actor.tenantId, tko_project.id);
+    if (tko_existing.some(tko_type => tko_type.name.toLocaleLowerCase() === tko_name.toLocaleLowerCase())) throw new Error("WORK_TYPE_NAME_TAKEN");
+    const tko_type: WorkType = { id: crypto.randomUUID(), tenantId: tko_input.actor.tenantId, type: "work_type", projectId: tko_project.id, name: tko_name, category: tko_input.category, icon: tko_input.icon?.trim() || "circle" };
+    this.tko_workTypes.set(tko_type.id, tko_type);
+    await this.tko_emit(tko_input.actor, "work.work_type_created.v1", "work.project", { projectId: tko_project.id, workTypeId: tko_type.id, name: tko_type.name, category: tko_type.category }, "work.work_type.created", "work_type", tko_type.id, tko_input.correlationId);
+    return tko_clone(tko_type);
+  }
+
+  async updateWorkType(tko_input: UpdateWorkTypeInput): Promise<WorkType> {
+    const tko_type = this.tko_workTypes.get(tko_input.workTypeId);
+    if (!tko_type || tko_type.tenantId !== tko_input.actor.tenantId) throw new Error("WORK_TYPE_NOT_FOUND");
+    const tko_before = { name: tko_type.name, icon: tko_type.icon };
+    if (tko_input.name !== undefined) {
+      const tko_name = tko_input.name.trim();
+      if (!tko_name) throw new Error("WORK_TYPE_NAME_INVALID");
+      const tko_existing = await this.listWorkTypes(tko_input.actor.tenantId, tko_input.projectId);
+      if (tko_existing.some(tko_entry => tko_entry.id !== tko_type.id && tko_entry.name.toLocaleLowerCase() === tko_name.toLocaleLowerCase())) throw new Error("WORK_TYPE_NAME_TAKEN");
+      tko_type.name = tko_name;
+    }
+    if (tko_input.icon !== undefined) {
+      if (!tko_input.icon.trim()) throw new Error("WORK_TYPE_NAME_INVALID");
+      tko_type.icon = tko_input.icon.trim();
+    }
+    this.tko_workTypes.set(tko_type.id, tko_type);
+    await this.tko_emit(tko_input.actor, "work.work_type_updated.v1", "work.project", { projectId: tko_input.projectId, workTypeId: tko_type.id, before: tko_before, after: { name: tko_type.name, icon: tko_type.icon } }, "work.work_type.updated", "work_type", tko_type.id, tko_input.correlationId);
+    return tko_clone(tko_type);
+  }
+
+  async setWorkItemType(tko_input: SetWorkItemTypeInput): Promise<WorkItem> {
+    const tko_item = await this.getWorkItem(tko_input.actor.tenantId, tko_input.workItemId);
+    if (!tko_item || tko_item.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+    const tko_types = await this.listWorkTypes(tko_input.actor.tenantId, tko_item.projectId);
+    const tko_type = tko_types.find(tko_entry => tko_entry.id === tko_input.workTypeId);
+    if (!tko_type) throw new Error("WORK_TYPE_NOT_FOUND");
+    const tko_before = tko_item.workTypeId;
+    if (tko_before !== tko_type.id) {
+      tko_item.workTypeId = tko_type.id;
+      tko_item.version += 1;
+      tko_item.updatedAt = tko_now();
+      this.tko_items.set(tko_item.id, tko_item);
+      await this.tko_historyEntry(tko_input.actor, tko_item, "work_type_id", tko_before, tko_type.id);
+      await this.tko_emit(tko_input.actor, "work.work_item_type_changed.v1", "work.item", { workItemId: tko_item.id, key: tko_item.key, beforeWorkTypeId: tko_before, workTypeId: tko_type.id, version: tko_item.version }, "work.work_item.type_changed", "work_item", tko_item.id, tko_input.correlationId);
+    }
+    return tko_clone((await this.getWorkItem(tko_input.actor.tenantId, tko_item.id))!);
+  }
+
+  async duplicateWorkItem(tko_input: DuplicateWorkItemInput): Promise<WorkItem> {
+    const tko_source = await this.getWorkItem(tko_input.actor.tenantId, tko_input.workItemId);
+    if (!tko_source || tko_source.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+    const tko_project = await this.getProject(tko_input.actor.tenantId, tko_source.projectId);
+    if (!tko_project || tko_project.archivedAt) throw new Error("WORK_PROJECT_NOT_FOUND");
+    const tko_statuses = await this.listStatuses(tko_input.actor.tenantId, tko_project.workflowId);
+    const tko_initialStatus = tko_statuses.find(tko_status => tko_status.category === "todo");
+    if (!tko_initialStatus) throw new Error("WORKFLOW_INITIAL_STATUS_MISSING");
+    tko_project.sequenceCounter += 1;
+    this.tko_projects.set(tko_project.id, tko_project);
+    const tko_record: WorkItem = {
+      ...tko_source,
+      id: crypto.randomUUID(), sequenceNo: tko_project.sequenceCounter, key: `${tko_project.key}-${tko_project.sequenceCounter}`,
+      title: `${tko_source.title} [Copy]`, statusId: tko_initialStatus.id, parentId: null, sprintId: null,
+      reporterMemberId: tko_input.actor.memberId, assigneeMemberIds: [...tko_source.assigneeMemberIds],
+      watcherMemberIds: [], labelIds: [...tko_source.labelIds], rank: "m", version: 1,
+      completedAt: null, archivedAt: null, createdAt: tko_now(), updatedAt: tko_now(),
+    };
+    this.tko_items.set(tko_record.id, tko_record);
+    this.tko_itemLabels.set(tko_record.id, new Set(tko_source.labelIds));
+    await this.tko_historyEntry(tko_input.actor, tko_record, "created", null, { key: tko_record.key, title: tko_record.title, duplicatedFrom: tko_source.id });
+    await this.tko_emit(tko_input.actor, "work.work_item_duplicated.v1", "work.item", { workItemId: tko_record.id, key: tko_record.key, sourceWorkItemId: tko_source.id, projectId: tko_record.projectId }, "work.work_item.duplicated", "work_item", tko_record.id, tko_input.correlationId);
+    return tko_clone(tko_record);
+  }
+
+  async moveWorkItemToProject(tko_input: MoveWorkItemToProjectInput): Promise<WorkItem> {
+    const tko_item = await this.getWorkItem(tko_input.actor.tenantId, tko_input.workItemId);
+    if (!tko_item || tko_item.archivedAt) throw new Error("WORK_ITEM_NOT_FOUND");
+    if (tko_item.projectId === tko_input.targetProjectId) throw new Error("WORK_ITEM_MOVE_PROJECT_INVALID");
+    const tko_target = await this.getProject(tko_input.actor.tenantId, tko_input.targetProjectId);
+    if (!tko_target || tko_target.archivedAt) throw new Error("WORK_PROJECT_NOT_FOUND");
+    const tko_targetStatuses = await this.listStatuses(tko_input.actor.tenantId, tko_target.workflowId);
+    const tko_initialStatus = tko_targetStatuses.find(tko_status => tko_status.category === "todo");
+    if (!tko_initialStatus) throw new Error("WORKFLOW_INITIAL_STATUS_MISSING");
+    const tko_sourceType = this.tko_workTypes.get(tko_item.workTypeId);
+    const tko_targetTypes = await this.listWorkTypes(tko_input.actor.tenantId, tko_target.id);
+    const tko_targetType = tko_targetTypes.find(tko_entry => tko_entry.id === tko_item.workTypeId)
+      ?? tko_targetTypes.find(tko_entry => tko_sourceType && tko_entry.category === tko_sourceType.category)
+      ?? tko_targetTypes.find(tko_entry => tko_entry.category === "task");
+    if (!tko_targetType) throw new Error("WORK_TYPE_NOT_FOUND");
+    for (const tko_members of Array.from(this.tko_sprintItems.values())) tko_members.delete(tko_item.id);
+    tko_target.sequenceCounter += 1;
+    this.tko_projects.set(tko_target.id, tko_target);
+    const tko_before = { projectId: tko_item.projectId, key: tko_item.key, sprintId: tko_item.sprintId };
+    tko_item.projectId = tko_target.id;
+    tko_item.workflowId = tko_target.workflowId;
+    tko_item.statusId = tko_initialStatus.id;
+    tko_item.workTypeId = tko_targetType.id;
+    tko_item.sequenceNo = tko_target.sequenceCounter;
+    tko_item.key = `${tko_target.key}-${tko_target.sequenceCounter}`;
+    tko_item.sprintId = null;
+    tko_item.rank = "m";
+    tko_item.version += 1;
+    tko_item.updatedAt = tko_now();
+    tko_item.completedAt = null;
+    this.tko_items.set(tko_item.id, tko_item);
+    await this.tko_historyEntry(tko_input.actor, tko_item, "project_moved", tko_before, { projectId: tko_item.projectId, key: tko_item.key, sprintId: null });
+    await this.tko_emit(tko_input.actor, "work.work_item_moved_project.v1", "work.item", { workItemId: tko_item.id, key: tko_item.key, beforeProjectId: tko_before.projectId, targetProjectId: tko_target.id, version: tko_item.version }, "work.work_item.moved_project", "work_item", tko_item.id, tko_input.correlationId);
+    return tko_clone(tko_item);
+  }
+
+  async deleteView(tko_input: DeleteSavedViewInput): Promise<void> {
+    const tko_view = this.tko_views.get(tko_input.viewId);
+    if (!tko_view || tko_view.tenantId !== tko_input.actor.tenantId || tko_view.projectId !== tko_input.projectId) throw new Error("WORK_SAVED_VIEW_NOT_FOUND");
+    this.tko_views.delete(tko_view.id);
+    await this.tko_emit(tko_input.actor, "work.saved_view_deleted.v1", "work.view", { projectId: tko_input.projectId, viewId: tko_view.id, name: tko_view.name }, "work.saved_view.deleted", "saved_view", tko_view.id, tko_input.correlationId);
+  }
+
   async seedDemoWork(tko_actor: PlatformActor): Promise<WorkBoardData> {
     const tko_existing = (await this.listProjects(tko_actor.tenantId))[0];
     if (tko_existing) return this.tko_board(tko_actor.tenantId, tko_existing.id);
@@ -784,6 +1101,15 @@ export class MemoryWorkStore implements WorkStore {
 
   private async tko_historyEntry(tko_actor: PlatformActor, tko_item: WorkItem, tko_field: string, tko_before: unknown, tko_after: unknown): Promise<void> {
     this.tko_history.push({ id: crypto.randomUUID(), tenantId: tko_item.tenantId, type: "work_history", workItemId: tko_item.id, actorMemberId: tko_actor.memberId, field: tko_field, before: tko_before, after: tko_after, createdAt: tko_now() });
+  }
+
+  /** Workflows with no persisted transition rows allow every status change (backward compat). */
+  private tko_requireTransition(tko_workflowId: string, tko_fromStatusId: string, tko_toStatusId: string): void {
+    if (tko_fromStatusId === tko_toStatusId) return;
+    const tko_rows = this.tko_transitions.get(tko_workflowId);
+    if (!tko_rows || !tko_rows.length) return;
+    const tko_row = tko_rows.find(tko_entry => tko_entry.fromStatusId === tko_fromStatusId && tko_entry.toStatusId === tko_toStatusId);
+    if (!tko_row || !tko_row.allowed) throw new Error("WORK_ITEM_TRANSITION_NOT_ALLOWED");
   }
 
   private async tko_emit(tko_actor: PlatformActor, tko_eventType: string, tko_topic: string, tko_payload: Record<string, unknown>, tko_action: string, tko_resourceType: string, tko_resourceId: string, tko_correlationId: string): Promise<void> {
