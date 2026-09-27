@@ -17,8 +17,14 @@ export type WorkspaceSearchKind = "work" | "chat" | "crm" | "doc";
 export type WorkspaceDocumentKind = "note" | "file";
 export type InboxItemKind = "mention" | "assignment" | "comment" | "deal" | "form" | "automation" | "system";
 export type FormTargetType = "work_item" | "crm_lead";
-export type AutomationTriggerType = "crm.lead_created.v1" | "work.work_item_created.v1" | "workspace.form_submitted.v1";
-export type AutomationActionType = "create_work_item" | "create_crm_activity";
+export type AutomationTriggerType =
+  | "crm.lead_created.v1"
+  | "work.work_item_created.v1"
+  | "work.work_item_status_changed.v1"
+  | "crm.deal_stage_changed.v1"
+  | "crm.deal_won.v1"
+  | "workspace.form_submitted.v1";
+export type AutomationActionType = "create_work_item" | "create_crm_activity" | "post_channel_message" | "notify_user" | "update_work_item";
 
 export interface WorkspaceSearchDocument extends TenantResource {
   type: "workspace_search_document";
@@ -76,6 +82,15 @@ export interface WorkspaceDocument extends TenantResource {
   updatedAt: Date;
 }
 
+export interface WorkspaceDocumentRevision extends TenantResource {
+  type: "workspace_document_revision";
+  documentId: string;
+  version: number;
+  snapshot: { title: string; bodyText: string; content: Record<string, unknown> };
+  authorMemberId: string;
+  createdAt: Date;
+}
+
 export interface WorkspaceDocumentLink extends TenantResource {
   type: "workspace_document_link";
   documentId: string;
@@ -101,9 +116,23 @@ export interface WorkspaceForm extends TenantResource {
   fields: WorkspaceFormField[];
   targetType: FormTargetType;
   targetConfig: Record<string, unknown>;
+  isPublic: boolean;
+  shareSlug: string | null;
   ownerMemberId: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** Public, unauthenticated projection of a shared form (spec 10 §5). Internal target mapping is
+ * deliberately excluded: a public visitor must never learn which project or pipeline receives records. */
+export interface WorkspacePublicFormDefinition {
+  slug: string;
+  formId: string;
+  tenantId: string;
+  name: string;
+  description: string;
+  targetType: FormTargetType;
+  fields: Array<Pick<WorkspaceFormField, "id" | "label" | "fieldType" | "required" | "options">>;
 }
 
 export interface WorkspaceFormSubmission extends TenantResource {
@@ -117,6 +146,11 @@ export interface WorkspaceFormSubmission extends TenantResource {
   createdAt: Date;
 }
 
+export interface WorkspaceAutomationCondition {
+  field: string;
+  equals: string | number | boolean | null;
+}
+
 export interface WorkspaceAutomationAction {
   type: AutomationActionType;
   config: Record<string, unknown>;
@@ -128,6 +162,7 @@ export interface WorkspaceAutomationRule extends TenantResource {
   status: "active" | "paused";
   triggerType: AutomationTriggerType;
   condition: Record<string, unknown>;
+  conditions?: WorkspaceAutomationCondition[];
   actions: WorkspaceAutomationAction[];
   ownerMemberId: string;
   version: number;
@@ -153,6 +188,9 @@ export interface WorkspaceOverview {
   unreadInboxCount: number;
   activeDealsCount: number;
   documentsCount: number;
+  thisWeekActivityCount: number;
+  overdueWorkItemsCount: number;
+  openPipelineValueCents: number;
   recentActivity: Array<{ id: string; kind: WorkspaceSearchKind | "inbox"; title: string; href: string; createdAt: Date }>;
 }
 

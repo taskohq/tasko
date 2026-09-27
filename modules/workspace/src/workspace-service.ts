@@ -11,6 +11,7 @@ import type {
 } from "../../../packages/contracts/src/workspace";
 import { getChatStore } from "../../../packages/database/src/chat-store";
 import { getCRMStore } from "../../../packages/database/src/crm-store";
+import { getPlatformStore } from "../../../packages/database/src/platform-store";
 import { getWorkStore } from "../../../packages/database/src/work-store";
 import { getWorkspaceStore } from "../../../packages/database/src/workspace-store";
 import { requireCapability } from "../../permissions/src/authorization";
@@ -117,6 +118,32 @@ export async function linkDocument(tko_actor: PlatformActor, tko_input: { docume
 export async function entityLinks(tko_actor: PlatformActor, tko_entityType: WorkspaceEntityType, tko_entityId: string) { await tko_entityExists(tko_actor, tko_entityType, tko_entityId); return getWorkspaceStore().listEntityLinks(tko_actor.tenantId, tko_entityType, tko_entityId); }
 export async function createEntityLink(tko_actor: PlatformActor, tko_input: { sourceType: WorkspaceEntityType; sourceId: string; targetType: WorkspaceEntityType; targetId: string; relationType: "context" | "reference" | "related" | "blocks"; correlationId: string }) { tko_require(tko_actor, "workspace.link.manage", "workspace_entity_link", `${tko_input.sourceId}:${tko_input.targetId}`); await tko_entityExists(tko_actor, tko_input.sourceType, tko_input.sourceId); await tko_entityExists(tko_actor, tko_input.targetType, tko_input.targetId); return getWorkspaceStore().createEntityLink(tko_actor, tko_input); }
 
+/** Version history (spec 10 §2 P2). Listing requires the same read scope as the document itself:
+ * a non-reader of a private document is denied before any revision metadata leaks. */
+export async function documentRevisions(tko_actor: PlatformActor, tko_documentId: string) {
+  await tko_requireEntityRead(tko_actor, "document", tko_documentId);
+  return getWorkspaceStore().listDocumentRevisions(tko_actor.tenantId, tko_documentId);
+}
+
+export async function updateDocumentContent(tko_actor: PlatformActor, tko_input: { documentId: string; title?: string; bodyText: string; content?: Record<string, unknown>; correlationId: string }) {
+  const tko_document = await getWorkspaceStore().getDocument(tko_actor.tenantId, tko_input.documentId);
+  if (!tko_document) throw new Error("WORKSPACE_DOCUMENT_NOT_FOUND");
+  requireCapability(tko_actor, "workspace.document.manage", tko_document);
+  if (tko_document.projectId) await tko_requireProjectDocumentAccess(tko_actor, tko_document.projectId, "work.item.update");
+  return getWorkspaceStore().updateDocumentContent(tko_actor, { documentId: tko_document.id, title: tko_input.title, bodyText: tko_input.bodyText, content: tko_input.content ?? {}, correlationId: tko_input.correlationId });
+}
+
+/** Restore is never destructive: it writes a NEW revision carrying the restored snapshot. */
+export async function restoreDocumentRevision(tko_actor: PlatformActor, tko_input: { documentId: string; revisionId: string; correlationId: string }) {
+  const tko_document = await getWorkspaceStore().getDocument(tko_actor.tenantId, tko_input.documentId);
+  if (!tko_document) throw new Error("WORKSPACE_DOCUMENT_NOT_FOUND");
+  requireCapability(tko_actor, "workspace.document.manage", tko_document);
+  if (tko_document.projectId) await tko_requireProjectDocumentAccess(tko_actor, tko_document.projectId, "work.item.update");
+  const tko_revisions = await getWorkspaceStore().listDocumentRevisions(tko_actor.tenantId, tko_input.documentId);
+  if (!tko_revisions.some(tko_revision => tko_revision.id === tko_input.revisionId)) throw new Error("WORKSPACE_DOCUMENT_REVISION_NOT_FOUND");
+  return getWorkspaceStore().restoreDocumentRevision(tko_actor, { documentId: tko_document.id, revisionId: tko_input.revisionId, correlationId: tko_input.correlationId });
+}
+
 export async function createForm(tko_actor: PlatformActor, tko_input: { name: string; description?: string; fields: import("../../../packages/contracts/src/workspace").WorkspaceFormField[]; targetType: "work_item" | "crm_lead"; targetConfig: Record<string, unknown>; correlationId: string }) {
   tko_require(tko_actor, "workspace.form.manage", "workspace_form", "new");
   if (!tko_input.fields.length) throw new Error("WORKSPACE_FORM_FIELDS_REQUIRED");
@@ -131,6 +158,19 @@ export async function createForm(tko_actor: PlatformActor, tko_input: { name: st
 }
 export async function forms(tko_actor: PlatformActor) { tko_require(tko_actor, "workspace.form.read", "workspace_form", "list"); return getWorkspaceStore().listForms(tko_actor.tenantId); }
 export async function activateForm(tko_actor: PlatformActor, tko_input: { formId: string; correlationId: string }) { tko_require(tko_actor, "workspace.form.manage", "workspace_form", tko_input.formId); return getWorkspaceStore().activateForm(tko_actor, tko_input); }
+
+/** Public share mode (spec 10 §5). Enabling regenerates the slug; disabling clears it. */
+export async function setFormSharing(tko_actor: PlatformActor, tko_input: { formId: string; isPublic: boolean; correlationId: string }) {
+  tko_require(tko_actor, "workspace.form.manage", "workspace_form", tko_input.formId);
+  const tko_form = await getWorkspaceStore().getForm(tko_actor.tenantId, tko_input.formId);
+  if (!tko_form) throw new Error("WORKSPACE_FORM_NOT_FOUND");
+  let tko_slug: string | null = null;
+  if (tko_input.isPublic) {
+    const tko_alphabet = "abcdefghijkmnpqrstuvwxyz23456789";
+    do { tko_slug = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(tko_byte => tko_alphabet[tko_byte % tko_alphabet.length]).join(""); } while (await getWorkspaceStore().getPublicFormBySlug(tko_slug));
+  }
+  return getWorkspaceStore().setFormSharing(tko_actor, { formId: tko_form.id, isPublic: tko_input.isPublic, shareSlug: tko_slug, correlationId: tko_input.correlationId });
+}
 export async function formSubmissions(tko_actor: PlatformActor, tko_formId: string) {
   const tko_form = await getWorkspaceStore().getForm(tko_actor.tenantId, tko_formId);
   if (!tko_form) throw new Error("WORKSPACE_FORM_NOT_FOUND");
@@ -153,19 +193,50 @@ export async function submitForm(tko_actor: PlatformActor, tko_input: { formId: 
   return getWorkspaceStore().recordFormSubmission(tko_actor, { formId: tko_form.id, values: tko_input.values, targetEntityType: "crm_lead", targetEntityId: tko_lead.id, idempotencyKey: tko_input.idempotencyKey, correlationId: tko_input.correlationId });
 }
 
-export async function createAutomationRule(tko_actor: PlatformActor, tko_input: { name: string; triggerType: AutomationTriggerType; condition?: Record<string, unknown>; actions: WorkspaceAutomationAction[]; correlationId: string }) {
+export async function createAutomationRule(tko_actor: PlatformActor, tko_input: { name: string; triggerType: AutomationTriggerType; condition?: Record<string, unknown>; conditions?: Array<{ field: string; equals: string | number | boolean | null }>; actions: WorkspaceAutomationAction[]; correlationId: string }) {
   tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_rule", "new");
   await getSaaSService().requireFeature(tko_actor, "automation");
   if (!tko_input.actions.length) throw new Error("WORKSPACE_AUTOMATION_ACTION_REQUIRED");
+  if ((tko_input.conditions?.length ?? 0) > 3) throw new Error("WORKSPACE_AUTOMATION_CONDITIONS_TOO_MANY");
+  for (const tko_condition of tko_input.conditions ?? []) if (!tko_text(tko_condition.field)) throw new Error("WORKSPACE_AUTOMATION_CONDITION_FIELD_REQUIRED");
   for (const tko_action of tko_input.actions) {
-    if (tko_action.type !== "create_work_item") continue;
-    const tko_projectId = tko_text(tko_action.config.projectId);
-    if (!tko_projectId) throw new Error("WORKSPACE_AUTOMATION_PROJECT_REQUIRED");
-    const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_projectId);
-    if (!tko_project) throw new Error("WORKSPACE_AUTOMATION_PROJECT_NOT_FOUND");
-    requireCapability(tko_actor, "work.item.create", tko_project);
+    if (tko_action.type === "create_work_item") {
+      const tko_projectId = tko_text(tko_action.config.projectId);
+      if (!tko_projectId) throw new Error("WORKSPACE_AUTOMATION_PROJECT_REQUIRED");
+      const tko_project = await getWorkStore().getProject(tko_actor.tenantId, tko_projectId);
+      if (!tko_project) throw new Error("WORKSPACE_AUTOMATION_PROJECT_NOT_FOUND");
+      requireCapability(tko_actor, "work.item.create", tko_project);
+    }
+    if (tko_action.type === "post_channel_message") {
+      const tko_channelId = tko_text(tko_action.config.channelId);
+      const tko_body = tko_text(tko_action.config.body);
+      if (!tko_channelId || !tko_body) throw new Error("WORKSPACE_AUTOMATION_CHANNEL_MESSAGE_TARGET_REQUIRED");
+      const tko_channel = await getChatStore().getChannel(tko_actor.tenantId, tko_channelId);
+      if (!tko_channel) throw new Error("WORKSPACE_AUTOMATION_CHANNEL_NOT_FOUND");
+      requireCapability(tko_actor, "chat.message.send", tko_channel);
+    }
+    if (tko_action.type === "notify_user") {
+      const tko_memberId = tko_text(tko_action.config.memberId);
+      if (!tko_memberId) throw new Error("WORKSPACE_AUTOMATION_NOTIFY_MEMBER_REQUIRED");
+      const tko_members = await getPlatformStore().listTenantMembers(tko_actor.tenantId);
+      if (!tko_members.some(tko_member => tko_member.id === tko_memberId && tko_member.status === "active")) throw new Error("WORKSPACE_AUTOMATION_MEMBER_NOT_FOUND");
+    }
+    if (tko_action.type === "update_work_item") {
+      const tko_hasChange = tko_text(tko_action.config.statusId) || Array.isArray(tko_action.config.assigneeMemberIds) && tko_action.config.assigneeMemberIds.length > 0 || tko_action.config.dueAt !== undefined;
+      if (!tko_hasChange) throw new Error("WORKSPACE_AUTOMATION_UPDATE_TARGET_REQUIRED");
+      const tko_statusId = tko_text(tko_action.config.statusId);
+      if (tko_statusId) {
+        const tko_projects = await getWorkStore().listProjects(tko_actor.tenantId);
+        const tko_statuses = (await Promise.all(tko_projects.map(tko_project => getWorkStore().listStatuses(tko_actor.tenantId, tko_project.workflowId)))).flat();
+        if (!tko_statuses.some(tko_status => tko_status.id === tko_statusId)) throw new Error("WORKSPACE_AUTOMATION_STATUS_NOT_FOUND");
+      }
+      if (tko_text(tko_action.config.workItemId)) {
+        const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_text(tko_action.config.workItemId));
+        if (!tko_item) throw new Error("WORKSPACE_AUTOMATION_WORK_ITEM_NOT_FOUND");
+      }
+    }
   }
-  return getWorkspaceStore().createAutomationRule(tko_actor, { name: tko_input.name, status: "active", triggerType: tko_input.triggerType, condition: tko_input.condition ?? {}, actions: tko_input.actions, correlationId: tko_input.correlationId });
+  return getWorkspaceStore().createAutomationRule(tko_actor, { name: tko_input.name, status: "active", triggerType: tko_input.triggerType, condition: tko_input.condition ?? {}, conditions: tko_input.conditions ?? [], actions: tko_input.actions, correlationId: tko_input.correlationId });
 }
 export async function automationRules(tko_actor: PlatformActor) { tko_require(tko_actor, "workspace.automation.manage", "workspace_automation_rule", "list"); return getWorkspaceStore().listAutomationRules(tko_actor.tenantId); }
 export async function automationExecutions(tko_actor: PlatformActor) {
@@ -174,9 +245,27 @@ export async function automationExecutions(tko_actor: PlatformActor) {
   return (await Promise.all(tko_rules.map(tko_rule => getWorkspaceStore().listAutomationExecutions(tko_actor.tenantId, tko_rule.id)))).flat().sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime());
 }
 
-function tko_triggerFor(tko_eventType: string): AutomationTriggerType | null { return tko_eventType === "crm.lead_created.v1" || tko_eventType === "work.work_item_created.v1" || tko_eventType === "workspace.form_submitted.v1" ? tko_eventType : null; }
-function tko_matchesCondition(tko_rule: WorkspaceAutomationRule, tko_record: OutboxRecord): boolean { const tko_field = tko_text(tko_rule.condition.field); if (!tko_field) return true; return tko_record.payload[tko_field] === tko_rule.condition.equals; }
+function tko_triggerFor(tko_eventType: string): AutomationTriggerType | null { return tko_eventType === "crm.lead_created.v1" || tko_eventType === "work.work_item_created.v1" || tko_eventType === "work.work_item_status_changed.v1" || tko_eventType === "crm.deal_stage_changed.v1" || tko_eventType === "crm.deal_won.v1" || tko_eventType === "workspace.form_submitted.v1" ? tko_eventType : null; }
+function tko_matchesCondition(tko_rule: WorkspaceAutomationRule, tko_record: OutboxRecord): boolean {
+  // Legacy single-field condition and v2 AND-ed condition list may coexist; every declared
+  // condition must match (spec 12 §4 all-of). A condition on a missing payload field never matches.
+  const tko_legacyField = tko_text(tko_rule.condition.field);
+  if (tko_legacyField && tko_record.payload[tko_legacyField] !== tko_rule.condition.equals) return false;
+  for (const tko_condition of tko_rule.conditions ?? []) {
+    const tko_value = tko_record.payload[tko_condition.field];
+    if (tko_value !== tko_condition.equals) return false;
+  }
+  return true;
+}
 function tko_template(tko_templateValue: unknown, tko_record: OutboxRecord): string { return tko_text(tko_templateValue).replace(/\{\{([^}]+)\}\}/g, (_tko_match, tko_field) => tko_text(tko_record.payload[tko_field])); }
+function tko_triggerEntityFor(tko_record: OutboxRecord): { entityType: WorkspaceEntityType; entityId: string } | null {
+  if (tko_record.eventType.startsWith("work.")) { const tko_workItemId = tko_payloadId(tko_record, "workItemId"); return tko_workItemId ? { entityType: "work_item", entityId: tko_workItemId } : null; }
+  if (tko_record.eventType.startsWith("crm.deal")) { const tko_dealId = tko_payloadId(tko_record, "dealId"); return tko_dealId ? { entityType: "crm_deal", entityId: tko_dealId } : null; }
+  if (tko_record.eventType === "crm.lead_created.v1") { const tko_leadId = tko_payloadId(tko_record, "leadId"); return tko_leadId ? { entityType: "crm_lead", entityId: tko_leadId } : null; }
+  if (tko_record.eventType === "workspace.form_submitted.v1") { const tko_type = tko_payloadId(tko_record, "targetEntityType"); const tko_entityId = tko_payloadId(tko_record, "targetEntityId"); return tko_type === "work_item" || tko_type === "crm_lead" ? { entityType: tko_type, entityId: tko_entityId ?? "" } : null; }
+  return null;
+}
+function tko_payloadId(tko_record: OutboxRecord, tko_name: string): string | null { const tko_value = tko_record.payload[tko_name]; return typeof tko_value === "string" ? tko_value : null; }
 
 export async function processAutomationEvent(tko_actor: PlatformActor, tko_record: OutboxRecord): Promise<void> {
   const tko_trigger = tko_triggerFor(tko_record.eventType); if (!tko_trigger || tko_record.correlationId.startsWith("tko_automation:")) return;
@@ -190,6 +279,37 @@ export async function processAutomationEvent(tko_actor: PlatformActor, tko_recor
       for (const tko_action of tko_rule.actions) {
         if (tko_action.type === "create_work_item") { const tko_projectId = tko_text(tko_action.config.projectId); if (!tko_projectId) throw new Error("WORKSPACE_AUTOMATION_PROJECT_REQUIRED"); const tko_item = await workService.createWorkItem({ actor: tko_actor, projectId: tko_projectId, title: tko_template(tko_action.config.title, tko_record) || `Automation: ${tko_rule.name}`, correlationId: `tko_automation:${tko_record.eventId}` }); tko_results.workItemId = tko_item.id; }
         if (tko_action.type === "create_crm_activity") { const tko_entityType = tko_text(tko_action.config.entityType) as CRMEntityType; const tko_entityId = tko_template(tko_action.config.entityId, tko_record); if (!(["lead", "company", "contact", "deal"] as string[]).includes(tko_entityType) || !tko_entityId) throw new Error("WORKSPACE_AUTOMATION_CRM_ACTIVITY_TARGET_REQUIRED"); const tko_activity = await crmService.addActivity(tko_actor, { entityType: tko_entityType, entityId: tko_entityId, activityType: "note", subject: tko_template(tko_action.config.subject, tko_record) || tko_rule.name, body: tko_template(tko_action.config.body, tko_record), correlationId: `tko_automation:${tko_record.eventId}` }); tko_results.crmActivityId = tko_activity.id; }
+        if (tko_action.type === "post_channel_message") {
+          const tko_channelId = tko_text(tko_action.config.channelId);
+          const tko_body = tko_template(tko_action.config.body, tko_record);
+          if (!tko_channelId || !tko_body) throw new Error("WORKSPACE_AUTOMATION_CHANNEL_MESSAGE_TARGET_REQUIRED");
+          // Trusted worker path: post through the chat store directly, mirroring the CRM handoff
+          // worker. Capability checks were applied when the rule was created.
+          const tko_channel = await getChatStore().getChannel(tko_actor.tenantId, tko_channelId);
+          if (!tko_channel) throw new Error("WORKSPACE_AUTOMATION_CHANNEL_NOT_FOUND");
+          const tko_message = await getChatStore().sendMessage(tko_actor, { tenantId: tko_actor.tenantId, channelId: tko_channel.id, authorMemberId: tko_actor.memberId, clientMessageId: crypto.randomUUID(), body: { type: "text", text: tko_body, mentions: [] } }, `tko_automation:${tko_record.eventId}`);
+          tko_results.messageId = tko_message.id;
+        }
+        if (tko_action.type === "notify_user") {
+          const tko_memberId = tko_text(tko_action.config.memberId);
+          if (!tko_memberId) throw new Error("WORKSPACE_AUTOMATION_NOTIFY_MEMBER_REQUIRED");
+          const tko_entity = tko_triggerEntityFor(tko_record);
+          await getWorkspaceStore().createInboxItem(tko_actor, { memberId: tko_memberId, kind: "automation", entityType: tko_entity?.entityType ?? "form", entityId: tko_entity?.entityId ?? (tko_record.payload.submissionId ? String(tko_record.payload.submissionId) : tko_record.eventId), title: tko_template(tko_action.config.title, tko_record) || `Automation: ${tko_rule.name}`, body: tko_template(tko_action.config.body, tko_record), href: tko_entity ? (tko_entity.entityType === "work_item" ? `/work?item=${tko_entity.entityId}` : tko_entity.entityType === "crm_deal" ? `/crm?deal=${tko_entity.entityId}` : tko_entity.entityType === "crm_lead" ? `/crm?lead=${tko_entity.entityId}` : "/") : "/", sourceEventId: tko_record.eventId, correlationId: `tko_automation:${tko_record.eventId}` });
+          tko_results.notifiedMemberId = tko_memberId;
+        }
+        if (tko_action.type === "update_work_item") {
+          const tko_workItemId = tko_text(tko_action.config.workItemId) || tko_payloadId(tko_record, "workItemId");
+          if (!tko_workItemId) throw new Error("WORKSPACE_AUTOMATION_WORK_ITEM_REQUIRED");
+          const tko_item = await getWorkStore().getWorkItem(tko_actor.tenantId, tko_workItemId);
+          if (!tko_item) throw new Error("WORKSPACE_AUTOMATION_WORK_ITEM_NOT_FOUND");
+          const tko_statusId = tko_text(tko_action.config.statusId);
+          if (tko_statusId && tko_statusId !== tko_item.statusId) { await getWorkStore().transitionWorkItem({ actor: tko_actor, workItemId: tko_item.id, targetStatusId: tko_statusId, expectedVersion: tko_item.version, correlationId: `tko_automation:${tko_record.eventId}` }); tko_results.updatedStatusId = tko_statusId; }
+          const tko_assigneeMemberIds = Array.isArray(tko_action.config.assigneeMemberIds) ? tko_action.config.assigneeMemberIds.filter((tko_id): tko_id is string => typeof tko_id === "string") : null;
+          const tko_dueAtRaw = tko_action.config.dueAt;
+          const tko_dueAt = typeof tko_dueAtRaw === "string" && tko_dueAtRaw ? new Date(tko_dueAtRaw) : tko_dueAtRaw === null ? null : undefined;
+          if (tko_dueAt instanceof Date && Number.isNaN(tko_dueAt.getTime())) throw new Error("WORKSPACE_AUTOMATION_DUE_AT_INVALID");
+          if (tko_assigneeMemberIds?.length || tko_dueAt !== undefined) { await getWorkStore().updateWorkItem({ actor: tko_actor, workItemId: tko_item.id, expectedVersion: tko_statusId && tko_statusId !== tko_item.statusId ? tko_item.version + 1 : tko_item.version, assigneeMemberIds: tko_assigneeMemberIds ?? undefined, dueAt: tko_dueAt, correlationId: `tko_automation:${tko_record.eventId}` }); tko_results.updatedWorkItemId = tko_item.id; }
+        }
       }
       await getWorkspaceStore().recordAutomationExecution(tko_actor, { ruleId: tko_rule.id, ruleVersion: tko_rule.version, sourceEventId: tko_record.eventId, status: "completed", results: tko_results, error: null, correlationId: `tko_automation:${tko_record.eventId}` });
     } catch (tko_error) {
@@ -211,7 +331,9 @@ export async function overview(tko_actor: PlatformActor) {
     ...tko_documents.map(tko_document => ({ id: tko_document.id, kind: "document" as const, title: tko_document.title, href: "/docs", createdAt: tko_document.updatedAt })),
     ...tko_leads.map(tko_lead => ({ id: tko_lead.id, kind: "crm" as const, title: `${tko_lead.firstName} ${tko_lead.lastName}`.trim(), href: "/crm", createdAt: tko_lead.updatedAt })),
     ...tko_deals.map(tko_deal => ({ id: tko_deal.id, kind: "crm" as const, title: tko_deal.name, href: "/crm", createdAt: tko_deal.updatedAt })),
-  ].sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime()).slice(0, 8);
+  ].sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime());
+  const tko_weekAgoMs = Date.now() - 7 * 86_400_000;
+  const tko_thisWeekActivityCount = tko_recentActivity.filter(tko_activity => tko_activity.createdAt.getTime() >= tko_weekAgoMs).length;
   const tko_hrefFor = (tko_entityType: WorkspaceEntityType) => tko_entityType === "work_item" || tko_entityType === "project" ? "/work" : tko_entityType === "channel" || tko_entityType === "message" ? "/chat" : tko_entityType === "document" ? "/docs" : tko_entityType === "form" ? "/forms" : "/crm";
   const tko_linkedObjects = (await Promise.all(tko_documents.map(async tko_document => (await getWorkspaceStore().listDocumentLinks(tko_actor.tenantId, tko_document.id)).map(tko_link => ({ tko_document, tko_link })))))
     .flat()
@@ -225,5 +347,5 @@ export async function overview(tko_actor: PlatformActor) {
     ...tko_documents.filter(tko_document => tko_authorizedLinks.some(tko_link => tko_link.documentId === tko_document.id)).slice(0, 10).map(tko_document => ({ id: `document:${tko_document.id}`, label: tko_document.title, kind: "document" as const, href: "/docs" })),
   ];
   const tko_graphEdges = tko_authorizedLinks.filter(tko_link => tko_link.entityType === "work_item").map(tko_link => ({ id: `${tko_link.documentId}:${tko_link.entityId}`, sourceId: `document:${tko_link.documentId}`, targetId: `work:${tko_link.entityId}`, relation: "context" as const }));
-  return { openWorkCount: tko_workItems.filter(tko_item => !tko_item.completedAt && !tko_item.archivedAt).length, dueSoonCount: tko_workItems.filter(tko_item => tko_item.dueAt && tko_item.dueAt.getTime() < Date.now() + 7 * 86_400_000 && !tko_item.completedAt).length, unreadInboxCount: tko_inboxItems.filter(tko_item => !tko_item.readAt).length, activeDealsCount: tko_deals.filter(tko_deal => !tko_deal.wonAt && !tko_deal.lostAt).length, documentsCount: tko_documents.length, recentActivity: tko_recentActivity, linkedObjects: tko_authorizedLinks, workGraph: { nodes: tko_graphNodes, edges: tko_graphEdges }, calendarItems: tko_workItems.filter(tko_item => tko_item.dueAt).sort((tko_left, tko_right) => (tko_left.dueAt?.getTime() ?? 0) - (tko_right.dueAt?.getTime() ?? 0)).slice(0, 12) };
+  return { openWorkCount: tko_workItems.filter(tko_item => !tko_item.completedAt && !tko_item.archivedAt).length, dueSoonCount: tko_workItems.filter(tko_item => tko_item.dueAt && tko_item.dueAt.getTime() < Date.now() + 7 * 86_400_000 && !tko_item.completedAt).length, unreadInboxCount: tko_inboxItems.filter(tko_item => !tko_item.readAt).length, activeDealsCount: tko_deals.filter(tko_deal => !tko_deal.wonAt && !tko_deal.lostAt).length, documentsCount: tko_documents.length, thisWeekActivityCount: tko_thisWeekActivityCount, overdueWorkItemsCount: tko_workItems.filter(tko_item => tko_item.dueAt && tko_item.dueAt.getTime() < Date.now() && !tko_item.completedAt && !tko_item.archivedAt).length, openPipelineValueCents: tko_deals.filter(tko_deal => !tko_deal.wonAt && !tko_deal.lostAt).reduce((tko_total, tko_deal) => tko_total + (tko_deal.amountCents ?? 0), 0), recentActivity: tko_recentActivity.slice(0, 8), linkedObjects: tko_authorizedLinks, workGraph: { nodes: tko_graphNodes, edges: tko_graphEdges }, calendarItems: tko_workItems.filter(tko_item => tko_item.dueAt).sort((tko_left, tko_right) => (tko_left.dueAt?.getTime() ?? 0) - (tko_right.dueAt?.getTime() ?? 0)).slice(0, 12) };
 }

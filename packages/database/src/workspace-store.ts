@@ -5,10 +5,12 @@ import type {
   WorkspaceAutomationRule,
   WorkspaceDocument,
   WorkspaceDocumentLink,
+  WorkspaceDocumentRevision,
   WorkspaceEntityLink,
   WorkspaceEntityType,
   WorkspaceForm,
   WorkspaceFormSubmission,
+  WorkspacePublicFormDefinition,
   WorkspaceSearchDocument,
 } from "../../contracts/src/workspace";
 import { tko_config } from "../../config/src/tasko-config";
@@ -26,14 +28,20 @@ export interface WorkspaceStore {
   createDocument(tko_actor: PlatformActor, tko_input: Omit<WorkspaceDocument, "id" | "tenantId" | "type" | "ownerMemberId" | "createdAt" | "updatedAt"> & { correlationId: string }): Promise<WorkspaceDocument>;
   listDocuments(tko_tenantId: string): Promise<WorkspaceDocument[]>;
   getDocument(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocument | null>;
+  updateDocumentContent(tko_actor: PlatformActor, tko_input: { documentId: string; title?: string; bodyText: string; content: Record<string, unknown>; correlationId: string }): Promise<{ document: WorkspaceDocument; revision: WorkspaceDocumentRevision }>;
+  listDocumentRevisions(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocumentRevision[]>;
+  restoreDocumentRevision(tko_actor: PlatformActor, tko_input: { documentId: string; revisionId: string; correlationId: string }): Promise<{ document: WorkspaceDocument; revision: WorkspaceDocumentRevision }>;
   removeDocument(tko_actor: PlatformActor, tko_input: { documentId: string; correlationId: string }): Promise<WorkspaceDocument>;
   linkDocument(tko_actor: PlatformActor, tko_input: { documentId: string; entityType: WorkspaceEntityType; entityId: string; correlationId: string }): Promise<WorkspaceDocumentLink>;
   listDocumentLinks(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocumentLink[]>;
   listDocumentLinksForEntity(tko_tenantId: string, tko_entityType: WorkspaceEntityType, tko_entityId: string): Promise<WorkspaceDocumentLink[]>;
-  createForm(tko_actor: PlatformActor, tko_input: Omit<WorkspaceForm, "id" | "tenantId" | "type" | "ownerMemberId" | "createdAt" | "updatedAt" | "status" | "accessMode"> & { correlationId: string }): Promise<WorkspaceForm>;
+  createForm(tko_actor: PlatformActor, tko_input: Omit<WorkspaceForm, "id" | "tenantId" | "type" | "ownerMemberId" | "createdAt" | "updatedAt" | "status" | "accessMode" | "isPublic" | "shareSlug"> & { correlationId: string }): Promise<WorkspaceForm>;
   listForms(tko_tenantId: string): Promise<WorkspaceForm[]>;
   getForm(tko_tenantId: string, tko_formId: string): Promise<WorkspaceForm | null>;
   activateForm(tko_actor: PlatformActor, tko_input: { formId: string; correlationId: string }): Promise<WorkspaceForm>;
+  setFormSharing(tko_actor: PlatformActor, tko_input: { formId: string; isPublic: boolean; shareSlug: string | null; correlationId: string }): Promise<WorkspaceForm>;
+  getPublicFormBySlug(tko_slug: string): Promise<WorkspaceForm | null>;
+  getFormDefinitionForPublic(tko_form: WorkspaceForm): WorkspacePublicFormDefinition;
   getFormSubmission(tko_tenantId: string, tko_formId: string, tko_idempotencyKey: string): Promise<WorkspaceFormSubmission | null>;
   listFormSubmissions(tko_tenantId: string, tko_formId: string): Promise<WorkspaceFormSubmission[]>;
   recordFormSubmission(tko_actor: PlatformActor, tko_input: Omit<WorkspaceFormSubmission, "id" | "tenantId" | "type" | "submittedByMemberId" | "createdAt"> & { correlationId: string }): Promise<WorkspaceFormSubmission>;
@@ -57,6 +65,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore {
   private readonly tko_entityLinks = new Map<string, WorkspaceEntityLink>();
   private readonly tko_documents = new Map<string, WorkspaceDocument>();
   private readonly tko_documentLinks = new Map<string, WorkspaceDocumentLink>();
+  private readonly tko_documentRevisions = new Map<string, WorkspaceDocumentRevision>();
   private readonly tko_forms = new Map<string, WorkspaceForm>();
   private readonly tko_submissions = new Map<string, WorkspaceFormSubmission>();
   private readonly tko_rules = new Map<string, WorkspaceAutomationRule>();
@@ -129,6 +138,49 @@ export class MemoryWorkspaceStore implements WorkspaceStore {
   async listDocuments(tko_tenantId: string): Promise<WorkspaceDocument[]> { return Array.from(this.tko_documents.values()).filter(tko_document => tko_document.tenantId === tko_tenantId).sort((tko_left, tko_right) => tko_right.updatedAt.getTime() - tko_left.updatedAt.getTime()).map(tko_clone); }
   async getDocument(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocument | null> { const tko_document = this.tko_documents.get(tko_documentId); return tko_document?.tenantId === tko_tenantId ? tko_clone(tko_document) : null; }
 
+  private tko_nextRevisionVersion(tko_tenantId: string, tko_documentId: string): number { return Array.from(this.tko_documentRevisions.values()).filter(tko_revision => tko_revision.tenantId === tko_tenantId && tko_revision.documentId === tko_documentId).reduce((tko_max, tko_revision) => Math.max(tko_max, tko_revision.version), 0) + 1; }
+
+  private async tko_recordRevision(tko_actor: PlatformActor, tko_document: WorkspaceDocument, tko_correlationId: string): Promise<WorkspaceDocumentRevision> {
+    const tko_revision: WorkspaceDocumentRevision = { id: crypto.randomUUID(), tenantId: tko_actor.tenantId, type: "workspace_document_revision", documentId: tko_document.id, version: this.tko_nextRevisionVersion(tko_actor.tenantId, tko_document.id), snapshot: { title: tko_document.title, bodyText: tko_document.bodyText, content: tko_clone(tko_document.content) }, authorMemberId: tko_actor.memberId, createdAt: tko_now() };
+    this.tko_documentRevisions.set(tko_revision.id, tko_revision);
+    await this.tko_emit(tko_actor, "workspace.document_revision_created.v1", "workspace.document", { documentId: tko_document.id, revisionId: tko_revision.id, version: tko_revision.version }, "workspace.document.revision_created", "workspace_document_revision", tko_revision.id, tko_correlationId);
+    return tko_revision;
+  }
+
+  async updateDocumentContent(tko_actor: PlatformActor, tko_input: { documentId: string; title?: string; bodyText: string; content: Record<string, unknown>; correlationId: string }): Promise<{ document: WorkspaceDocument; revision: WorkspaceDocumentRevision }> {
+    const tko_document = this.tko_documents.get(tko_input.documentId);
+    if (!tko_document || tko_document.tenantId !== tko_actor.tenantId) throw new Error("WORKSPACE_DOCUMENT_NOT_FOUND");
+    if (tko_document.documentKind !== "note") throw new Error("WORKSPACE_DOCUMENT_REVISION_UNSUPPORTED");
+    tko_document.title = tko_input.title?.trim() ? tko_input.title.trim() : tko_document.title;
+    tko_document.bodyText = tko_input.bodyText;
+    tko_document.content = tko_clone(tko_input.content);
+    tko_document.updatedAt = tko_now();
+    this.tko_documents.set(tko_document.id, tko_document);
+    await this.tko_emit(tko_actor, "workspace.document_updated.v1", "workspace.document", { documentId: tko_document.id, title: tko_document.title }, "workspace.document.updated", "workspace_document", tko_document.id, tko_input.correlationId);
+    const tko_revision = await this.tko_recordRevision(tko_actor, tko_document, tko_input.correlationId);
+    return { document: tko_clone(tko_document), revision: tko_clone(tko_revision) };
+  }
+
+  async listDocumentRevisions(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocumentRevision[]> { return Array.from(this.tko_documentRevisions.values()).filter(tko_revision => tko_revision.tenantId === tko_tenantId && tko_revision.documentId === tko_documentId).sort((tko_left, tko_right) => tko_right.version - tko_left.version).map(tko_clone); }
+
+  async restoreDocumentRevision(tko_actor: PlatformActor, tko_input: { documentId: string; revisionId: string; correlationId: string }): Promise<{ document: WorkspaceDocument; revision: WorkspaceDocumentRevision }> {
+    const tko_document = this.tko_documents.get(tko_input.documentId);
+    if (!tko_document || tko_document.tenantId !== tko_actor.tenantId) throw new Error("WORKSPACE_DOCUMENT_NOT_FOUND");
+    if (tko_document.documentKind !== "note") throw new Error("WORKSPACE_DOCUMENT_REVISION_UNSUPPORTED");
+    const tko_source = this.tko_documentRevisions.get(tko_input.revisionId);
+    if (!tko_source || tko_source.tenantId !== tko_actor.tenantId || tko_source.documentId !== tko_document.id) throw new Error("WORKSPACE_DOCUMENT_REVISION_NOT_FOUND");
+    // Restore is additive history: the snapshot becomes the live content and a NEW revision
+    // records the restored state. Existing revisions are never rewritten or deleted.
+    tko_document.title = tko_source.snapshot.title;
+    tko_document.bodyText = tko_source.snapshot.bodyText;
+    tko_document.content = tko_clone(tko_source.snapshot.content);
+    tko_document.updatedAt = tko_now();
+    this.tko_documents.set(tko_document.id, tko_document);
+    await this.tko_emit(tko_actor, "workspace.document_restored.v1", "workspace.document", { documentId: tko_document.id, revisionId: tko_source.id, restoredVersion: tko_source.version }, "workspace.document.restored", "workspace_document", tko_document.id, tko_input.correlationId);
+    const tko_revision = await this.tko_recordRevision(tko_actor, tko_document, tko_input.correlationId);
+    return { document: tko_clone(tko_document), revision: tko_clone(tko_revision) };
+  }
+
   async removeDocument(tko_actor: PlatformActor, tko_input: { documentId: string; correlationId: string }): Promise<WorkspaceDocument> {
     const tko_document = this.tko_documents.get(tko_input.documentId);
     if (!tko_document || tko_document.tenantId !== tko_actor.tenantId) throw new Error("WORKSPACE_DOCUMENT_NOT_FOUND");
@@ -152,7 +204,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore {
 
   async createForm(tko_actor: PlatformActor, tko_input: Omit<WorkspaceForm, "id" | "tenantId" | "type" | "ownerMemberId" | "createdAt" | "updatedAt" | "status" | "accessMode"> & { correlationId: string }): Promise<WorkspaceForm> {
     const { correlationId: _tko_correlationId, ...tko_formInput } = tko_input;
-    const tko_form: WorkspaceForm = { ...tko_clone(tko_formInput), id: crypto.randomUUID(), tenantId: tko_actor.tenantId, type: "workspace_form", status: "draft", accessMode: "internal", ownerMemberId: tko_actor.memberId, createdAt: tko_now(), updatedAt: tko_now() };
+    const tko_form: WorkspaceForm = { ...tko_clone(tko_formInput), id: crypto.randomUUID(), tenantId: tko_actor.tenantId, type: "workspace_form", status: "draft", accessMode: "internal", isPublic: false, shareSlug: null, ownerMemberId: tko_actor.memberId, createdAt: tko_now(), updatedAt: tko_now() };
     this.tko_forms.set(tko_form.id, tko_form);
     await this.tko_emit(tko_actor, "workspace.form_created.v1", "workspace.form", { formId: tko_form.id, targetType: tko_form.targetType }, "workspace.form.created", "workspace_form", tko_form.id, tko_input.correlationId);
     return tko_clone(tko_form);
@@ -161,6 +213,31 @@ export class MemoryWorkspaceStore implements WorkspaceStore {
   async listForms(tko_tenantId: string): Promise<WorkspaceForm[]> { return Array.from(this.tko_forms.values()).filter(tko_form => tko_form.tenantId === tko_tenantId).sort((tko_left, tko_right) => tko_right.updatedAt.getTime() - tko_left.updatedAt.getTime()).map(tko_clone); }
   async getForm(tko_tenantId: string, tko_formId: string): Promise<WorkspaceForm | null> { const tko_form = this.tko_forms.get(tko_formId); return tko_form?.tenantId === tko_tenantId ? tko_clone(tko_form) : null; }
   async activateForm(tko_actor: PlatformActor, tko_input: { formId: string; correlationId: string }): Promise<WorkspaceForm> { const tko_form = this.tko_forms.get(tko_input.formId); if (!tko_form || tko_form.tenantId !== tko_actor.tenantId) throw new Error("WORKSPACE_FORM_NOT_FOUND"); tko_form.status = "active"; tko_form.updatedAt = tko_now(); this.tko_forms.set(tko_form.id, tko_form); await this.tko_emit(tko_actor, "workspace.form_activated.v1", "workspace.form", { formId: tko_form.id }, "workspace.form.activated", "workspace_form", tko_form.id, tko_input.correlationId); return tko_clone(tko_form); }
+
+  async setFormSharing(tko_actor: PlatformActor, tko_input: { formId: string; isPublic: boolean; shareSlug: string | null; correlationId: string }): Promise<WorkspaceForm> {
+    const tko_form = this.tko_forms.get(tko_input.formId);
+    if (!tko_form || tko_form.tenantId !== tko_actor.tenantId) throw new Error("WORKSPACE_FORM_NOT_FOUND");
+    tko_form.isPublic = tko_input.isPublic;
+    tko_form.shareSlug = tko_input.isPublic ? tko_input.shareSlug : null;
+    tko_form.updatedAt = tko_now();
+    this.tko_forms.set(tko_form.id, tko_form);
+    await this.tko_emit(tko_actor, "workspace.form_sharing_changed.v1", "workspace.form", { formId: tko_form.id, isPublic: tko_form.isPublic }, "workspace.form.sharing_changed", "workspace_form", tko_form.id, tko_input.correlationId);
+    return tko_clone(tko_form);
+  }
+
+  /** Unauthenticated public lookup: intentionally NOT tenant-scoped. Only the minimal public
+   * definition of an active, explicitly shared form ever leaves this method. */
+  async getPublicFormBySlug(tko_slug: string): Promise<WorkspaceForm | null> {
+    const tko_normalized = tko_slug.trim().toLocaleLowerCase();
+    if (!tko_normalized) return null;
+    const tko_form = Array.from(this.tko_forms.values()).find(tko_candidate => tko_candidate.isPublic && tko_candidate.status === "active" && tko_candidate.shareSlug === tko_normalized);
+    return tko_form ? tko_clone(tko_form) : null;
+  }
+
+  getFormDefinitionForPublic(tko_form: WorkspaceForm): WorkspacePublicFormDefinition {
+    return { slug: tko_form.shareSlug ?? "", formId: tko_form.id, tenantId: tko_form.tenantId, name: tko_form.name, description: tko_form.description, targetType: tko_form.targetType, fields: tko_form.fields.map(tko_field => ({ id: tko_field.id, label: tko_field.label, fieldType: tko_field.fieldType, required: tko_field.required, options: tko_field.options })) };
+  }
+
 
   async getFormSubmission(tko_tenantId: string, tko_formId: string, tko_idempotencyKey: string): Promise<WorkspaceFormSubmission | null> { return tko_clone(this.tko_submissions.get(`${tko_tenantId}:${tko_formId}:${tko_idempotencyKey}`) ?? null); }
   async listFormSubmissions(tko_tenantId: string, tko_formId: string): Promise<WorkspaceFormSubmission[]> { return Array.from(this.tko_submissions.values()).filter(tko_submission => tko_submission.tenantId === tko_tenantId && tko_submission.formId === tko_formId).sort((tko_left, tko_right) => tko_right.createdAt.getTime() - tko_left.createdAt.getTime()).map(tko_clone); }

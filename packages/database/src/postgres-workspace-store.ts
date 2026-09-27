@@ -5,10 +5,12 @@ import type {
   WorkspaceAutomationRule,
   WorkspaceDocument,
   WorkspaceDocumentLink,
+  WorkspaceDocumentRevision,
   WorkspaceEntityLink,
   WorkspaceEntityType,
   WorkspaceForm,
   WorkspaceFormSubmission,
+  WorkspacePublicFormDefinition,
   WorkspaceSearchDocument,
 } from "../../contracts/src/workspace";
 import type { WorkspaceInboxItemResult, WorkspaceStore } from "./workspace-store";
@@ -80,7 +82,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   async createDocument(tko_actor: PlatformActor, tko_input: Parameters<WorkspaceStore["createDocument"]>[1]): Promise<WorkspaceDocument> {
     return this.tko_tx(tko_actor.tenantId, async tko_client => {
-      const tko_result = await tko_client.query(`insert into workspace_documents(id,tenant_id,title,document_kind,project_id,object_key,filename,content_type,byte_size,content_json,body_text,owner_member_id,visibility,template_key) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14) returning *`, [crypto.randomUUID(), tko_actor.tenantId, tko_input.title.trim(), tko_input.documentKind, tko_input.projectId, tko_input.objectKey, tko_input.filename, tko_input.contentType, tko_input.byteSize, JSON.stringify(tko_input.content), tko_input.bodyText.trim(), tko_actor.memberId, tko_input.visibility, tko_input.templateKey]);
+      const tko_result = await tko_client.query(`insert into workspace_documents(id,tenant_id,title,document_kind,project_id,object_key,filename,content_type,byte_size,content_json,body_text,owner_member_id,visibility,template_key) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14) returning *`, [crypto.randomUUID(), tko_actor.tenantId, tko_input.title.trim(), tko_input.documentKind ?? "note", tko_input.projectId, tko_input.objectKey, tko_input.filename, tko_input.contentType, tko_input.byteSize, JSON.stringify(tko_input.content), tko_input.bodyText.trim(), tko_actor.memberId, tko_input.visibility, tko_input.templateKey]);
       const tko_document = this.tko_documentRow(tko_result.rows[0]);
       await this.tko_emit(tko_client, tko_actor, "workspace.document_created.v1", "workspace.document", { documentId: tko_document.id, title: tko_document.title }, "workspace.document.created", "workspace_document", tko_document.id, tko_input.correlationId);
       return tko_document;
@@ -89,6 +91,41 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   async listDocuments(tko_tenantId: string): Promise<WorkspaceDocument[]> { return this.tko_read(tko_tenantId, async tko_client => (await tko_client.query("select * from workspace_documents where tenant_id=$1 order by updated_at desc", [tko_tenantId])).rows.map(this.tko_documentRow)); }
   async getDocument(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocument | null> { return this.tko_read(tko_tenantId, async tko_client => { const tko_result = await tko_client.query("select * from workspace_documents where tenant_id=$1 and id=$2", [tko_tenantId, tko_documentId]); return tko_result.rowCount ? this.tko_documentRow(tko_result.rows[0]) : null; }); }
+
+  async updateDocumentContent(tko_actor: PlatformActor, tko_input: { documentId: string; title?: string; bodyText: string; content: Record<string, unknown>; correlationId: string }): Promise<{ document: WorkspaceDocument; revision: WorkspaceDocumentRevision }> {
+    return this.tko_tx(tko_actor.tenantId, async tko_client => {
+      const tko_updated = await tko_client.query("update workspace_documents set title = coalesce(nullif(trim($3), ''), title), body_text=$4, content_json=$5::jsonb, updated_at=now() where tenant_id=$1 and id=$2 and document_kind='note' returning *", [tko_actor.tenantId, tko_input.documentId, tko_input.title ?? "", tko_input.bodyText, JSON.stringify(tko_input.content)]);
+      if (!tko_updated.rowCount) throw new Error((await tko_client.query("select document_kind from workspace_documents where tenant_id=$1 and id=$2", [tko_actor.tenantId, tko_input.documentId])).rowCount ? "WORKSPACE_DOCUMENT_REVISION_UNSUPPORTED" : "WORKSPACE_DOCUMENT_NOT_FOUND");
+      const tko_document = this.tko_documentRow(tko_updated.rows[0]);
+      await this.tko_emit(tko_client, tko_actor, "workspace.document_updated.v1", "workspace.document", { documentId: tko_document.id, title: tko_document.title }, "workspace.document.updated", "workspace_document", tko_document.id, tko_input.correlationId);
+      const tko_revision = await this.tko_insertRevision(tko_client, tko_actor, tko_document, tko_input.correlationId);
+      return { document: tko_document, revision: tko_revision };
+    });
+  }
+
+  async listDocumentRevisions(tko_tenantId: string, tko_documentId: string): Promise<WorkspaceDocumentRevision[]> { return this.tko_read(tko_tenantId, async tko_client => (await tko_client.query("select * from document_revisions where tenant_id=$1 and document_id=$2 order by version desc", [tko_tenantId, tko_documentId])).rows.map(this.tko_revisionRow)); }
+
+  async restoreDocumentRevision(tko_actor: PlatformActor, tko_input: { documentId: string; revisionId: string; correlationId: string }): Promise<{ document: WorkspaceDocument; revision: WorkspaceDocumentRevision }> {
+    return this.tko_tx(tko_actor.tenantId, async tko_client => {
+      const tko_source = await tko_client.query("select * from document_revisions where tenant_id=$1 and id=$2 and document_id=$3", [tko_actor.tenantId, tko_input.revisionId, tko_input.documentId]);
+      if (!tko_source.rowCount) throw new Error("WORKSPACE_DOCUMENT_REVISION_NOT_FOUND");
+      const tko_snapshot = this.tko_revisionRow(tko_source.rows[0]).snapshot;
+      const tko_updated = await tko_client.query("update workspace_documents set title=$3, body_text=$4, content_json=$5::jsonb, updated_at=now() where tenant_id=$1 and id=$2 and document_kind='note' returning *", [tko_actor.tenantId, tko_input.documentId, tko_snapshot.title, tko_snapshot.bodyText, JSON.stringify(tko_snapshot.content)]);
+      if (!tko_updated.rowCount) throw new Error("WORKSPACE_DOCUMENT_REVISION_UNSUPPORTED");
+      const tko_document = this.tko_documentRow(tko_updated.rows[0]);
+      await this.tko_emit(tko_client, tko_actor, "workspace.document_restored.v1", "workspace.document", { documentId: tko_document.id, revisionId: tko_input.revisionId, restoredVersion: this.tko_revisionRow(tko_source.rows[0]).version }, "workspace.document.restored", "workspace_document", tko_document.id, tko_input.correlationId);
+      const tko_revision = await this.tko_insertRevision(tko_client, tko_actor, tko_document, tko_input.correlationId);
+      return { document: tko_document, revision: tko_revision };
+    });
+  }
+
+  private async tko_insertRevision(tko_client: PoolClient, tko_actor: PlatformActor, tko_document: WorkspaceDocument, tko_correlationId: string): Promise<WorkspaceDocumentRevision> {
+    const tko_result = await tko_client.query(`insert into document_revisions(id,tenant_id,document_id,version,snapshot_json,author_member_id) select $1,$2,$3,coalesce(max(version),0)+1,$4::jsonb,$5 from document_revisions where tenant_id=$2 and document_id=$3 returning *`, [crypto.randomUUID(), tko_actor.tenantId, tko_document.id, JSON.stringify({ title: tko_document.title, bodyText: tko_document.bodyText, content: tko_document.content }), tko_actor.memberId]);
+    const tko_revision = this.tko_revisionRow(tko_result.rows[0]);
+    await this.tko_emit(tko_client, tko_actor, "workspace.document_revision_created.v1", "workspace.document", { documentId: tko_document.id, revisionId: tko_revision.id, version: tko_revision.version }, "workspace.document.revision_created", "workspace_document_revision", tko_revision.id, tko_correlationId);
+    return tko_revision;
+  }
+
 
   async removeDocument(tko_actor: PlatformActor, tko_input: { documentId: string; correlationId: string }): Promise<WorkspaceDocument> {
     return this.tko_tx(tko_actor.tenantId, async tko_client => {
@@ -125,6 +162,40 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async listForms(tko_tenantId: string): Promise<WorkspaceForm[]> { return this.tko_read(tko_tenantId, async tko_client => (await tko_client.query("select * from workspace_forms where tenant_id=$1 order by updated_at desc", [tko_tenantId])).rows.map(this.tko_formRow)); }
   async getForm(tko_tenantId: string, tko_formId: string): Promise<WorkspaceForm | null> { return this.tko_read(tko_tenantId, async tko_client => { const tko_result = await tko_client.query("select * from workspace_forms where tenant_id=$1 and id=$2", [tko_tenantId, tko_formId]); return tko_result.rowCount ? this.tko_formRow(tko_result.rows[0]) : null; }); }
   async activateForm(tko_actor: PlatformActor, tko_input: { formId: string; correlationId: string }): Promise<WorkspaceForm> { return this.tko_tx(tko_actor.tenantId, async tko_client => { const tko_result = await tko_client.query("update workspace_forms set status='active',updated_at=now() where tenant_id=$1 and id=$2 returning *", [tko_actor.tenantId, tko_input.formId]); if (!tko_result.rowCount) throw new Error("WORKSPACE_FORM_NOT_FOUND"); const tko_form = this.tko_formRow(tko_result.rows[0]); await this.tko_emit(tko_client, tko_actor, "workspace.form_activated.v1", "workspace.form", { formId: tko_form.id }, "workspace.form.activated", "workspace_form", tko_form.id, tko_input.correlationId); return tko_form; }); }
+
+  async setFormSharing(tko_actor: PlatformActor, tko_input: { formId: string; isPublic: boolean; shareSlug: string | null; correlationId: string }): Promise<WorkspaceForm> {
+    return this.tko_tx(tko_actor.tenantId, async tko_client => {
+      const tko_result = await tko_client.query("update workspace_forms set is_public=$3, share_slug=$4, updated_at=now() where tenant_id=$1 and id=$2 returning *", [tko_actor.tenantId, tko_input.formId, tko_input.isPublic, tko_input.isPublic ? tko_input.shareSlug : null]);
+      if (!tko_result.rowCount) throw new Error("WORKSPACE_FORM_NOT_FOUND");
+      const tko_form = this.tko_formRow(tko_result.rows[0]);
+      await this.tko_emit(tko_client, tko_actor, "workspace.form_sharing_changed.v1", "workspace.form", { formId: tko_form.id, isPublic: tko_form.isPublic }, "workspace.form.sharing_changed", "workspace_form", tko_form.id, tko_input.correlationId);
+      return tko_form;
+    });
+  }
+
+  async getPublicFormBySlug(tko_slug: string): Promise<WorkspaceForm | null> {
+    const tko_normalized = tko_slug.trim().toLocaleLowerCase();
+    if (!tko_normalized) return null;
+    const tko_client = await this.tko_pool.connect();
+    try {
+      await tko_client.query("begin");
+      // No tenant GUC is set: this lookup backs the unauthenticated public endpoint and is
+      // restricted to explicitly shared, active forms by the predicate itself.
+      const tko_result = await tko_client.query("select * from workspace_forms where is_public=true and status='active' and share_slug=$1 limit 1", [tko_normalized]);
+      await tko_client.query("commit");
+      return tko_result.rowCount ? this.tko_formRow(tko_result.rows[0]) : null;
+    } catch (tko_error) {
+      await tko_client.query("rollback");
+      throw tko_error;
+    } finally {
+      tko_client.release();
+    }
+  }
+
+  getFormDefinitionForPublic(tko_form: WorkspaceForm): WorkspacePublicFormDefinition {
+    return { slug: tko_form.shareSlug ?? "", formId: tko_form.id, tenantId: tko_form.tenantId, name: tko_form.name, description: tko_form.description, targetType: tko_form.targetType, fields: tko_form.fields.map(tko_field => ({ id: tko_field.id, label: tko_field.label, fieldType: tko_field.fieldType, required: tko_field.required, options: tko_field.options })) };
+  }
+
   async getFormSubmission(tko_tenantId: string, tko_formId: string, tko_idempotencyKey: string): Promise<WorkspaceFormSubmission | null> { return this.tko_read(tko_tenantId, async tko_client => { const tko_result = await tko_client.query("select * from workspace_form_submissions where tenant_id=$1 and form_id=$2 and idempotency_key=$3", [tko_tenantId, tko_formId, tko_idempotencyKey]); return tko_result.rowCount ? this.tko_submissionRow(tko_result.rows[0]) : null; }); }
   async listFormSubmissions(tko_tenantId: string, tko_formId: string): Promise<WorkspaceFormSubmission[]> { return this.tko_read(tko_tenantId, async tko_client => (await tko_client.query("select * from workspace_form_submissions where tenant_id=$1 and form_id=$2 order by created_at desc", [tko_tenantId, tko_formId])).rows.map(this.tko_submissionRow)); }
 
@@ -144,7 +215,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   private tko_entityLinkRow = (tko_row: TkoRow): WorkspaceEntityLink => ({ id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "workspace_entity_link", sourceType: tko_row.source_type as WorkspaceEntityType, sourceId: String(tko_row.source_id), targetType: tko_row.target_type as WorkspaceEntityType, targetId: String(tko_row.target_id), relationType: tko_row.relation_type as WorkspaceEntityLink["relationType"], createdAt: new Date(String(tko_row.created_at)) });
   private tko_documentRow = (tko_row: TkoRow): WorkspaceDocument => ({ id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "workspace_document", title: String(tko_row.title), documentKind: (tko_row.document_kind === "file" ? "file" : "note"), projectId: tko_row.project_id ? String(tko_row.project_id) : null, objectKey: tko_row.object_key ? String(tko_row.object_key) : null, filename: tko_row.filename ? String(tko_row.filename) : null, contentType: tko_row.content_type ? String(tko_row.content_type) : null, byteSize: tko_row.byte_size === null || tko_row.byte_size === undefined ? null : Number(tko_row.byte_size), content: tko_json<Record<string, unknown>>(tko_row.content_json, {}), bodyText: String(tko_row.body_text), ownerMemberId: String(tko_row.owner_member_id), visibility: tko_row.visibility as WorkspaceDocument["visibility"], templateKey: tko_row.template_key ? String(tko_row.template_key) : null, createdAt: new Date(String(tko_row.created_at)), updatedAt: new Date(String(tko_row.updated_at)) });
   private tko_documentLinkRow = (tko_row: TkoRow): WorkspaceDocumentLink => ({ id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "workspace_document_link", documentId: String(tko_row.document_id), entityType: tko_row.entity_type as WorkspaceEntityType, entityId: String(tko_row.entity_id), createdAt: new Date(String(tko_row.created_at)) });
-  private tko_formRow = (tko_row: TkoRow): WorkspaceForm => ({ id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "workspace_form", name: String(tko_row.name), description: String(tko_row.description), status: tko_row.status as WorkspaceForm["status"], accessMode: "internal", fields: tko_json<WorkspaceForm["fields"]>(tko_row.fields_json, []), targetType: tko_row.target_type as WorkspaceForm["targetType"], targetConfig: tko_json<Record<string, unknown>>(tko_row.target_config_json, {}), ownerMemberId: String(tko_row.owner_member_id), createdAt: new Date(String(tko_row.created_at)), updatedAt: new Date(String(tko_row.updated_at)) });
+  private tko_revisionRow = (tko_row: TkoRow): WorkspaceDocumentRevision => { const tko_snapshot = tko_json<{ title?: unknown; bodyText?: unknown; content?: Record<string, unknown> }>(tko_row.snapshot_json, {}); return { id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "workspace_document_revision", documentId: String(tko_row.document_id), version: Number(tko_row.version), snapshot: { title: String(tko_snapshot.title ?? ""), bodyText: String(tko_snapshot.bodyText ?? ""), content: tko_snapshot.content ?? {} }, authorMemberId: String(tko_row.author_member_id), createdAt: new Date(String(tko_row.created_at)) }; };
+  private tko_formRow = (tko_row: TkoRow): WorkspaceForm => ({ id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "workspace_form", name: String(tko_row.name), description: String(tko_row.description), status: tko_row.status as WorkspaceForm["status"], accessMode: "internal", fields: tko_json<WorkspaceForm["fields"]>(tko_row.fields_json, []), targetType: tko_row.target_type as WorkspaceForm["targetType"], targetConfig: tko_json<Record<string, unknown>>(tko_row.target_config_json, {}), isPublic: tko_row.is_public === true, shareSlug: tko_row.share_slug ? String(tko_row.share_slug) : null, ownerMemberId: String(tko_row.owner_member_id), createdAt: new Date(String(tko_row.created_at)), updatedAt: new Date(String(tko_row.updated_at)) });
   private tko_submissionRow = (tko_row: TkoRow): WorkspaceFormSubmission => ({ id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "workspace_form_submission", formId: String(tko_row.form_id), submittedByMemberId: String(tko_row.submitted_by_member_id), values: tko_json<Record<string, unknown>>(tko_row.values_json, {}), targetEntityType: tko_row.target_entity_type as WorkspaceEntityType, targetEntityId: String(tko_row.target_entity_id), idempotencyKey: String(tko_row.idempotency_key), createdAt: new Date(String(tko_row.created_at)) });
   private tko_ruleRow = (tko_row: TkoRow): WorkspaceAutomationRule => ({ id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "workspace_automation_rule", name: String(tko_row.name), status: tko_row.status as WorkspaceAutomationRule["status"], triggerType: tko_row.trigger_type as WorkspaceAutomationRule["triggerType"], condition: tko_json<Record<string, unknown>>(tko_row.condition_json, {}), actions: tko_json<WorkspaceAutomationRule["actions"]>(tko_row.actions_json, []), ownerMemberId: String(tko_row.owner_member_id), version: Number(tko_row.version), createdAt: new Date(String(tko_row.created_at)), updatedAt: new Date(String(tko_row.updated_at)) });
   private tko_executionRow = (tko_row: TkoRow): WorkspaceAutomationExecution => ({ id: String(tko_row.id), tenantId: String(tko_row.tenant_id), type: "workspace_automation_execution", ruleId: String(tko_row.rule_id), ruleVersion: Number(tko_row.rule_version), sourceEventId: String(tko_row.source_event_id), status: tko_row.status as WorkspaceAutomationExecution["status"], results: tko_json<Record<string, unknown>>(tko_row.results_json, {}), error: tko_row.error ? String(tko_row.error) : null, createdAt: new Date(String(tko_row.created_at)), completedAt: tko_date(tko_row.completed_at) });
