@@ -4,6 +4,7 @@ import { getPlatformStore } from "../../../packages/database/src/platform-store"
 import { getRedisAdapter } from "../../../packages/redis/src/redis-adapter";
 import { recordAuthenticationEvent } from "../../audit/src/audit-service";
 import { createPlatformActor, resolveTenantRequestContext } from "../../tenancy/src/tenant-context";
+import { tko_config } from "../../../packages/config/src/tasko-config";
 import { sdk } from "../../../server/_core/sdk";
 import { ONE_YEAR_MS } from "../../../shared/const";
 import { tko_hashSessionToken, tko_revokeAllSessionsForSubject } from "./session-service";
@@ -41,16 +42,34 @@ export async function signUpWithEmailPassword(tko_input: { email: string; passwo
   await tko_takeCredentialRateLimit("signup", tko_email);
   const tko_authSubject = `${TKO_EMAIL_SUBJECT_PREFIX}${randomUUID()}`;
   const tko_account = await getEmailPasswordStore().create({ authSubject: tko_authSubject, email: tko_email, displayName: tko_input.displayName.trim(), passwordHash: await tko_passwordHash(tko_input.password) });
-  let tko_provisioned: { tenant: { id: string } };
+  let tko_tenantId: string;
   try {
-    tko_provisioned = await getPlatformStore().provisionTenant({ name: tko_input.workspaceName?.trim() || `${tko_account.displayName}'s Workspace`, slug: tko_workspaceSlug(tko_email), ownerAuthSubject: tko_authSubject, ownerDisplayName: tko_account.displayName, planKey: "starter", idempotencyKey: `email-signup:${tko_authSubject}`, correlationId: tko_input.correlationId });
+    if (tko_config.deploymentProfile === "single_tenant") {
+      // Spec 17 §3: the OSS single-tenant profile disables tenant self-provisioning.
+      // New signups join the one configured workspace as members instead of
+      // creating their own tenant. On a fresh non-production install the first
+      // signup bootstraps the configured workspace (and becomes its owner).
+      const tko_platform = getPlatformStore();
+      let tko_target = (await tko_platform.listTenants()).find(tko_tenant => tko_tenant.slug === tko_config.singleTenantSlug);
+      if (!tko_target) {
+        if (tko_config.isProduction) throw new Error("TASKO_SINGLE_TENANT_NOT_SEEDED");
+        await tko_platform.seedDemoWorkspace({ ownerAuthSubject: tko_authSubject, tenantSlug: tko_config.singleTenantSlug, tenantName: "Tasko workspace" });
+        tko_target = (await tko_platform.listTenants()).find(tko_tenant => tko_tenant.slug === tko_config.singleTenantSlug);
+      }
+      if (!tko_target) throw new Error("TASKO_SINGLE_TENANT_NOT_SEEDED");
+      await tko_platform.upsertTenantMember({ tenantId: tko_target.id, authSubject: tko_authSubject, email: tko_email, displayName: tko_account.displayName, role: "member", correlationId: tko_input.correlationId });
+      tko_tenantId = tko_target.id;
+    } else {
+      const tko_provisioned = await getPlatformStore().provisionTenant({ name: tko_input.workspaceName?.trim() || `${tko_account.displayName}'s Workspace`, slug: tko_workspaceSlug(tko_email), ownerAuthSubject: tko_authSubject, ownerDisplayName: tko_account.displayName, planKey: "starter", idempotencyKey: `email-signup:${tko_authSubject}`, correlationId: tko_input.correlationId });
+      tko_tenantId = tko_provisioned.tenant.id;
+    }
   } catch (tko_error) { await getEmailPasswordStore().delete(tko_authSubject); throw tko_error; }
-  const tko_membership = (await getPlatformStore().listMemberships(tko_authSubject)).find(tko_item => tko_item.tenant.id === tko_provisioned.tenant.id && tko_item.status === "active");
+  const tko_membership = (await getPlatformStore().listMemberships(tko_authSubject)).find(tko_item => tko_item.tenant.id === tko_tenantId && tko_item.status === "active");
   if (!tko_membership) throw new Error("TASKO_SIGNUP_TENANT_MISSING");
   await recordAuthenticationEvent({ actor: createPlatformActor(tko_membership, tko_input.correlationId), action: "login", correlationId: tko_input.correlationId, metadata: { loginMethod: "email_password", enrollment: "signup" } });
   // Spec 06 §2 P1: every signup gets a verification email. Never blocks signup.
   await issueEmailVerificationForSignup(tko_account, tko_input.correlationId);
-  return { account: tko_account, sessionToken: await sdk.createSessionToken(tko_authSubject, { name: tko_account.displayName, expiresInMs: ONE_YEAR_MS, tenantId: tko_provisioned.tenant.id }) };
+  return { account: tko_account, sessionToken: await sdk.createSessionToken(tko_authSubject, { name: tko_account.displayName, expiresInMs: ONE_YEAR_MS, tenantId: tko_tenantId }) };
 }
 
 export async function signInWithEmailPassword(tko_input: { email: string; password: string; correlationId: string }): Promise<TkoSignInResult> {

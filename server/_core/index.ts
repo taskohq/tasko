@@ -61,6 +61,10 @@ async function startServer() {
     ),
     // Base64 attachment uploads ride through the JSON API.
     bodyLimit: 50 * 1024 * 1024,
+    // tRPC httpBatchLink encodes the whole procedure list as one wildcard path
+    // param; Fastify's 100-char default rejects large batches with 414
+    // (see tRPC Fastify adapter docs).
+    maxParamLength: 5000,
   }) as unknown as import("fastify").FastifyInstance;
   await tko_fastify.register(fastifyCookie);
 

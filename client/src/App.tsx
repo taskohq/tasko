@@ -1,5 +1,6 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useAuth } from "./_core/hooks/useAuth";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -20,7 +21,14 @@ import Login from "./pages/Login";
 
 function Router() {
   const [tko_location] = useLocation();
+  const { isAuthenticated, loading: tko_authLoading } = useAuth();
+  // Spec 06 §8: an unauthenticated visitor must not discover any workspace
+  // surface — every route resolves to the login page until signed in.
   if (tko_location === "/login") return <Login />;
+  if (tko_authLoading) {
+    return <div className="grid min-h-screen place-items-center bg-[#f7f8f9] text-sm text-[#5e6c84]">Loading Tasko…</div>;
+  }
+  if (!isAuthenticated) return <Login />;
   return (
     <TaskoShell>
       <Switch>
