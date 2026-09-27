@@ -181,3 +181,56 @@ export interface ConvertLeadInput {
   dealAmountCents?: number | null;
   correlationId: string;
 }
+
+// M3 CRM UI extras: partial updates. `undefined` leaves a field untouched; providing a
+// value (including empty string / null where allowed) replaces it. Status "converted" is
+// intentionally unreachable here — conversion must go through ConvertLeadInput.
+export interface UpdateLeadInput {
+  leadId: string;
+  ownerMemberId?: string;
+  firstName?: string;
+  lastName?: string;
+  companyName?: string;
+  jobTitle?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  country?: string;
+  source?: string;
+  status?: Exclude<CRMLeadStatus, "converted">;
+  score?: number | null;
+  tags?: string[];
+  notes?: string;
+  nextFollowUpAt?: Date | null;
+  customFields?: Record<string, unknown>;
+  correlationId: string;
+}
+
+export interface UpdateCompanyInput {
+  companyId: string;
+  ownerMemberId?: string;
+  name?: string;
+  domain?: string;
+  website?: string;
+  industry?: string;
+  employeeRange?: string;
+  country?: string;
+  lifecycleStatus?: string;
+  tags?: string[];
+  customFields?: Record<string, unknown>;
+  correlationId: string;
+}
+
+export interface UpdateContactInput {
+  contactId: string;
+  companyId?: string | null;
+  ownerMemberId?: string;
+  firstName?: string;
+  lastName?: string;
+  title?: string;
+  emails?: string[];
+  phones?: string[];
+  tags?: string[];
+  customFields?: Record<string, unknown>;
+  correlationId: string;
+}

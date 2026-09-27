@@ -1,51 +1,79 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
-import { trpc } from "@/lib/trpc";
-import { Building2, CheckCircle2, CirclePlus, ExternalLink, Handshake, Plus, Sparkles, Target, X } from "lucide-react";
-import { Link } from "wouter";
-import { type FormEvent, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { TkoCrmCompaniesView } from "@/components/crm/TkoCrmCompanies";
+import { TkoCrmContactsView } from "@/components/crm/TkoCrmContacts";
+import { TkoCrmDealsView } from "@/components/crm/TkoCrmDeals";
+import { TkoCrmLeadsView } from "@/components/crm/TkoCrmLeads";
+import { TkoCrmPipelinesView } from "@/components/crm/TkoCrmPipelines";
+import { BriefcaseBusiness, Building2, Grid2X2, Sparkles, UsersRound } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 
-type TkoPreviewDeal = { id: string; name: string; company: string; amount: string; next: string; stageId: string; probability: number; wonAt?: Date | null; amountCents?: number | null; currency?: string; owner?: string };
-const tko_previewStages = [{ id: "new", name: "Discovery", category: "open", probabilityDefault: 20 }, { id: "proposal", name: "Proposal", category: "open", probabilityDefault: 60 }, { id: "won", name: "Closed won", category: "won", probabilityDefault: 100 }] as const;
-const tko_previewDeals: TkoPreviewDeal[] = [{ id: "crm-preview-1", name: "Expansion workspace", company: "Northstar Labs", amount: "$24,000", next: "Scope delivery", stageId: "new", probability: 20, owner: "PS" }, { id: "crm-preview-2", name: "Operations rollout", company: "Aster Studio", amount: "$18,500", next: "Send proposal", stageId: "proposal", probability: 60, owner: "RK" }, { id: "crm-preview-3", name: "Team pilot", company: "Cedar & Co.", amount: "$9,200", next: "Delivery handoff", stageId: "won", probability: 100, wonAt: new Date(), owner: "NR" }];
-const tko_emptyUuid = "00000000-0000-0000-0000-000000000000";
+type TkoCrmMode = "deals" | "leads" | "companies" | "contacts" | "pipelines";
+const tko_modes: Array<{ tko_id: TkoCrmMode; tko_hash: string; tko_label: string; tko_icon: typeof BriefcaseBusiness }> = [
+  { tko_id: "deals", tko_hash: "", tko_label: "Deals", tko_icon: BriefcaseBusiness },
+  { tko_id: "leads", tko_hash: "#leads", tko_label: "Leads", tko_icon: UsersRound },
+  { tko_id: "companies", tko_hash: "#companies", tko_label: "Companies", tko_icon: Building2 },
+  { tko_id: "contacts", tko_hash: "#contacts", tko_label: "Contacts", tko_icon: UsersRound },
+  { tko_id: "pipelines", tko_hash: "#pipelines", tko_label: "Pipelines", tko_icon: Grid2X2 },
+];
 
-function tko_formatMoney(tko_cents: number | null | undefined, tko_currency: string) { return tko_cents == null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: tko_currency || "USD", maximumFractionDigits: 0 }).format(tko_cents / 100); }
-function TkoMetric({ label, value, hint }: { label: string; value: string; hint: string }) { return <div className="min-w-[155px] rounded-md border border-[#dfe1e6] bg-white px-3.5 py-3"><p className="text-[10px] font-semibold uppercase tracking-[.09em] text-[#6b778c]">{label}</p><div className="mt-1 flex items-baseline gap-2"><p className="text-[18px] font-semibold tracking-[-.03em] text-[#172b4d]">{value}</p><span className="text-[10px] font-medium text-[#0052cc]">{hint}</span></div></div>; }
+function tko_modeFromHash(): TkoCrmMode {
+  const tko_hash = window.location.hash.replace(/^#\/?/, "");
+  const tko_match = tko_modes.find(tko_mode => tko_mode.tko_hash === `#${tko_hash}`);
+  return tko_match?.tko_id ?? "deals";
+}
 
 export default function CRM() {
   const { isAuthenticated, loading: tko_authLoading } = useAuth();
-  const tko_utils = trpc.useUtils();
-  const [tko_selectedDealId, setTkoSelectedDealId] = useState<string | null>(null);
-  const [tko_intakeOpen, setTkoIntakeOpen] = useState(false);
-  const [tko_firstName, setTkoFirstName] = useState("");
-  const [tko_lastName, setTkoLastName] = useState("");
-  const [tko_companyName, setTkoCompanyName] = useState("");
-  const tko_overview = trpc.crm.overview.useQuery(undefined, { enabled: isAuthenticated });
-  const tko_pipelines = trpc.crm.pipelines.useQuery(undefined, { enabled: isAuthenticated });
-  const tko_pipelineId = tko_pipelines.data?.[0]?.id;
-  const tko_board = trpc.crm.board.useQuery({ pipelineId: tko_pipelineId ?? tko_emptyUuid }, { enabled: Boolean(tko_pipelineId) });
-  const tko_isPreview = !isAuthenticated || !tko_pipelineId;
-  const tko_stages: any[] = tko_board.data?.stages ?? [...tko_previewStages];
-  const tko_deals: any[] = tko_board.data?.deals ?? tko_previewDeals;
-  const tko_selected = useMemo(() => tko_deals.find(tko_deal => tko_deal.id === tko_selectedDealId) ?? null, [tko_deals, tko_selectedDealId]);
-  const tko_detail = trpc.crm.deal.useQuery({ dealId: tko_selectedDealId ?? tko_emptyUuid }, { enabled: Boolean(isAuthenticated && tko_selectedDealId), refetchInterval: 2_000 });
-  const tko_createLead = trpc.crm.createLead.useMutation({ onSuccess: async () => { setTkoIntakeOpen(false); setTkoFirstName(""); setTkoLastName(""); setTkoCompanyName(""); await tko_utils.crm.overview.invalidate(); toast.success("Lead đã được thêm vào CRM."); }, onError: () => toast.error("Không thể tạo lead. Hãy thử lại.") });
-  const tko_moveDeal = trpc.crm.moveDeal.useMutation({ onSuccess: async () => { await Promise.all([tko_utils.crm.board.invalidate(), tko_utils.crm.deal.invalidate()]); toast.success("Deal stage đã được cập nhật."); }, onError: () => toast.error("Không thể cập nhật stage của deal.") });
-  const tko_requestHandoff = trpc.crm.requestDealHandoff.useMutation({ onSuccess: async () => { await tko_utils.crm.deal.invalidate(); toast.success("Đã yêu cầu handoff. Delivery sẽ được materialize bởi worker."); }, onError: () => toast.error("Không thể yêu cầu delivery handoff.") });
-  const tko_pipelineCents = tko_deals.reduce((tko_sum, tko_deal) => tko_sum + (tko_deal.amountCents ?? 0), 0);
-  const tko_weightedCents = tko_deals.reduce((tko_sum, tko_deal) => tko_sum + Math.round((tko_deal.amountCents ?? 0) * ((tko_deal.probability ?? 0) / 100)), 0);
-  const tko_selectedStage = tko_stages.find(tko_stage => tko_stage.id === tko_selected?.stageId);
-  const tko_canRequestHandoff = Boolean(tko_selected?.wonAt || tko_selectedStage?.category === "won") && !tko_detail.data?.handoff;
+  const [tko_mode, setTkoMode] = useState<TkoCrmMode>(() => (typeof window === "undefined" ? "deals" : tko_modeFromHash()));
+  const [tko_focusCompanyId, setTkoFocusCompanyId] = useState<string | null>(null);
+  const [tko_focusContactId, setTkoFocusContactId] = useState<string | null>(null);
 
-  function tko_submitLead(tko_event: FormEvent) { tko_event.preventDefault(); if (!tko_firstName.trim() || !tko_lastName.trim()) { toast.error("Nhập họ và tên lead trước khi lưu."); return; } tko_createLead.mutate({ firstName: tko_firstName.trim(), lastName: tko_lastName.trim(), companyName: tko_companyName.trim() || undefined }); }
+  useEffect(() => {
+    const tko_onHashChange = () => setTkoMode(tko_modeFromHash());
+    window.addEventListener("hashchange", tko_onHashChange);
+    return () => window.removeEventListener("hashchange", tko_onHashChange);
+  }, []);
 
-  return <div className="min-w-0 bg-[#f4f5f7]"><header className="border-b border-[#dfe1e6] bg-white px-5 py-5 lg:px-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2"><h1 className="text-[21px] font-semibold tracking-[-.035em] text-[#172b4d]">Sales pipeline</h1><span className="rounded-sm bg-[#deebff] px-2 py-0.5 text-[11px] font-medium text-[#0052cc]">Revenue pilot</span></div><p className="mt-1 text-[13px] text-[#5e6c84]">Move customer context from qualification to delivery without losing the work around it.</p></div>{isAuthenticated ? <Button onClick={() => setTkoIntakeOpen(true)} className="h-9 rounded-sm bg-[#0052cc] px-3.5 text-xs font-semibold hover:bg-[#0747a6]"><Plus className="mr-1.5 h-4 w-4" />New lead</Button> : <Button onClick={startLogin} className="h-9 rounded-sm bg-[#0052cc] px-3.5 text-xs font-semibold hover:bg-[#0747a6]">Sign in</Button>}</div></header>
-    <main className="px-5 py-5 lg:px-7">{tko_isPreview && !tko_authLoading ? <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-[#ffe380] bg-[#fff7d6] px-3 py-2.5 text-xs text-[#7a5d00]"><Sparkles className="h-4 w-4" />CRM Alpha preview. Sign in and initialize the controlled-pilot workspace to view durable records.<button onClick={startLogin} className="ml-auto font-semibold underline">Sign in</button></div> : null}<div className="mb-5 flex gap-3 overflow-x-auto pb-1"><TkoMetric label="Pipeline value" value={tko_pipelineCents ? tko_formatMoney(tko_pipelineCents, "USD") : "$51,700"} hint="Current pipeline" /><TkoMetric label="Weighted pipeline" value={tko_weightedCents ? tko_formatMoney(tko_weightedCents, "USD") : "$26,180"} hint="Forecast" /><TkoMetric label="Open deals" value={String(tko_deals.length)} hint="Across stages" /><TkoMetric label="Active leads" value={String(tko_overview.data?.leads.length ?? 0)} hint="Needs follow-up" /></div><div className="mb-4 flex items-center gap-2"><span className="flex h-9 items-center gap-2 rounded-sm border border-[#dfe1e6] bg-white px-3 text-xs font-medium text-[#42526e]"><Target className="h-3.5 w-3.5 text-[#0052cc]" />All deals</span></div><div className="overflow-x-auto pb-4"><div className="grid min-w-[900px] grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">{tko_stages.map(tko_stage => { const tko_stageDeals = tko_deals.filter(tko_deal => tko_deal.stageId === tko_stage.id); const tko_accent = tko_stage.category === "won" ? "bg-[#36b37e]" : tko_stage.name.toLowerCase().includes("proposal") ? "bg-[#0052cc]" : "bg-[#ffab00]"; return <section key={tko_stage.id} className="border border-[#dfe1e6] bg-[#ebecf0] p-2.5"><div className="mb-3 px-1"><div className="flex items-center gap-2 text-xs font-semibold text-[#172b4d]"><span className={`h-2 w-2 ${tko_accent}`} />{tko_stage.name}<span className="grid h-5 min-w-5 place-items-center bg-white px-1 text-[10px] text-[#5e6c84]">{tko_stageDeals.length}</span></div><p className="mt-1 pl-4 text-[10px] text-[#5e6c84]">{tko_stage.probabilityDefault}% probability</p></div><div className="space-y-2">{tko_stageDeals.map(tko_deal => <button type="button" key={tko_deal.id} onClick={() => setTkoSelectedDealId(tko_deal.id)} className="block w-full border border-[#dfe1e6] bg-white p-3 text-left shadow-[0_1px_1px_rgba(9,30,66,.12)] transition hover:border-[#4c9aff]"><div className="flex items-start justify-between gap-2"><p className="text-[13px] font-semibold leading-5 text-[#172b4d]">{tko_deal.name}</p><span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#deebff] text-[8px] font-bold text-[#0052cc]">{tko_deal.owner ?? "TK"}</span></div><p className="mt-1 flex items-center gap-1 text-[11px] text-[#5e6c84]"><Building2 className="h-3 w-3" />{tko_deal.company ?? "No company"}</p><div className="mt-3 flex items-center justify-between"><span className="text-[12px] font-semibold text-[#172b4d]">{tko_deal.amount ?? tko_formatMoney(tko_deal.amountCents, tko_deal.currency ?? "USD")}</span><span className="bg-[#f4f5f7] px-1.5 py-0.5 text-[10px] text-[#5e6c84]">{tko_deal.probability ?? tko_stage.probabilityDefault}%</span></div><p className="mt-2 flex items-center gap-1 text-[10px] text-[#0052cc]"><CirclePlus className="h-3 w-3" />{tko_deal.next ?? tko_deal.nextStep ?? "Set next step"}</p></button>)}</div></section>; })}</div></div></main>
-    {tko_intakeOpen ? <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#091e42]/25 p-4" role="dialog" aria-modal="true" aria-label="Create lead"><form onSubmit={tko_submitLead} className="w-full max-w-md border border-[#dfe1e6] bg-white p-5 shadow-xl"><div className="mb-5 flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.11em] text-[#5e6c84]">CRM intake</p><h2 className="mt-1 text-lg font-semibold tracking-[-.03em] text-[#172b4d]">New lead</h2></div><button type="button" onClick={() => setTkoIntakeOpen(false)} aria-label="Close"><X className="h-4 w-4 text-[#5e6c84]" /></button></div><div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-[#42526e]">First name<Input value={tko_firstName} onChange={tko_event => setTkoFirstName(tko_event.target.value)} className="mt-1 rounded-sm" /></label><label className="text-xs font-medium text-[#42526e]">Last name<Input value={tko_lastName} onChange={tko_event => setTkoLastName(tko_event.target.value)} className="mt-1 rounded-sm" /></label></div><label className="mt-3 block text-xs font-medium text-[#42526e]">Company<Input value={tko_companyName} onChange={tko_event => setTkoCompanyName(tko_event.target.value)} className="mt-1 rounded-sm" /></label><div className="mt-6 flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setTkoIntakeOpen(false)} className="h-8 rounded-sm text-xs">Cancel</Button><Button type="submit" disabled={tko_createLead.isPending} className="h-8 rounded-sm bg-[#0052cc] text-xs hover:bg-[#0747a6]">{tko_createLead.isPending ? "Saving…" : "Save lead"}</Button></div></form></div> : null}
-    {tko_selected ? <div className="fixed inset-0 z-[60] flex justify-end bg-[#091e42]/20" role="dialog" aria-modal="true" aria-label="Deal details"><aside className="h-full w-full max-w-[420px] overflow-y-auto border-l border-[#dfe1e6] bg-white shadow-[-16px_0_38px_rgba(9,30,66,.2)]"><div className="border-b border-[#dfe1e6] p-5"><div className="flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-[.11em] text-[#5e6c84]">Deal details</span><button onClick={() => setTkoSelectedDealId(null)} aria-label="Close deal inspector" className="grid h-8 w-8 place-items-center rounded-sm text-[#5e6c84] hover:bg-[#f4f5f7]"><X className="h-4 w-4" /></button></div><div className="mt-4 flex items-center gap-2"><span className="bg-[#e3fcef] px-2 py-0.5 text-[10px] font-semibold text-[#006644]">{tko_selectedStage?.name ?? "Open"}</span><span className="bg-[#deebff] px-2 py-0.5 text-[10px] font-medium text-[#0052cc]">{tko_selected.probability ?? "—"}% likely</span></div><h2 className="mt-3 text-xl font-semibold tracking-[-.03em] text-[#172b4d]">{tko_selected.name}</h2><p className="mt-1 flex items-center gap-1.5 text-[13px] text-[#5e6c84]"><Building2 className="h-3.5 w-3.5" />{tko_selected.company ?? "No company connected"}</p></div><div className="space-y-6 p-5"><section className="grid grid-cols-2 gap-3"><div className="bg-[#f4f5f7] p-3"><span className="block text-[10px] font-medium text-[#5e6c84]">Amount</span><strong className="mt-1 block text-sm text-[#172b4d]">{tko_selected.amount ?? tko_formatMoney(tko_selected.amountCents, tko_selected.currency ?? "USD")}</strong></div><div className="bg-[#f4f5f7] p-3"><span className="block text-[10px] font-medium text-[#5e6c84]">Next step</span><strong className="mt-1 block text-xs text-[#172b4d]">{tko_selected.next ?? tko_selected.nextStep ?? "Add next step"}</strong></div></section><section><p className="mb-3 text-[10px] font-bold uppercase tracking-[.11em] text-[#5e6c84]">Move stage</p><div className="flex flex-wrap gap-2">{tko_stages.map(tko_stage => <button type="button" key={tko_stage.id} disabled={tko_isPreview || tko_moveDeal.isPending} onClick={() => tko_moveDeal.mutate({ dealId: tko_selected.id, stageId: tko_stage.id })} className={`border px-2.5 py-1.5 text-[11px] font-medium disabled:opacity-50 ${tko_stage.id === tko_selected.stageId ? "border-[#0052cc] bg-[#deebff] text-[#0052cc]" : "border-[#dfe1e6] text-[#5e6c84]"}`}>{tko_stage.name}</button>)}</div></section><section className="border-y border-[#dfe1e6] py-5"><div className="flex items-start justify-between gap-3"><div><p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.11em] text-[#5e6c84]"><Handshake className="h-3.5 w-3.5 text-[#0052cc]" />Connected delivery</p><p className="mt-1 text-xs text-[#5e6c84]">{tko_detail.isLoading ? "Loading delivery handoff…" : tko_detail.data?.handoff?.status === "completed" ? "Delivery project and customer channel are ready." : tko_detail.data?.handoff?.status === "pending" ? "Handoff is queued for delivery materialization." : "Create delivery work and a customer channel from this won deal."}</p></div>{tko_canRequestHandoff ? <Button size="sm" disabled={tko_requestHandoff.isPending || tko_isPreview} onClick={() => tko_requestHandoff.mutate({ dealId: tko_selected.id })} className="h-8 rounded-sm bg-[#0052cc] text-xs hover:bg-[#0747a6]">{tko_requestHandoff.isPending ? "Requesting…" : "Start handoff"}</Button> : null}</div>{tko_detail.data?.handoff?.status === "completed" ? <div className="mt-4 space-y-2"><div className="flex items-center justify-between border border-[#dfe1e6] bg-[#f4f5f7] p-2.5 text-xs"><span className="flex items-center gap-2 text-[#42526e]"><CheckCircle2 className="h-4 w-4 text-[#36b37e]" />Delivery project</span>{tko_detail.data.deliveryProject ? <Link href="/work" className="flex items-center gap-1 font-semibold text-[#0052cc] hover:underline">{tko_detail.data.deliveryProject.key} · {tko_detail.data.deliveryProject.name}<ExternalLink className="h-3 w-3" /></Link> : <span className="text-[#5e6c84]">Access limited</span>}</div><div className="flex items-center justify-between border border-[#dfe1e6] bg-[#f4f5f7] p-2.5 text-xs"><span className="flex items-center gap-2 text-[#42526e]"><CheckCircle2 className="h-4 w-4 text-[#36b37e]" />Customer channel</span>{tko_detail.data.deliveryChannel ? <Link href="/chat" className="flex items-center gap-1 font-semibold text-[#0052cc] hover:underline">#{tko_detail.data.deliveryChannel.name}<ExternalLink className="h-3 w-3" /></Link> : <span className="text-[#5e6c84]">Access limited</span>}</div></div> : null}{tko_detail.data?.handoff?.status === "pending" ? <div className="mt-4 border border-[#b3d4ff] bg-[#deebff] p-3 text-xs text-[#0747a6]">The request is durable. This panel refreshes once the worker completes the handoff.</div> : null}</section></div></aside></div> : null}
+  function tko_goToMode(tko_next: TkoCrmMode) {
+    const tko_hash = tko_modes.find(tko_mode => tko_mode.tko_id === tko_next)?.tko_hash ?? "";
+    const tko_base = window.location.pathname + window.location.search;
+    window.history.replaceState(null, "", `${tko_base}${tko_hash}`);
+    setTkoMode(tko_next);
+    setTkoFocusCompanyId(null);
+    setTkoFocusContactId(null);
+  }
+
+  const tko_headerTitle: Record<TkoCrmMode, { tko_title: string; tko_hint: string }> = {
+    deals: { tko_title: "Sales pipeline", tko_hint: "Move customer context from qualification to delivery without losing the work around it." },
+    leads: { tko_title: "Leads", tko_hint: "Qualify inbound and outbound demand, then convert with full history intact." },
+    companies: { tko_title: "Companies", tko_hint: "One connected view of contacts, deals, activities and linked workspace objects." },
+    contacts: { tko_title: "Contacts", tko_hint: "The people behind every account, ready for follow-up work." },
+    pipelines: { tko_title: "Pipelines", tko_hint: "Stages, probabilities and categories powering the board and forecasting." },
+  };
+
+  return <div className="min-w-0 bg-[#f4f5f7]">
+    <header className="border-b border-[#dfe1e6] bg-white px-5 py-5 lg:px-7">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2"><h1 className="text-[21px] font-semibold tracking-[-.035em] text-[#172b4d]">{tko_headerTitle[tko_mode].tko_title}</h1><span className="rounded-sm bg-[#deebff] px-2 py-0.5 text-[11px] font-medium text-[#0052cc]">Slim CRM</span></div>
+          <p className="mt-1 text-[13px] text-[#5e6c84]">{tko_headerTitle[tko_mode].tko_hint}</p>
+        </div>
+        {isAuthenticated ? null : <Button onClick={startLogin} className="h-9 rounded-sm bg-[#0052cc] px-3.5 text-xs font-semibold hover:bg-[#0747a6]">Sign in</Button>}
+      </div>
+      <nav aria-label="CRM sections" className="mt-4 flex flex-wrap gap-1.5">{tko_modes.map(tko_modeItem => {
+        const TkoIcon = tko_modeItem.tko_icon;
+        return <button type="button" key={tko_modeItem.tko_id} onClick={() => tko_goToMode(tko_modeItem.tko_id)} aria-current={tko_mode === tko_modeItem.tko_id ? "page" : undefined} className={`flex items-center gap-1.5 border px-3 py-1.5 text-xs font-semibold transition ${tko_mode === tko_modeItem.tko_id ? "border-[#0052cc] bg-[#deebff] text-[#0052cc]" : "border-[#dfe1e6] bg-white text-[#5e6c84] hover:border-[#4c9aff] hover:text-[#172b4d]"}`}><TkoIcon className="h-3.5 w-3.5" />{tko_modeItem.tko_label}</button>;
+      })}</nav>
+    </header>
+    <main className="px-5 py-5 lg:px-7">
+      {!tko_authLoading && !isAuthenticated ? <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-[#ffe380] bg-[#fff7d6] px-3 py-2.5 text-xs text-[#7a5d00]"><Sparkles className="h-4 w-4" />CRM Alpha preview. Sign in and initialize the controlled-pilot workspace to view durable records.<button onClick={startLogin} className="ml-auto font-semibold underline">Sign in</button></div> : null}
+      {tko_mode === "deals" ? <TkoCrmDealsView tko_isAuthenticated={isAuthenticated} tko_onNewPipeline={() => tko_goToMode("pipelines")} /> : null}
+      {tko_mode === "leads" ? <TkoCrmLeadsView tko_isAuthenticated={isAuthenticated} /> : null}
+      {tko_mode === "companies" ? <TkoCrmCompaniesView tko_isAuthenticated={isAuthenticated} tko_focusCompanyId={tko_focusCompanyId} tko_onOpenContact={tko_contactId => { setTkoFocusContactId(tko_contactId); tko_goToMode("contacts"); }} /> : null}
+      {tko_mode === "contacts" ? <TkoCrmContactsView tko_isAuthenticated={isAuthenticated} tko_focusContactId={tko_focusContactId} tko_onNavigateCompanies={() => tko_goToMode("companies")} /> : null}
+      {tko_mode === "pipelines" ? <TkoCrmPipelinesView tko_isAuthenticated={isAuthenticated} /> : null}
+    </main>
   </div>;
 }
