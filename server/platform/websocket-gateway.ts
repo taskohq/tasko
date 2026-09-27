@@ -74,7 +74,14 @@ export function registerWebSocketGateway(tko_server: Server): { close(): Promise
 
   tko_server.on("upgrade", async (tko_request, tko_socket, tko_head) => {
     if (!tko_request.url?.startsWith("/api/realtime")) {
-      tko_socket.destroy();
+      // Vite dev HMR shares this HTTP server and identifies itself with the
+      // `vite-hmr` websocket protocol. Destroying those upgrades makes the
+      // Vite client lose its socket, poll for restart and full-reload the
+      // page in an endless loop — leave them for Vite's own upgrade listener.
+      const tko_protocol = tko_request.headers["sec-websocket-protocol"];
+      if (tko_protocol !== "vite-hmr") {
+        tko_socket.destroy();
+      }
       return;
     }
 

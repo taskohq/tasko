@@ -32,8 +32,8 @@ type TkoModuleKey = "overview" | "work" | "chat" | "crm" | "ai";
 type TkoNavItem = { label: string; path: string; icon: ComponentType<{ className?: string }>; badge?: string };
 
 export const tko_brandAssets = {
-  logo: "/manus-storage/tasko-logo_50726dd1.png",
-  favicon: "/manus-storage/tasko-favicon_2220cdac.png",
+  logo: "/tasko-logo.png",
+  favicon: "/tasko-favicon.png",
 } as const;
 
 export const tko_shellModules: Record<TkoModuleKey, { label: string; eyebrow: string; nav: TkoNavItem[] }> = {
