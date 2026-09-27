@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values: the vitest suites that need real PostgreSQL/Redis/MinIO self-skip
+      # without their full env contract (TASKO_RUN_POSTGRES_INTEGRATION_TESTS=1, 127.0.0.1
+      # MinIO endpoint, ...). OWNER_OPEN_ID unlocks the platform-admin saas suites; the
+      # Resend/VAPID credentials let the offline email/web-push suites run with mocked or
+      # local-only networking.
+      JWT_SECRET: ci-dummy-jwt-secret-0123456789abcdef
+      VITE_APP_ID: tasko-ci
+      OAUTH_SERVER_URL: https://oauth.example.test
+      RESEND_API_KEY: dummy-resend-api-key
+      RESEND_FROM_EMAIL: tasko-ci@example.test
+      TASKO_APP_ORIGIN: http://localhost:3000
+      OWNER_OPEN_ID: email:tasko-ci-owner
+      TASKO_PLATFORM_ADMIN_SUBJECTS: email:tasko-ci-owner
+      VITE_TASKO_VAPID_PUBLIC_KEY: BJa4uj6dKpvQhk6VEKD4vdrcihDv8zqnFaPcw5TUBW6WQVq8gmPSELRAqERUZZJ43SvJGqtHzGDuXagwiVFwkl0
+      TASKO_VAPID_PRIVATE_KEY: WzcJPxMXxp3DMBKbu8KNfd9eXXYuvixi8ZAmoOyM9Ro
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          # No lockfile is committed on purpose; hash package.json for the cache key instead.
+          cache-dependency-path: package.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck (full tsc)
+        run: npm run check
+
+      - name: Unit and offline integration tests
+        # postgres.connection.test.ts asserts a live TASKO_POSTGRES_URL endpoint and
+        # resend.config.test.ts performs a live authenticated call to api.resend.com —
+        # neither can pass offline; every other env-gated suite skips itself.
+        run: npx vitest run --exclude "server/postgres.connection.test.ts" --exclude "server/resend.config.test.ts"

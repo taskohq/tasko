@@ -27,15 +27,15 @@ import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 
-const menuItems = [
+const tko_menuItems = [
   { icon: LayoutDashboard, label: "Page 1", path: "/" },
   { icon: Users, label: "Page 2", path: "/some-path" },
 ];
 
-const SIDEBAR_WIDTH_KEY = "sidebar-width";
-const DEFAULT_WIDTH = 280;
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 480;
+const tko_SIDEBAR_WIDTH_KEY = "sidebar-width";
+const tko_DEFAULT_WIDTH = 280;
+const tko_MIN_WIDTH = 200;
+const tko_MAX_WIDTH = 480;
 
 export default function DashboardLayout({
   children,
@@ -43,13 +43,13 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
-    return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
+    const tko_saved = localStorage.getItem(tko_SIDEBAR_WIDTH_KEY);
+    return tko_saved ? parseInt(tko_saved, 10) : tko_DEFAULT_WIDTH;
   });
   const { loading, user } = useAuth();
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+    localStorage.setItem(tko_SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
   }, [sidebarWidth]);
 
   if (loading) {
@@ -107,43 +107,43 @@ function DashboardLayoutContent({
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
   const { state, toggleSidebar } = useSidebar();
-  const isCollapsed = state === "collapsed";
+  const tko_isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
-  const sidebarRef = useRef<HTMLDivElement>(null);
-  const activeMenuItem = menuItems.find(item => item.path === location);
-  const isMobile = useIsMobile();
+  const tko_sidebarRef = useRef<HTMLDivElement>(null);
+  const tko_activeMenuItem = tko_menuItems.find(item => item.path === location);
+  const tko_isMobile = useIsMobile();
 
   useEffect(() => {
-    if (isCollapsed) {
+    if (tko_isCollapsed) {
       setIsResizing(false);
     }
-  }, [isCollapsed]);
+  }, [tko_isCollapsed]);
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+    const tko_handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
 
-      const sidebarLeft = sidebarRef.current?.getBoundingClientRect().left ?? 0;
-      const newWidth = e.clientX - sidebarLeft;
-      if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
-        setSidebarWidth(newWidth);
+      const tko_sidebarLeft = tko_sidebarRef.current?.getBoundingClientRect().left ?? 0;
+      const tko_newWidth = e.clientX - tko_sidebarLeft;
+      if (tko_newWidth >= tko_MIN_WIDTH && tko_newWidth <= tko_MAX_WIDTH) {
+        setSidebarWidth(tko_newWidth);
       }
     };
 
-    const handleMouseUp = () => {
+    const tko_handleMouseUp = () => {
       setIsResizing(false);
     };
 
     if (isResizing) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
+      document.addEventListener("mousemove", tko_handleMouseMove);
+      document.addEventListener("mouseup", tko_handleMouseUp);
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
     }
 
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mousemove", tko_handleMouseMove);
+      document.removeEventListener("mouseup", tko_handleMouseUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -151,7 +151,7 @@ function DashboardLayoutContent({
 
   return (
     <>
-      <div className="relative" ref={sidebarRef}>
+      <div className="relative" ref={tko_sidebarRef}>
         <Sidebar
           collapsible="icon"
           className="border-r-0"
@@ -166,7 +166,7 @@ function DashboardLayoutContent({
               >
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
-              {!isCollapsed ? (
+              {!tko_isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-semibold tracking-tight truncate">
                     Navigation
@@ -178,18 +178,18 @@ function DashboardLayoutContent({
 
           <SidebarContent className="gap-0">
             <SidebarMenu className="px-2 py-1">
-              {menuItems.map(item => {
-                const isActive = location === item.path;
+              {tko_menuItems.map(item => {
+                const tko_isActive = location === item.path;
                 return (
                   <SidebarMenuItem key={item.path}>
                     <SidebarMenuButton
-                      isActive={isActive}
+                      isActive={tko_isActive}
                       onClick={() => setLocation(item.path)}
                       tooltip={item.label}
                       className={`h-10 transition-all font-normal`}
                     >
                       <item.icon
-                        className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
+                        className={`h-4 w-4 ${tko_isActive ? "text-primary" : ""}`}
                       />
                       <span>{item.label}</span>
                     </SidebarMenuButton>
@@ -231,9 +231,9 @@ function DashboardLayoutContent({
           </SidebarFooter>
         </Sidebar>
         <div
-          className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/20 transition-colors ${isCollapsed ? "hidden" : ""}`}
+          className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/20 transition-colors ${tko_isCollapsed ? "hidden" : ""}`}
           onMouseDown={() => {
-            if (isCollapsed) return;
+            if (tko_isCollapsed) return;
             setIsResizing(true);
           }}
           style={{ zIndex: 50 }}
@@ -241,14 +241,14 @@ function DashboardLayoutContent({
       </div>
 
       <SidebarInset>
-        {isMobile && (
+        {tko_isMobile && (
           <div className="flex border-b h-14 items-center justify-between bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:backdrop-blur sticky top-0 z-40">
             <div className="flex items-center gap-2">
               <SidebarTrigger className="h-9 w-9 rounded-lg bg-background" />
               <div className="flex items-center gap-3">
                 <div className="flex flex-col gap-1">
                   <span className="tracking-tight text-foreground">
-                    {activeMenuItem?.label ?? "Menu"}
+                    {tko_activeMenuItem?.label ?? "Menu"}
                   </span>
                 </div>
               </div>

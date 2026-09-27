@@ -4,7 +4,7 @@ export type AIContextKind = "work_item" | "project" | "channel" | "message" | "l
 export type AIToolRisk = "read" | "draft" | "write";
 export type AIRunStatus = "running" | "completed" | "failed" | "blocked";
 export type AIProposalStatus = "proposed" | "confirmed" | "executed" | "rejected" | "failed" | "expired";
-export type AIToolName = "context.read" | "work_item.draft" | "document.draft" | "work_item.create" | "chat.message.send";
+export type AIToolName = "context.read" | "work_item.draft" | "document.draft" | "work_item.create" | "chat.message.send" | "work.transition_status" | "crm.update_deal_stage";
 export type McpAccessScope = "context:read" | "draft:write" | "action:propose" | "action:confirm";
 
 export interface AIContextReference extends TenantResource {
@@ -50,6 +50,14 @@ export interface AIToolProposal extends TenantResource {
   updatedAt: Date;
 }
 
+export interface AIToolInputField {
+  name: string;
+  label: string;
+  type: "string" | "text" | "number" | "uuid";
+  required: boolean;
+  placeholder?: string;
+}
+
 export interface AIToolDefinition {
   name: AIToolName;
   risk: AIToolRisk;
@@ -57,6 +65,8 @@ export interface AIToolDefinition {
   requiresConfirmation: boolean;
   idempotent: boolean;
   description: string;
+  /** Pragmatic, schema-driven field hints so UI surfaces (and later MCP schemas) can render parameters without guessing. */
+  inputFields?: AIToolInputField[];
 }
 
 export interface CreateAIRunInput {

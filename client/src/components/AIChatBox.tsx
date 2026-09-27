@@ -120,76 +120,76 @@ export function AIChatBox({
   emptyStateMessage = "Start a conversation with AI",
   suggestedPrompts,
 }: AIChatBoxProps) {
-  const [input, setInput] = useState("");
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputAreaRef = useRef<HTMLFormElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [tko_input, tko_setInput] = useState("");
+  const tko_scrollAreaRef = useRef<HTMLDivElement>(null);
+  const tko_containerRef = useRef<HTMLDivElement>(null);
+  const tko_inputAreaRef = useRef<HTMLFormElement>(null);
+  const tko_textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Filter out system messages
-  const displayMessages = messages.filter((msg) => msg.role !== "system");
+  const tko_displayMessages = messages.filter((tko_msg) => tko_msg.role !== "system");
 
   // Calculate min-height for last assistant message to push user message to top
-  const [minHeightForLastMessage, setMinHeightForLastMessage] = useState(0);
+  const [tko_minHeightForLastMessage, tko_setMinHeightForLastMessage] = useState(0);
 
   useEffect(() => {
-    if (containerRef.current && inputAreaRef.current) {
-      const containerHeight = containerRef.current.offsetHeight;
-      const inputHeight = inputAreaRef.current.offsetHeight;
-      const scrollAreaHeight = containerHeight - inputHeight;
+    if (tko_containerRef.current && tko_inputAreaRef.current) {
+      const tko_containerHeight = tko_containerRef.current.offsetHeight;
+      const tko_inputHeight = tko_inputAreaRef.current.offsetHeight;
+      const tko_scrollAreaHeight = tko_containerHeight - tko_inputHeight;
 
       // Reserve space for:
       // - padding (p-4 = 32px top+bottom)
       // - user message: 40px (item height) + 16px (margin-top from space-y-4) = 56px
       // Note: margin-bottom is not counted because it naturally pushes the assistant message down
-      const userMessageReservedHeight = 56;
-      const calculatedHeight = scrollAreaHeight - 32 - userMessageReservedHeight;
+      const tko_userMessageReservedHeight = 56;
+      const tko_calculatedHeight = tko_scrollAreaHeight - 32 - tko_userMessageReservedHeight;
 
-      setMinHeightForLastMessage(Math.max(0, calculatedHeight));
+      tko_setMinHeightForLastMessage(Math.max(0, tko_calculatedHeight));
     }
   }, []);
 
   // Scroll to bottom helper function with smooth animation
-  const scrollToBottom = () => {
-    const viewport = scrollAreaRef.current?.querySelector(
+  const tko_scrollToBottom = () => {
+    const tko_viewport = tko_scrollAreaRef.current?.querySelector(
       '[data-radix-scroll-area-viewport]'
     ) as HTMLDivElement;
 
-    if (viewport) {
+    if (tko_viewport) {
       requestAnimationFrame(() => {
-        viewport.scrollTo({
-          top: viewport.scrollHeight,
+        tko_viewport.scrollTo({
+          top: tko_viewport.scrollHeight,
           behavior: 'smooth'
         });
       });
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmedInput = input.trim();
-    if (!trimmedInput || isLoading) return;
+  const tko_handleSubmit = (tko_event: React.FormEvent) => {
+    tko_event.preventDefault();
+    const tko_trimmedInput = tko_input.trim();
+    if (!tko_trimmedInput || isLoading) return;
 
-    onSendMessage(trimmedInput);
-    setInput("");
+    onSendMessage(tko_trimmedInput);
+    tko_setInput("");
 
     // Scroll immediately after sending
-    scrollToBottom();
+    tko_scrollToBottom();
 
     // Keep focus on input
-    textareaRef.current?.focus();
+    tko_textareaRef.current?.focus();
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e);
+  const tko_handleKeyDown = (tko_event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (tko_event.key === "Enter" && !tko_event.shiftKey) {
+      tko_event.preventDefault();
+      tko_handleSubmit(tko_event);
     }
   };
 
   return (
     <div
-      ref={containerRef}
+      ref={tko_containerRef}
       className={cn(
         "flex flex-col bg-card text-card-foreground rounded-lg border shadow-sm",
         className
@@ -197,8 +197,8 @@ export function AIChatBox({
       style={{ height }}
     >
       {/* Messages Area */}
-      <div ref={scrollAreaRef} className="flex-1 overflow-hidden">
-        {displayMessages.length === 0 ? (
+      <div ref={tko_scrollAreaRef} className="flex-1 overflow-hidden">
+        {tko_displayMessages.length === 0 ? (
           <div className="flex h-full flex-col p-4">
             <div className="flex flex-1 flex-col items-center justify-center gap-6 text-muted-foreground">
               <div className="flex flex-col items-center gap-3">
@@ -208,14 +208,14 @@ export function AIChatBox({
 
               {suggestedPrompts && suggestedPrompts.length > 0 && (
                 <div className="flex max-w-2xl flex-wrap justify-center gap-2">
-                  {suggestedPrompts.map((prompt, index) => (
+                  {suggestedPrompts.map((tko_prompt, tko_index) => (
                     <button
-                      key={index}
-                      onClick={() => onSendMessage(prompt)}
+                      key={tko_index}
+                      onClick={() => onSendMessage(tko_prompt)}
                       disabled={isLoading}
                       className="rounded-lg border border-border bg-card px-4 py-2 text-sm transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {prompt}
+                      {tko_prompt}
                     </button>
                   ))}
                 </div>
@@ -225,28 +225,28 @@ export function AIChatBox({
         ) : (
           <ScrollArea className="h-full">
             <div className="flex flex-col space-y-4 p-4">
-              {displayMessages.map((message, index) => {
+              {tko_displayMessages.map((tko_message, tko_index) => {
                 // Apply min-height to last message only if NOT loading (when loading, the loading indicator gets it)
-                const isLastMessage = index === displayMessages.length - 1;
-                const shouldApplyMinHeight =
-                  isLastMessage && !isLoading && minHeightForLastMessage > 0;
+                const tko_isLastMessage = tko_index === tko_displayMessages.length - 1;
+                const tko_shouldApplyMinHeight =
+                  tko_isLastMessage && !isLoading && tko_minHeightForLastMessage > 0;
 
                 return (
                   <div
-                    key={index}
+                    key={tko_index}
                     className={cn(
                       "flex gap-3",
-                      message.role === "user"
+                      tko_message.role === "user"
                         ? "justify-end items-start"
                         : "justify-start items-start"
                     )}
                     style={
-                      shouldApplyMinHeight
-                        ? { minHeight: `${minHeightForLastMessage}px` }
+                      tko_shouldApplyMinHeight
+                        ? { minHeight: `${tko_minHeightForLastMessage}px` }
                         : undefined
                     }
                   >
-                    {message.role === "assistant" && (
+                    {tko_message.role === "assistant" && (
                       <div className="size-8 shrink-0 mt-1 rounded-full bg-primary/10 flex items-center justify-center">
                         <Sparkles className="size-4 text-primary" />
                       </div>
@@ -255,23 +255,23 @@ export function AIChatBox({
                     <div
                       className={cn(
                         "max-w-[80%] rounded-lg px-4 py-2.5",
-                        message.role === "user"
+                        tko_message.role === "user"
                           ? "bg-primary text-primary-foreground"
                           : "bg-muted text-foreground"
                       )}
                     >
-                      {message.role === "assistant" ? (
+                      {tko_message.role === "assistant" ? (
                         <div className="prose prose-sm dark:prose-invert max-w-none">
-                          <Streamdown>{message.content}</Streamdown>
+                          <Streamdown>{tko_message.content}</Streamdown>
                         </div>
                       ) : (
                         <p className="whitespace-pre-wrap text-sm">
-                          {message.content}
+                          {tko_message.content}
                         </p>
                       )}
                     </div>
 
-                    {message.role === "user" && (
+                    {tko_message.role === "user" && (
                       <div className="size-8 shrink-0 mt-1 rounded-full bg-secondary flex items-center justify-center">
                         <User className="size-4 text-secondary-foreground" />
                       </div>
@@ -284,8 +284,8 @@ export function AIChatBox({
                 <div
                   className="flex items-start gap-3"
                   style={
-                    minHeightForLastMessage > 0
-                      ? { minHeight: `${minHeightForLastMessage}px` }
+                    tko_minHeightForLastMessage > 0
+                      ? { minHeight: `${tko_minHeightForLastMessage}px` }
                       : undefined
                   }
                 >
@@ -304,15 +304,15 @@ export function AIChatBox({
 
       {/* Input Area */}
       <form
-        ref={inputAreaRef}
-        onSubmit={handleSubmit}
+        ref={tko_inputAreaRef}
+        onSubmit={tko_handleSubmit}
         className="flex gap-2 p-4 border-t bg-background/50 items-end"
       >
         <Textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
+          ref={tko_textareaRef}
+          value={tko_input}
+          onChange={(tko_event) => tko_setInput(tko_event.target.value)}
+          onKeyDown={tko_handleKeyDown}
           placeholder={placeholder}
           className="flex-1 max-h-32 resize-none min-h-9"
           rows={1}
@@ -320,7 +320,7 @@ export function AIChatBox({
         <Button
           type="submit"
           size="icon"
-          disabled={!input.trim() || isLoading}
+          disabled={!tko_input.trim() || isLoading}
           className="shrink-0 h-[38px] w-[38px]"
         >
           {isLoading ? (
