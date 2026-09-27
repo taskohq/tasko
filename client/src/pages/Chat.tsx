@@ -5,6 +5,8 @@ import { ChatCreateChannelDialog } from "@/components/ChatCreateChannelDialog";
 import { TkoMessageRow } from "@/components/TkoMessageRow";
 import { tko_galleryIndex } from "@/lib/chat-lightbox";
 import { tko_readCursorAttemptKey, tko_shouldSyncReadCursor } from "@/lib/chat-read-state";
+import { tko_chatMessageAbsoluteUrl, tko_isChatMessageMutationEvent, tko_mergeMessages, tko_parseChatPermalink, tko_pruneTyping, tko_stringPayloadId, type TkoLiveTypingEntry } from "@/lib/chat-realtime";
+import { useChatRealtime } from "@/hooks/useChatRealtime";
 import { trpc } from "@/lib/trpc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -131,13 +133,30 @@ export default function Chat() {
   const [tko_lightbox, tko_setLightbox] = useState<TkoLightbox | null>(null);
   const [tko_reminderDraft, tko_setReminderDraft] = useState<TkoReminderDraft | null>(null);
   const [tko_forwardDraft, tko_setForwardDraft] = useState<TkoForwardDraft | null>(null);
+  // Realtime (WS) state: connection flag drives fallback polling; typing/presence overlays are fed
+  // by gateway events and expire on their own TTLs.
+  const [tko_socketConnected, tko_setSocketConnected] = useState(false);
+  const [tko_liveTyping, tko_setLiveTyping] = useState<TkoLiveTypingEntry[]>([]);
+  const [tko_livePresence, tko_setLivePresence] = useState<Record<string, string>>({});
+  const [tko_highlightMessageId, tko_setHighlightMessageId] = useState<string | null>(null);
+  const [tko_selectedTeamIds, tko_setSelectedTeamIds] = useState<string[]>([]);
+  const [tko_searchChannelId, tko_setSearchChannelId] = useState<string | null>(null);
+  const [tko_searchFromMemberId, tko_setSearchFromMemberId] = useState<string | null>(null);
+  const [tko_searchHasFile, tko_setSearchHasFile] = useState(false);
+  const [tko_searchInThreads, tko_setSearchInThreads] = useState(false);
+  const [tko_searchDateFrom, tko_setSearchDateFrom] = useState("");
+  const [tko_searchDateTo, tko_setSearchDateTo] = useState("");
+  const tko_lastSeenSequence = useRef<Record<string, number>>({});
+  const tko_pendingJump = useRef<string | null>(null);
 
   const tko_tenant = trpc.platform.currentTenant.useQuery(undefined, { enabled: isAuthenticated });
   const tko_channels = trpc.chat.channels.useQuery(undefined, { enabled: isAuthenticated });
   const tko_channelId = tko_activeChannelId ?? tko_channels.data?.[0]?.id ?? null;
+  // Live updates arrive over the WS gateway; HTTP polling below is the fallback used ONLY while the
+  // socket is disconnected (spec 13 §1 graceful degradation).
   const tko_messages = trpc.chat.messages.useQuery(
     { channelId: tko_channelId ?? "00000000-0000-0000-0000-000000000000" },
-    { enabled: Boolean(isAuthenticated && tko_channelId), refetchInterval: 12_000 },
+    { enabled: Boolean(isAuthenticated && tko_channelId), refetchInterval: tko_socketConnected ? false : 20_000 },
   );
   const tko_channelMembers = trpc.chat.channelMembers.useQuery(
     { channelId: tko_channelId ?? "00000000-0000-0000-0000-000000000000" },
@@ -146,12 +165,13 @@ export default function Chat() {
   const tko_readStates = trpc.chat.readStates.useQuery(undefined, { enabled: isAuthenticated });
   const tko_presence = trpc.chat.presence.useQuery(
     { channelId: tko_channelId ?? "00000000-0000-0000-0000-000000000000" },
-    { enabled: Boolean(isAuthenticated && tko_channelId), refetchInterval: 20_000 },
+    { enabled: Boolean(isAuthenticated && tko_channelId), refetchInterval: tko_socketConnected ? false : 20_000 },
   );
   const tko_typing = trpc.chat.typing.useQuery(
     { channelId: tko_channelId ?? "00000000-0000-0000-0000-000000000000" },
-    { enabled: Boolean(isAuthenticated && tko_channelId), refetchInterval: 2_500 },
+    { enabled: Boolean(isAuthenticated && tko_channelId), refetchInterval: tko_socketConnected ? false : 2_500 },
   );
+  const tko_mentionTeams = trpc.chat.mentionTeams.useQuery(undefined, { enabled: isAuthenticated });
   const tko_saved = trpc.chat.savedEntries.useQuery(undefined, { enabled: isAuthenticated });
   const tko_reminders = trpc.chat.reminders.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 60_000 });
   const tko_mentions = trpc.chat.mentionedMessages.useQuery(undefined, { enabled: isAuthenticated });
@@ -160,7 +180,16 @@ export default function Chat() {
     { enabled: Boolean(isAuthenticated && tko_channelId) },
   );
   const tko_search = trpc.chat.search.useQuery(
-    { query: tko_searchText.trim() },
+    {
+      query: tko_searchText.trim(),
+      channelId: tko_searchChannelId,
+      fromMemberId: tko_searchFromMemberId,
+      hasFile: tko_searchHasFile ? true : undefined,
+      inThreads: tko_searchInThreads ? true : undefined,
+      dateFrom: tko_searchDateFrom ? new Date(`${tko_searchDateFrom}T00:00:00`) : null,
+      dateTo: tko_searchDateTo ? new Date(`${tko_searchDateTo}T23:59:59`) : null,
+      limit: 30,
+    },
     { enabled: Boolean(isAuthenticated && tko_searchText.trim().length >= 2) },
   );
 
@@ -174,8 +203,19 @@ export default function Chat() {
   const tko_quotedMessage = tko_liveMessages.find(tko_message => tko_message.id === tko_quotedMessageId) ?? null;
   const tko_lastSequence = tko_liveMessages[tko_liveMessages.length - 1]?.sequence ?? 0;
   const tko_readState = tko_readStates.data?.find(tko_state => tko_state.channelId === tko_channelId);
+  const tko_hasQueryError = Boolean(tko_channels.error || tko_messages.error || tko_channelMembers.error || tko_readStates.error || tko_saved.error || tko_mentions.error || tko_pins.error);
+  const tko_currentMemberId = tko_tenant.data?.memberId;
+  // Typing/presence: WS overlays win while connected; the polling queries cover the disconnected window.
+  const tko_typingIndicators = tko_socketConnected
+    ? tko_liveTyping.filter(tko_entry => tko_entry.channelId === tko_channelId && tko_entry.memberId !== tko_currentMemberId)
+    : (tko_typing.data ?? []).filter(tko_entry => tko_entry.channelId === tko_channelId);
+  const tko_presenceFromServer = useMemo(() => {
+    const tko_base = tko_presence.data ?? [];
+    if (!tko_socketConnected) return tko_base;
+    return tko_base.map(tko_entry => ({ ...tko_entry, status: (tko_livePresence[tko_entry.memberId] as typeof tko_entry.status) ?? tko_entry.status }));
+  }, [tko_presence.data, tko_socketConnected, tko_livePresence]);
   const tko_activeChannelMemberIds = new Set((tko_channelMembers.data ?? []).filter(tko_member => tko_member.isActive).map(tko_member => tko_member.id));
-  const tko_onlineMemberIds = new Set((tko_presence.data ?? []).filter(tko_member => tko_member.status === "online" && tko_activeChannelMemberIds.has(tko_member.memberId)).map(tko_member => tko_member.memberId));
+  const tko_onlineMemberIds = new Set((tko_presenceFromServer ?? []).filter(tko_member => tko_member.status === "online" && tko_activeChannelMemberIds.has(tko_member.memberId)).map(tko_member => tko_member.memberId));
   const tko_onlineCount = tko_onlineMemberIds.size;
   const tko_savedIds = new Set((tko_saved.data ?? []).map(tko_item => tko_item.message.id));
   const tko_pinnedIds = new Set((tko_pins.data ?? []).map(tko_item => tko_item.message.id));
@@ -188,7 +228,7 @@ export default function Chat() {
   const tko_mentionMatch = /(^|\s)@([A-Za-z0-9_-]*)$/.exec(tko_draft);
   const tko_mentionSearch = tko_mentionMatch?.[2].toLocaleLowerCase() ?? "";
   const tko_mentionChoices = (tko_channelMembers.data ?? []).filter(tko_member => tko_member.isActive && tko_member.id !== tko_tenant.data?.memberId && tko_member.displayName.toLocaleLowerCase().includes(tko_mentionSearch));
-  const tko_hasQueryError = Boolean(tko_channels.error || tko_messages.error || tko_channelMembers.error || tko_readStates.error || tko_saved.error || tko_mentions.error || tko_pins.error);
+  const tko_teamMentionChoices = (tko_mentionTeams.data ?? []).filter(tko_team => tko_team.name.toLocaleLowerCase().includes(tko_mentionSearch) || tko_team.handle.toLocaleLowerCase().includes(tko_mentionSearch));
 
   const tko_refreshConversation = async () => {
     await Promise.all([
@@ -207,9 +247,10 @@ export default function Chat() {
       tko_setReplyToMessageId(null);
       tko_setQuotedMessageId(null);
       tko_setSelectedMentionIds([]);
+      tko_setSelectedTeamIds([]);
       await tko_refreshConversation();
     },
-    onError: tko_error => toast.error(tko_error.message.includes("MENTION") ? "Người được nhắc không còn thuộc hội thoại này." : "Không thể gửi tin nhắn. Vui lòng thử lại."),
+    onError: tko_error => toast.error(tko_error.message.includes("MENTION") || tko_error.message.includes("TEAM") ? "Người được nhắc không còn thuộc hội thoại này." : "Không thể gửi tin nhắn. Vui lòng thử lại."),
   });
   const tko_react = trpc.chat.toggleReaction.useMutation({ onSuccess: () => void tko_utils.chat.messages.invalidate(), onError: () => toast.error("Không thể cập nhật phản ứng.") });
   const tko_save = trpc.chat.saveMessage.useMutation({ onSuccess: () => { void tko_utils.chat.savedEntries.invalidate(); toast.success("Đã lưu vào danh sách xử lý sau."); }, onError: () => toast.error("Không thể lưu tin nhắn.") });
@@ -227,6 +268,112 @@ export default function Chat() {
   const tko_setTyping = trpc.chat.setTyping.useMutation();
   const tko_updateChannel = trpc.chat.updateChannel.useMutation({ onSuccess: async () => { await tko_channels.refetch(); tko_setChannelSettingsOpen(false); toast.success("Đã cập nhật thông tin channel."); }, onError: () => toast.error("Bạn không có quyền thay đổi channel này.") });
   const tko_archiveChannel = trpc.chat.archiveChannel.useMutation({ onSuccess: async () => { tko_setActiveChannelId(null); tko_setChannelSettingsOpen(false); await tko_channels.refetch(); toast.success("Đã lưu trữ channel."); }, onError: () => toast.error("Không thể lưu trữ channel.") });
+
+  // ---- Realtime (WS gateway) cache wiring ----
+  const tko_mergeFetchedMessages = async (tko_targetChannelId: string, tko_afterSequence: number) => {
+    try {
+      const tko_incoming = await tko_utils.chat.messages.fetch({ channelId: tko_targetChannelId, afterSequence: tko_afterSequence });
+      tko_utils.chat.messages.setData({ channelId: tko_targetChannelId }, tko_current => (tko_incoming.length ? tko_mergeMessages(tko_current ?? [], tko_incoming) : tko_current ?? []));
+      const tko_maxSequence = tko_incoming[tko_incoming.length - 1]?.sequence ?? 0;
+      if (tko_maxSequence) tko_lastSeenSequence.current[tko_targetChannelId] = Math.max(tko_lastSeenSequence.current[tko_targetChannelId] ?? 0, tko_maxSequence);
+    } catch {
+      // The fallback poller picks up the delta if the incremental fetch fails.
+    }
+  };
+  const tko_patchMessage = async (tko_messageId: string) => {
+    if (!tko_channelId) return;
+    try {
+      const tko_fresh = await tko_utils.chat.message.fetch({ messageId: tko_messageId });
+      if (!tko_fresh || tko_fresh.channelId !== tko_channelId) return;
+      tko_utils.chat.messages.setData({ channelId: tko_channelId }, tko_current => (tko_current ?? []).map(tko_item => (tko_item.id === tko_fresh.id ? { ...tko_item, ...tko_fresh } : tko_item)));
+    } catch {
+      // Deleted or inaccessible message: keep the cached copy until the next full refresh.
+    }
+  };
+  useChatRealtime({
+    enabled: Boolean(isAuthenticated && tko_channelId),
+    channelId: tko_channelId,
+    onEvent: tko_event => {
+      const tko_payload = tko_event.payload;
+      if (tko_event.eventType === "chat.message_created.v1") {
+        const tko_eventChannelId = tko_stringPayloadId(tko_payload, "channelId");
+        if (tko_eventChannelId) void tko_mergeFetchedMessages(tko_eventChannelId, tko_lastSeenSequence.current[tko_eventChannelId] ?? 0);
+        return;
+      }
+      if (tko_isChatMessageMutationEvent(tko_event.eventType)) {
+        const tko_messageId = tko_stringPayloadId(tko_payload, "messageId");
+        if (tko_messageId) void tko_patchMessage(tko_messageId);
+        return;
+      }
+      if (tko_event.eventType === "chat.typing_updated.v1") {
+        const tko_memberId = tko_stringPayloadId(tko_payload, "memberId");
+        const tko_eventChannelId = tko_stringPayloadId(tko_payload, "channelId");
+        if (!tko_memberId || !tko_eventChannelId || tko_eventChannelId !== tko_channelId || tko_memberId === tko_currentMemberId) return;
+        const tko_isTyping = tko_payload.isTyping === true;
+        const tko_expiresAt = typeof tko_payload.expiresAt === "number" ? tko_payload.expiresAt : Date.now() + 8_000;
+        tko_setLiveTyping(tko_current => [...tko_current.filter(tko_entry => tko_entry.memberId !== tko_memberId), ...(tko_isTyping ? [{ channelId: tko_eventChannelId, memberId: tko_memberId, expiresAt: tko_expiresAt }] : [])]);
+        return;
+      }
+      if (tko_event.eventType === "chat.presence_updated.v1") {
+        const tko_memberId = tko_stringPayloadId(tko_payload, "memberId");
+        const tko_status = typeof tko_payload.status === "string" ? tko_payload.status : null;
+        if (tko_memberId && tko_status) tko_setLivePresence(tko_current => ({ ...tko_current, [tko_memberId]: tko_status }));
+        return;
+      }
+      if (tko_event.eventType.startsWith("chat.channel_")) void tko_channels.refetch();
+      if (tko_event.eventType === "chat.message_pin_toggled.v1") void tko_utils.chat.pinnedMessages.invalidate();
+      if (tko_event.eventType === "chat.read_cursor_updated.v1" || tko_event.eventType === "chat.notification_preference_updated.v1") void tko_utils.chat.readStates.invalidate();
+    },
+    onSessionOpened: ({ reconnected }) => {
+      if (!reconnected || !tko_channelId) return;
+      void tko_mergeFetchedMessages(tko_channelId, tko_lastSeenSequence.current[tko_channelId] ?? 0);
+    },
+    onStatusChange: tko_setSocketConnected,
+  });
+  useEffect(() => {
+    if (!tko_channelId || !tko_messages.data?.length) return;
+    const tko_maxSequence = tko_messages.data[tko_messages.data.length - 1]?.sequence ?? 0;
+    tko_lastSeenSequence.current[tko_channelId] = Math.max(tko_lastSeenSequence.current[tko_channelId] ?? 0, tko_maxSequence);
+  }, [tko_channelId, tko_messages.data]);
+  useEffect(() => {
+    if (!tko_liveTyping.length) return;
+    const tko_timer = window.setInterval(() => tko_setLiveTyping(tko_current => tko_pruneTyping(tko_current)), 2_000);
+    return () => window.clearInterval(tko_timer);
+  }, [tko_liveTyping.length]);
+
+  // ---- Permalink (?channel=…&message=…) jump + highlight ----
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const tko_parsed = tko_parseChatPermalink(window.location.search);
+    if (!tko_parsed.channelId && !tko_parsed.messageRef) return;
+    if (tko_parsed.channelId) tko_setActiveChannelId(tko_parsed.channelId);
+    if (tko_parsed.channelId && tko_parsed.messageRef) tko_pendingJump.current = tko_parsed.messageRef;
+    tko_setView("channel");
+    window.history.replaceState(null, "", "/chat");
+  }, [isAuthenticated]);
+  useEffect(() => {
+    const tko_ref = tko_pendingJump.current;
+    if (!tko_ref || !tko_channelId || !tko_messages.data) return;
+    const tko_target = tko_messages.data.find(tko_message => tko_message.id === tko_ref) ?? tko_messages.data.find(tko_message => String(tko_message.sequence) === tko_ref);
+    if (!tko_target) return;
+    tko_pendingJump.current = null;
+    tko_setHighlightMessageId(tko_target.id);
+    window.setTimeout(() => document.querySelector(`[data-message-id="${tko_target.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
+    window.setTimeout(() => tko_setHighlightMessageId(null), 4_000);
+  }, [tko_channelId, tko_messages.data]);
+
+  const tko_jumpToMessage = (tko_nextChannelId: string, tko_messageRef: string) => {
+    tko_selectChannel(tko_nextChannelId);
+    tko_pendingJump.current = tko_messageRef;
+  };
+  const tko_copyMessageLink = (tko_messageId: string) => {
+    if (!tko_channelId) return;
+    void navigator.clipboard?.writeText(tko_chatMessageAbsoluteUrl(tko_channelId, tko_messageId)).then(
+      () => toast.success("Đã sao chép liên kết tin nhắn."),
+      () => toast.error("Không thể sao chép liên kết."),
+    );
+  };
+
 
   useEffect(() => {
     const tko_syncHash = () => tko_setView(tko_hashToView());
@@ -294,6 +441,8 @@ export default function Chat() {
     tko_setReplyToMessageId(null);
     tko_setView("channel");
     tko_setSidebarOpen(false);
+    tko_setLiveTyping([]);
+    tko_setSelectedTeamIds([]);
     window.history.replaceState(null, "", "/chat");
   };
   const tko_addAttachment = (tko_file: File) => {
@@ -330,11 +479,12 @@ export default function Chat() {
     if (!tko_channelId || (!tko_draft.trim() && !tko_attachments.length) || tko_send.isPending) return;
     const tko_broadcastMention = /(^|\s)@channel\b/i.test(tko_draft) ? "channel" : /(^|\s)@here\b/i.test(tko_draft) ? "here" : undefined;
     const tko_explicitMentions = (tko_channelMembers.data ?? []).filter(tko_member => tko_member.isActive && tko_selectedMentionIds.includes(tko_member.id) && new RegExp(`@${tko_member.displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(tko_draft)).map(tko_member => tko_member.id);
+    const tko_teamMentions = (tko_mentionTeams.data ?? []).filter(tko_team => tko_selectedTeamIds.includes(tko_team.id) && new RegExp(`@${tko_team.handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(tko_draft)).map(tko_team => tko_team.id);
     tko_send.mutate({
       channelId: tko_channelId,
       clientMessageId: crypto.randomUUID(),
       parentMessageId: tko_replyToMessageId,
-      body: { type: "text", text: tko_draft.trim(), mentions: tko_explicitMentions, broadcastMention: tko_broadcastMention, quotedMessageId: tko_quotedMessageId },
+      body: { type: "text", text: tko_draft.trim(), mentions: tko_explicitMentions, teamMentions: tko_teamMentions.length ? tko_teamMentions : undefined, broadcastMention: tko_broadcastMention, quotedMessageId: tko_quotedMessageId },
       attachments: tko_attachments,
     });
   };
@@ -355,6 +505,11 @@ export default function Chat() {
   const tko_insertMention = (tko_member: { id: string; displayName: string }) => {
     tko_setDraft(tko_current => tko_current.replace(/(^|\s)@[A-Za-z0-9_-]*$/, (_tko_full, tko_prefix: string) => `${tko_prefix}@${tko_member.displayName} `));
     tko_setSelectedMentionIds(tko_current => Array.from(new Set([...tko_current, tko_member.id])));
+    tko_composerInput.current?.focus();
+  };
+  const tko_insertTeamMention = (tko_team: { id: string; handle: string }) => {
+    tko_setDraft(tko_current => tko_current.replace(/(^|\s)@[A-Za-z0-9_-]*$/, (_tko_full, tko_prefix: string) => `${tko_prefix}@${tko_team.handle} `));
+    tko_setSelectedTeamIds(tko_current => Array.from(new Set([...tko_current, tko_team.id])));
     tko_composerInput.current?.focus();
   };
   const tko_insertFormatting = (tko_prefix: string, tko_suffix = tko_prefix) => {
@@ -435,7 +590,7 @@ export default function Chat() {
           <header className="relative z-10 flex min-h-[68px] shrink-0 items-center gap-3 border-b border-[#e6e4eb] bg-white px-4 sm:px-6">
             <button onClick={() => tko_setSidebarOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#e6e4eb] text-[#454245] lg:hidden" aria-label="Mở danh sách channel"><Hash className="h-4 w-4" /></button>
             <div className="min-w-0 flex-1">
-              {tko_searchOpen ? <div className="relative max-w-xl"><div className="flex h-9 items-center gap-2 rounded-lg border border-[#4a154b] bg-white px-2.5 shadow-sm"><Search className="h-4 w-4 text-[#4a154b]" /><input id="tko-chat-search" autoFocus value={tko_searchText} onChange={tko_event => tko_setSearchText(tko_event.target.value)} placeholder="Tìm tin nhắn trong workspace…" className="min-w-0 flex-1 border-0 bg-transparent text-[13px] outline-none" /><button onClick={() => { tko_setSearchOpen(false); tko_setSearchText(""); }} className="rounded p-1 text-[#777477] hover:bg-[#efedf0]" aria-label="Đóng tìm kiếm"><X className="h-3.5 w-3.5" /></button></div><div className="absolute left-0 top-11 z-50 max-h-[340px] w-full overflow-y-auto rounded-xl border border-[#e6e4eb] bg-white p-1.5 shadow-[0_16px_36px_rgba(29,28,29,.18)]">{tko_searchText.trim().length < 2 ? <p className="px-3 py-4 text-[12px] text-[#777477]">Nhập ít nhất hai ký tự để tìm trong lịch sử trao đổi.</p> : tko_search.isLoading ? <p className="px-3 py-4 text-[12px] text-[#777477]">Đang tìm kiếm…</p> : tko_search.data?.length ? tko_search.data.map(tko_result => <button type="button" key={tko_result.message.id} onClick={() => { tko_selectChannel(tko_result.channel.id); tko_setSelectedMessageId(tko_result.message.id); tko_setSearchOpen(false); tko_setSearchText(""); }} className="block w-full rounded-lg px-3 py-2.5 text-left hover:bg-[#f5f1f6]"><span className="flex items-center gap-1 text-[10px] font-bold text-[#4a154b]"><Hash className="h-3 w-3" />{tko_result.channel.name ?? "Tin nhắn trực tiếp"}</span><span className="mt-1 block line-clamp-2 text-[12px] leading-5 text-[#454245]">{tko_result.snippet}</span></button>) : <p className="px-3 py-4 text-[12px] text-[#777477]">Không có kết quả trong các hội thoại bạn được phép xem.</p>}</div></div> : <><button onClick={() => tko_setInfoOpen(tko_open => !tko_open)} className="flex max-w-full items-center gap-1.5 text-left"><span className="flex min-w-0 items-center gap-1.5"><span className="grid h-6 w-6 place-items-center rounded-md bg-[#f3edf4] text-[#4a154b]">{tko_activeChannel?.kind === "private" ? <LockKeyhole className="h-3.5 w-3.5" /> : <Hash className="h-4 w-4" />}</span><span className="truncate text-[15px] font-bold tracking-[-.01em]">{tko_view === "mentions" ? "Nhắc tên" : tko_view === "saved" ? "Đã lưu để xử lý sau" : tko_view === "threads" ? `Threads${tko_activeChannel?.name ? ` trong #${tko_activeChannel.name}` : ""}` : (tko_activeChannel?.name ?? "Chọn một channel")}</span></span><ChevronDown className="h-4 w-4 shrink-0 text-[#777477]" /></button><p className="mt-0.5 truncate text-[12px] text-[#777477]">{tko_view === "channel" ? (tko_typing.data?.length ? "Có người đang nhập…" : (tko_activeChannel?.topic || "Trao đổi cùng đội ngũ trong một không gian tập trung.")) : tko_view === "saved" ? "Các tin nhắn bạn muốn quay lại sau này." : tko_view === "mentions" ? "Những điểm cần bạn chú ý." : "Theo dõi các trao đổi có chiều sâu mà không làm loãng luồng chính."}</p></>}
+              {tko_searchOpen ? <div className="relative max-w-xl"><div className="flex h-9 items-center gap-2 rounded-lg border border-[#4a154b] bg-white px-2.5 shadow-sm"><Search className="h-4 w-4 text-[#4a154b]" /><input id="tko-chat-search" autoFocus value={tko_searchText} onChange={tko_event => tko_setSearchText(tko_event.target.value)} placeholder="Tìm tin nhắn trong workspace…" className="min-w-0 flex-1 border-0 bg-transparent text-[13px] outline-none" /><button onClick={() => { tko_setSearchOpen(false); tko_setSearchText(""); }} className="rounded p-1 text-[#777477] hover:bg-[#efedf0]" aria-label="Đóng tìm kiếm"><X className="h-3.5 w-3.5" /></button></div><div className="absolute left-0 top-11 z-50 max-h-[440px] w-full overflow-y-auto rounded-xl border border-[#e6e4eb] bg-white p-1.5 shadow-[0_16px_36px_rgba(29,28,29,.18)]"><div className="flex flex-wrap items-center gap-1.5 border-b border-[#e6e4eb] px-2 pb-2 pt-1"><select value={tko_searchChannelId ?? ""} onChange={tko_event => tko_setSearchChannelId(tko_event.target.value || null)} className="h-7 rounded border border-[#e6e4eb] bg-white px-1.5 text-[11px] outline-none"><option value="">Mọi channel</option>{(tko_channels.data ?? []).map(tko_channel => <option key={tko_channel.id} value={tko_channel.id}>{tko_channel.kind === "dm" || tko_channel.kind === "group_dm" ? "Tin nhắn trực tiếp" : `#${tko_channel.name}`}</option>)}</select><select value={tko_searchFromMemberId ?? ""} onChange={tko_event => tko_setSearchFromMemberId(tko_event.target.value || null)} className="h-7 rounded border border-[#e6e4eb] bg-white px-1.5 text-[11px] outline-none"><option value="">Mọi người gửi</option>{(tko_channelMembers.data ?? []).map(tko_member => <option key={tko_member.id} value={tko_member.id}>{tko_member.displayName}</option>)}</select><label className="flex items-center gap-1 text-[11px] text-[#454245]"><input type="checkbox" checked={tko_searchHasFile} onChange={tko_event => tko_setSearchHasFile(tko_event.target.checked)} className="h-3 w-3" />Có tệp</label><label className="flex items-center gap-1 text-[11px] text-[#454245]"><input type="checkbox" checked={tko_searchInThreads} onChange={tko_event => tko_setSearchInThreads(tko_event.target.checked)} className="h-3 w-3" />Trong thread</label><input type="date" value={tko_searchDateFrom} onChange={tko_event => tko_setSearchDateFrom(tko_event.target.value)} className="h-7 rounded border border-[#e6e4eb] px-1.5 text-[11px] outline-none" aria-label="Từ ngày" /><input type="date" value={tko_searchDateTo} onChange={tko_event => tko_setSearchDateTo(tko_event.target.value)} className="h-7 rounded border border-[#e6e4eb] px-1.5 text-[11px] outline-none" aria-label="Đến ngày" /></div>{tko_searchText.trim().length < 2 ? <p className="px-3 py-4 text-[12px] text-[#777477]">Nhập ít nhất hai ký tự để tìm trong lịch sử trao đổi.</p> : tko_search.isLoading ? <p className="px-3 py-4 text-[12px] text-[#777477]">Đang tìm kiếm…</p> : tko_search.data?.length ? tko_search.data.map(tko_result => <button type="button" key={tko_result.message.id} onClick={() => { tko_jumpToMessage(tko_result.channel.id, tko_result.message.id); tko_setSearchOpen(false); tko_setSearchText(""); }} className="block w-full rounded-lg px-3 py-2.5 text-left hover:bg-[#f5f1f6]"><span className="flex flex-wrap items-center gap-1 text-[10px] font-bold text-[#4a154b]"><Hash className="h-3 w-3" />{tko_result.channel.name ?? "Tin nhắn trực tiếp"}<span className="font-semibold text-[#616061]">· {tko_result.message.author?.displayName ?? tko_result.message.authorMemberId.slice(0, 5)}</span><span className="font-normal text-[#777477]">{tko_fullTime(tko_result.message.createdAt)}</span></span><span className="mt-1 block line-clamp-2 text-[12px] leading-5 text-[#454245]">{tko_result.snippet}</span></button>) : <p className="px-3 py-4 text-[12px] text-[#777477]">Không có kết quả trong các hội thoại bạn được phép xem.</p>}</div></div> : <><button onClick={() => tko_setInfoOpen(tko_open => !tko_open)} className="flex max-w-full items-center gap-1.5 text-left"><span className="flex min-w-0 items-center gap-1.5"><span className="grid h-6 w-6 place-items-center rounded-md bg-[#f3edf4] text-[#4a154b]">{tko_activeChannel?.kind === "private" ? <LockKeyhole className="h-3.5 w-3.5" /> : <Hash className="h-4 w-4" />}</span><span className="truncate text-[15px] font-bold tracking-[-.01em]">{tko_view === "mentions" ? "Nhắc tên" : tko_view === "saved" ? "Đã lưu để xử lý sau" : tko_view === "threads" ? `Threads${tko_activeChannel?.name ? ` trong #${tko_activeChannel.name}` : ""}` : (tko_activeChannel?.name ?? "Chọn một channel")}</span></span><ChevronDown className="h-4 w-4 shrink-0 text-[#777477]" /></button><p className="mt-0.5 truncate text-[12px] text-[#777477]">{tko_view === "channel" ? (tko_typingIndicators.length ? "Có người đang nhập…" : (tko_activeChannel?.topic || "Trao đổi cùng đội ngũ trong một không gian tập trung.")) : tko_view === "saved" ? "Các tin nhắn bạn muốn quay lại sau này." : tko_view === "mentions" ? "Những điểm cần bạn chú ý." : "Theo dõi các trao đổi có chiều sâu mà không làm loãng luồng chính."}</p></>}
             </div>
             {tko_view === "channel" ? <div className="flex items-center gap-1.5"><button onClick={() => tko_setSearchOpen(true)} className="grid h-8 w-8 place-items-center rounded-md text-[#616061] transition hover:bg-[#f3edf4] hover:text-[#4a154b]" aria-label="Tìm kiếm tin nhắn"><Search className="h-4 w-4" /></button><button onClick={() => tko_setInfoOpen(tko_open => !tko_open)} className="hidden items-center gap-1 rounded-md border border-[#e6e4eb] px-2.5 py-1.5 text-[12px] text-[#454245] transition hover:bg-[#f8f8fa] sm:flex"><UsersRound className="h-3.5 w-3.5" />{tko_channelMembers.data?.length ?? 0}</button><button onClick={() => tko_setChannelSettingsOpen(true)} className="grid h-8 w-8 place-items-center rounded-md text-[#616061] transition hover:bg-[#f3edf4] hover:text-[#4a154b]" aria-label="Thông tin channel"><Info className="h-4 w-4" /></button></div> : null}
             {tko_view === "saved" ? <div className="flex items-center gap-2"><button type="button" onClick={() => void tko_enablePush()} disabled={tko_pushSubscription.isPending} className="hidden rounded-lg border border-[#d8cce1] px-3 py-2 text-[12px] font-semibold text-[#4a154b] transition hover:bg-[#f5f1f6] disabled:opacity-50 sm:block"><Bell className="mr-1 inline h-3.5 w-3.5" />Bật thông báo</button><button type="button" onClick={() => tko_setReminderDraft({ messageId: null, title: "", note: "", reminderAt: tko_defaultReminderAt() })} className="rounded-lg bg-[#4a154b] px-3 py-2 text-[12px] font-semibold text-white transition hover:bg-[#611f69]"><Plus className="mr-1 inline h-3.5 w-3.5" />Nhắc việc</button></div> : null}
@@ -449,13 +604,13 @@ export default function Chat() {
               {tko_view === "saved" ? <><TkoReminderPanel reminders={tko_reminders.data ?? []} onUpdate={(tko_reminderId, tko_status) => tko_updateReminder.mutate({ reminderId: tko_reminderId, status: tko_status })} onSnooze={(tko_reminderId, tko_delayMinutes) => tko_snoozeReminder.mutate({ reminderId: tko_reminderId, reminderAt: new Date(Date.now() + tko_delayMinutes * 60_000) })} /><TkoSavedView entries={tko_saved.data ?? []} onOpen={tko_entry => { tko_selectChannel(tko_entry.channel.id); tko_setSelectedMessageId(tko_entry.message.id); }} /></> : null}
               {tko_view === "mentions" ? <TkoMentionsView entries={tko_mentions.data ?? []} onOpen={tko_entry => { tko_selectChannel(tko_entry.channel.id); tko_setSelectedMessageId(tko_entry.message.id); }} /> : null}
               {tko_view === "threads" ? <TkoThreadListView messages={tko_rootMessages.filter(tko_message => tko_message.replyCount > 0)} onOpen={tko_message => { tko_setSelectedMessageId(tko_message.id); }} /> : null}
-              {tko_view === "channel" ? <div className="mx-auto max-w-4xl px-4 pb-8 pt-5 sm:px-7"><div className="mb-6 rounded-xl border border-[#ebe8ed] bg-gradient-to-r from-[#faf8fb] to-white p-4"><div className="flex items-start gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-[#4a154b] text-white">{tko_activeChannel?.kind === "private" ? <LockKeyhole className="h-4 w-4" /> : <Hash className="h-5 w-5" />}</span><div><p className="text-sm font-bold">Đây là phần đầu của <span className="text-[#4a154b]">#{tko_activeChannel?.name ?? "channel"}</span></p><p className="mt-1 text-[12px] leading-5 text-[#616061]">{tko_activeChannel?.topic || "Chia sẻ quyết định, tiến độ và bối cảnh công việc. Hãy dùng thread để giữ luồng trao đổi chính gọn gàng."}</p>{tko_pins.data?.length ? <button onClick={() => tko_setSelectedMessageId(tko_pins.data?.[0]?.message.id ?? null)} className="mt-2 flex items-center gap-1.5 rounded-md bg-[#f3edf4] px-2 py-1 text-[10px] font-semibold text-[#4a154b] hover:bg-[#eadfee]"><Pin className="h-3 w-3" fill="currentColor" />{tko_pins.data.length} tin đã ghim</button> : null}</div></div></div>{tko_messages.isLoading ? <TkoLoadingMessages /> : null}{!tko_messages.isLoading && tko_rootMessages.length === 0 ? <TkoEmptyChannel onCreate={() => tko_setCreateChannelOpen(true)} /> : null}{tko_rootMessages.map((tko_message, tko_index) => <TkoMessageRow key={tko_message.id} message={tko_message} previous={tko_rootMessages[tko_index - 1]} currentMemberId={tko_tenant.data?.memberId} saved={tko_savedIds.has(tko_message.id)} pinned={tko_pinnedIds.has(tko_message.id)} menuOpen={tko_messageMenuId === tko_message.id} editing={tko_editingMessageId === tko_message.id} editDraft={tko_editDraft} onEditDraft={tko_setEditDraft} onToggleMenu={() => tko_setMessageMenuId(tko_current => tko_current === tko_message.id ? null : tko_message.id)} onReact={tko_emoji => tko_react.mutate({ messageId: tko_message.id, emoji: tko_emoji })} onOpenThread={() => tko_setSelectedMessageId(tko_message.id)} onReply={() => { tko_setSelectedMessageId(tko_message.id); tko_setReplyToMessageId(tko_message.id); tko_setQuotedMessageId(null); tko_composerInput.current?.focus(); }} onSave={() => tko_save.mutate({ messageId: tko_message.id, status: "open" })} onPin={() => { tko_setMessageMenuId(null); tko_togglePin.mutate({ messageId: tko_message.id }); }} onQuote={() => { tko_setQuotedMessageId(tko_message.id); tko_setReplyToMessageId(null); tko_setMessageMenuId(null); tko_composerInput.current?.focus(); }} onStartEdit={() => { tko_setEditingMessageId(tko_message.id); tko_setEditDraft(tko_message.body.text); tko_setMessageMenuId(null); }} onCancelEdit={() => tko_setEditingMessageId(null)} onSaveEdit={() => tko_edit.mutate({ messageId: tko_message.id, text: tko_editDraft })} onDelete={() => { tko_setMessageMenuId(null); if (window.confirm("Xóa tin nhắn này?")) tko_delete.mutate({ messageId: tko_message.id }); }} onOpenAttachment={tko_attachment => tko_openAttachment(tko_message.id, tko_attachment.id)} />)}</div> : null}
+              {tko_view === "channel" ? <div className="mx-auto max-w-4xl px-4 pb-8 pt-5 sm:px-7"><div className="mb-6 rounded-xl border border-[#ebe8ed] bg-gradient-to-r from-[#faf8fb] to-white p-4"><div className="flex items-start gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-[#4a154b] text-white">{tko_activeChannel?.kind === "private" ? <LockKeyhole className="h-4 w-4" /> : <Hash className="h-5 w-5" />}</span><div><p className="text-sm font-bold">Đây là phần đầu của <span className="text-[#4a154b]">#{tko_activeChannel?.name ?? "channel"}</span></p><p className="mt-1 text-[12px] leading-5 text-[#616061]">{tko_activeChannel?.topic || "Chia sẻ quyết định, tiến độ và bối cảnh công việc. Hãy dùng thread để giữ luồng trao đổi chính gọn gàng."}</p>{tko_pins.data?.length ? <button onClick={() => tko_setSelectedMessageId(tko_pins.data?.[0]?.message.id ?? null)} className="mt-2 flex items-center gap-1.5 rounded-md bg-[#f3edf4] px-2 py-1 text-[10px] font-semibold text-[#4a154b] hover:bg-[#eadfee]"><Pin className="h-3 w-3" fill="currentColor" />{tko_pins.data.length} tin đã ghim</button> : null}</div></div></div>{tko_messages.isLoading ? <TkoLoadingMessages /> : null}{!tko_messages.isLoading && tko_rootMessages.length === 0 ? <TkoEmptyChannel onCreate={() => tko_setCreateChannelOpen(true)} /> : null}{tko_rootMessages.map((tko_message, tko_index) => <TkoMessageRow key={tko_message.id} message={tko_message} previous={tko_rootMessages[tko_index - 1]} currentMemberId={tko_tenant.data?.memberId} saved={tko_savedIds.has(tko_message.id)} pinned={tko_pinnedIds.has(tko_message.id)} menuOpen={tko_messageMenuId === tko_message.id} editing={tko_editingMessageId === tko_message.id} editDraft={tko_editDraft} onEditDraft={tko_setEditDraft} onToggleMenu={() => tko_setMessageMenuId(tko_current => tko_current === tko_message.id ? null : tko_message.id)} onReact={tko_emoji => tko_react.mutate({ messageId: tko_message.id, emoji: tko_emoji })} onOpenThread={() => tko_setSelectedMessageId(tko_message.id)} onReply={() => { tko_setSelectedMessageId(tko_message.id); tko_setReplyToMessageId(tko_message.id); tko_setQuotedMessageId(null); tko_composerInput.current?.focus(); }} onSave={() => tko_save.mutate({ messageId: tko_message.id, status: "open" })} onPin={() => { tko_setMessageMenuId(null); tko_togglePin.mutate({ messageId: tko_message.id }); }} onQuote={() => { tko_setQuotedMessageId(tko_message.id); tko_setReplyToMessageId(null); tko_setMessageMenuId(null); tko_composerInput.current?.focus(); }} onStartEdit={() => { tko_setEditingMessageId(tko_message.id); tko_setEditDraft(tko_message.body.text); tko_setMessageMenuId(null); }} onCancelEdit={() => tko_setEditingMessageId(null)} onSaveEdit={() => tko_edit.mutate({ messageId: tko_message.id, text: tko_editDraft })} onDelete={() => { tko_setMessageMenuId(null); if (window.confirm("Xóa tin nhắn này?")) tko_delete.mutate({ messageId: tko_message.id }); }} onOpenAttachment={tko_attachment => tko_openAttachment(tko_message.id, tko_attachment.id)} onCopyLink={() => { tko_setMessageMenuId(null); tko_copyMessageLink(tko_message.id); }} highlighted={tko_highlightMessageId === tko_message.id} />)}</div> : null}
               </> : null}
             </section>
             {tko_threadRoot ? <aside className="hidden w-[360px] shrink-0 border-l border-[#e6e4eb] bg-[#fbfafc] xl:flex xl:flex-col"><div className="flex items-center justify-between border-b border-[#e6e4eb] px-4 py-4"><div className="flex items-center gap-2"><MessageCircleMore className="h-4 w-4 text-[#4a154b]" /><span className="text-sm font-bold">Thread</span><span className="rounded-full bg-[#ede7f6] px-2 py-0.5 text-[10px] font-bold text-[#4a154b]">{tko_threadReplies.length}</span></div><button onClick={() => tko_setSelectedMessageId(null)} className="rounded-md p-1 text-[#616061] hover:bg-[#efedf0]" aria-label="Đóng thread"><X className="h-4 w-4" /></button></div><div className="min-h-0 flex-1 overflow-y-auto p-4"><TkoThreadMessage message={tko_threadRoot} currentMemberId={tko_tenant.data?.memberId} root /><div className="my-4 flex items-center gap-2 text-[11px] font-medium text-[#777477]"><span className="h-px flex-1 bg-[#e6e4eb]" />{tko_threadReplies.length ? `${tko_threadReplies.length} phản hồi` : "Chưa có phản hồi"}<span className="h-px flex-1 bg-[#e6e4eb]" /></div>{tko_threadReplies.map(tko_reply => <TkoThreadMessage key={tko_reply.id} message={tko_reply} currentMemberId={tko_tenant.data?.memberId} />)}</div><div className="border-t border-[#e6e4eb] bg-white p-3"><button onClick={() => { tko_setReplyToMessageId(tko_threadRoot.id); tko_setQuotedMessageId(null); tko_composerInput.current?.focus(); }} className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#4a154b] px-3 py-2 text-[12px] font-semibold text-white transition hover:bg-[#611f69]"><MessageCircleMore className="h-3.5 w-3.5" />Trả lời trong thread</button><button onClick={() => { tko_setQuotedMessageId(tko_threadRoot.id); tko_setReplyToMessageId(null); tko_composerInput.current?.focus(); }} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-[#d9d5da] px-3 py-2 text-[12px] font-semibold text-[#4a154b] transition hover:bg-[#f5f1f6]"><Link2 className="h-3.5 w-3.5" />Trích dẫn vào kênh</button></div></aside> : null}
           </div>
 
-          {tko_view === "channel" ? <footer className="relative shrink-0 border-t border-[#e6e4eb] bg-white px-4 pb-4 pt-3 sm:px-7"><div className="mx-auto max-w-4xl">{tko_replyRoot || tko_quotedMessage ? <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-[#d8cce1] bg-[#f6f1f7] px-3 py-2 text-[11px] text-[#4a154b]"><span className="min-w-0 truncate">{tko_replyRoot ? <><MessageCircleMore className="mr-1 inline h-3.5 w-3.5" />Trả lời thread: {tko_replyRoot.body.text || "Tệp đính kèm"}</> : <><Link2 className="mr-1 inline h-3.5 w-3.5" />Đang trích: {tko_quotedMessage?.body.text || "Tệp đính kèm"}</>}</span><button onClick={() => { tko_setReplyToMessageId(null); tko_setQuotedMessageId(null); }} className="rounded p-0.5 hover:bg-white" aria-label="Hủy thao tác trả lời hoặc trích dẫn"><X className="h-3.5 w-3.5" /></button></div> : null}<div className="relative rounded-xl border border-[#bdb7bf] bg-white shadow-[0_2px_4px_rgba(29,28,29,.08)] transition focus-within:border-[#4a154b] focus-within:ring-2 focus-within:ring-[#e7dcec]"><textarea ref={tko_composerInput} value={tko_draft} onChange={tko_event => tko_setDraft(tko_event.target.value)} onKeyDown={tko_event => { if (tko_event.key === "Enter" && !tko_event.shiftKey) { tko_event.preventDefault(); tko_submit(); } }} placeholder={tko_replyRoot ? "Trả lời thread…" : `Gửi tin đến #${tko_activeChannel?.name ?? "channel"}`} className="h-[78px] w-full resize-none rounded-t-xl border-0 px-3.5 py-3 text-[14px] leading-5 outline-none placeholder:text-[#8d898e]" disabled={!tko_channelId} />{tko_mentionMatch && tko_mentionChoices.length ? <div className="absolute bottom-[108px] left-0 z-30 w-[270px] overflow-hidden rounded-xl border border-[#e6e4eb] bg-white py-1 shadow-[0_16px_36px_rgba(29,28,29,.18)]"><p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[.09em] text-[#777477]">Nhắc thành viên</p>{tko_mentionChoices.slice(0, 6).map(tko_member => <button type="button" key={tko_member.id} onClick={() => tko_insertMention(tko_member)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f5f1f6]"><TkoAvatar name={tko_member.displayName} small /><span><span className="block text-[12px] font-semibold text-[#1d1c1d]">{tko_member.displayName}</span><span className="block text-[10px] text-[#777477]">{tko_member.role}</span></span></button>)}</div> : null}{tko_attachments.length ? <div className="flex flex-wrap gap-1.5 px-3 pb-2">{tko_attachments.map(tko_attachment => <button type="button" key={tko_attachment.filename} onClick={() => tko_setAttachments(tko_current => tko_current.filter(tko_item => tko_item !== tko_attachment))} className="flex items-center gap-1 rounded-md border border-[#dbd3df] bg-[#f6f1f7] px-2 py-1 text-[10px] text-[#4a154b]"><FileText className="h-3 w-3" />{tko_attachment.filename}<X className="h-3 w-3" /></button>)}</div> : null}<div className="flex items-center justify-between gap-2 border-t border-[#edeaed] px-2.5 py-2"><div className="flex items-center gap-0.5"><input ref={tko_fileInput} type="file" className="hidden" onChange={tko_event => { const tko_file = tko_event.target.files?.[0]; if (tko_file) tko_addAttachment(tko_file); tko_event.target.value = ""; }} /><TkoComposerButton label="Đính kèm" onClick={() => tko_fileInput.current?.click()}><Paperclip className="h-4 w-4" /></TkoComposerButton><TkoComposerButton label="In đậm" onClick={() => tko_insertFormatting("**")}><strong className="text-sm">B</strong></TkoComposerButton><TkoComposerButton label="In nghiêng" onClick={() => tko_insertFormatting("_")}><Italic className="h-4 w-4" /></TkoComposerButton><TkoComposerButton label="Chèn mã" onClick={() => tko_insertFormatting("`")}><Code2 className="h-4 w-4" /></TkoComposerButton><TkoComposerButton label="Nhắc thành viên" onClick={() => tko_setDraft(tko_current => `${tko_current}${tko_current && !tko_current.endsWith(" ") ? " " : ""}@`)}><AtSign className="h-4 w-4" /></TkoComposerButton><TkoComposerButton label="Emoji" onClick={() => tko_setDraft(tko_current => `${tko_current} ✨`)}><SmilePlus className="h-4 w-4" /></TkoComposerButton></div><div className="flex items-center gap-2"><span className="hidden text-[10px] text-[#8d898e] sm:block"><kbd className="rounded border border-[#e6e4eb] bg-[#faf9fa] px-1">↵</kbd> gửi</span><button onClick={tko_submit} disabled={!tko_channelId || ((!tko_draft.trim() && !tko_attachments.length) || tko_send.isPending)} className="flex items-center gap-1.5 rounded-lg bg-[#007a5a] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-[#006c4f] disabled:cursor-not-allowed disabled:opacity-40"><span>Gửi</span><SendHorizontal className="h-3.5 w-3.5" /></button></div></div></div></div></footer> : null}
+          {tko_view === "channel" ? <footer className="relative shrink-0 border-t border-[#e6e4eb] bg-white px-4 pb-4 pt-3 sm:px-7"><div className="mx-auto max-w-4xl">{tko_replyRoot || tko_quotedMessage ? <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-[#d8cce1] bg-[#f6f1f7] px-3 py-2 text-[11px] text-[#4a154b]"><span className="min-w-0 truncate">{tko_replyRoot ? <><MessageCircleMore className="mr-1 inline h-3.5 w-3.5" />Trả lời thread: {tko_replyRoot.body.text || "Tệp đính kèm"}</> : <><Link2 className="mr-1 inline h-3.5 w-3.5" />Đang trích: {tko_quotedMessage?.body.text || "Tệp đính kèm"}</>}</span><button onClick={() => { tko_setReplyToMessageId(null); tko_setQuotedMessageId(null); }} className="rounded p-0.5 hover:bg-white" aria-label="Hủy thao tác trả lời hoặc trích dẫn"><X className="h-3.5 w-3.5" /></button></div> : null}<div className="relative rounded-xl border border-[#bdb7bf] bg-white shadow-[0_2px_4px_rgba(29,28,29,.08)] transition focus-within:border-[#4a154b] focus-within:ring-2 focus-within:ring-[#e7dcec]"><textarea ref={tko_composerInput} value={tko_draft} onChange={tko_event => tko_setDraft(tko_event.target.value)} onKeyDown={tko_event => { if (tko_event.key === "Enter" && !tko_event.shiftKey) { tko_event.preventDefault(); tko_submit(); } }} placeholder={tko_replyRoot ? "Trả lời thread…" : `Gửi tin đến #${tko_activeChannel?.name ?? "channel"}`} className="h-[78px] w-full resize-none rounded-t-xl border-0 px-3.5 py-3 text-[14px] leading-5 outline-none placeholder:text-[#8d898e]" disabled={!tko_channelId} />{tko_mentionMatch && (tko_mentionChoices.length || tko_teamMentionChoices.length) ? <div className="absolute bottom-[108px] left-0 z-30 w-[270px] overflow-hidden rounded-xl border border-[#e6e4eb] bg-white py-1 shadow-[0_16px_36px_rgba(29,28,29,.18)]"><p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[.09em] text-[#777477]">Nhắc thành viên</p>{tko_mentionChoices.slice(0, 6).map(tko_member => <button type="button" key={tko_member.id} onClick={() => tko_insertMention(tko_member)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f5f1f6]"><TkoAvatar name={tko_member.displayName} small /><span><span className="block text-[12px] font-semibold text-[#1d1c1d]">{tko_member.displayName}</span><span className="block text-[10px] text-[#777477]">{tko_member.role}</span></span></button>)}{tko_teamMentionChoices.length ? <><p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[.09em] text-[#777477]">Nhắc nhóm</p>{tko_teamMentionChoices.slice(0, 4).map(tko_team => <button type="button" key={tko_team.id} onClick={() => tko_insertTeamMention(tko_team)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f5f1f6]"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#e8f5fa] text-[#1264a3]"><UsersRound className="h-3.5 w-3.5" /></span><span><span className="block text-[12px] font-semibold text-[#1d1c1d]">@{tko_team.handle}</span><span className="block text-[10px] text-[#777477]">{tko_team.name} · {tko_team.memberCount} thành viên</span></span></button>)}</> : null}</div> : null}{tko_attachments.length ? <div className="flex flex-wrap gap-1.5 px-3 pb-2">{tko_attachments.map(tko_attachment => <button type="button" key={tko_attachment.filename} onClick={() => tko_setAttachments(tko_current => tko_current.filter(tko_item => tko_item !== tko_attachment))} className="flex items-center gap-1 rounded-md border border-[#dbd3df] bg-[#f6f1f7] px-2 py-1 text-[10px] text-[#4a154b]"><FileText className="h-3 w-3" />{tko_attachment.filename}<X className="h-3 w-3" /></button>)}</div> : null}<div className="flex items-center justify-between gap-2 border-t border-[#edeaed] px-2.5 py-2"><div className="flex items-center gap-0.5"><input ref={tko_fileInput} type="file" className="hidden" onChange={tko_event => { const tko_file = tko_event.target.files?.[0]; if (tko_file) tko_addAttachment(tko_file); tko_event.target.value = ""; }} /><TkoComposerButton label="Đính kèm" onClick={() => tko_fileInput.current?.click()}><Paperclip className="h-4 w-4" /></TkoComposerButton><TkoComposerButton label="In đậm" onClick={() => tko_insertFormatting("**")}><strong className="text-sm">B</strong></TkoComposerButton><TkoComposerButton label="In nghiêng" onClick={() => tko_insertFormatting("_")}><Italic className="h-4 w-4" /></TkoComposerButton><TkoComposerButton label="Chèn mã" onClick={() => tko_insertFormatting("`")}><Code2 className="h-4 w-4" /></TkoComposerButton><TkoComposerButton label="Nhắc thành viên" onClick={() => tko_setDraft(tko_current => `${tko_current}${tko_current && !tko_current.endsWith(" ") ? " " : ""}@`)}><AtSign className="h-4 w-4" /></TkoComposerButton><TkoComposerButton label="Emoji" onClick={() => tko_setDraft(tko_current => `${tko_current} ✨`)}><SmilePlus className="h-4 w-4" /></TkoComposerButton></div><div className="flex items-center gap-2"><span className="hidden text-[10px] text-[#8d898e] sm:block"><kbd className="rounded border border-[#e6e4eb] bg-[#faf9fa] px-1">↵</kbd> gửi</span><button onClick={tko_submit} disabled={!tko_channelId || ((!tko_draft.trim() && !tko_attachments.length) || tko_send.isPending)} className="flex items-center gap-1.5 rounded-lg bg-[#007a5a] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-[#006c4f] disabled:cursor-not-allowed disabled:opacity-40"><span>Gửi</span><SendHorizontal className="h-3.5 w-3.5" /></button></div></div></div></div></footer> : null}
         </main>
       </div>
       {false && tko_createChannelOpen ? <div /> : null}

@@ -1,6 +1,6 @@
 
 export type ChannelKind = "public" | "private" | "dm" | "group_dm";
-export type MessageBody = { type: "text"; text: string; mentions?: string[]; broadcastMention?: "channel" | "here"; quotedMessageId?: string | null };
+export type MessageBody = { type: "text"; text: string; mentions?: string[]; teamMentions?: string[]; broadcastMention?: "channel" | "here"; quotedMessageId?: string | null };
 export type ChannelNotificationLevel = "all" | "mentions" | "none";
 export type SavedMessageStatus = "open" | "done";
 export type ChatReminderStatus = "open" | "done" | "dismissed";
@@ -156,6 +156,39 @@ export interface ChatSearchResult {
   message: ChatMessage;
   channel: Pick<Channel, "id" | "kind" | "name">;
   snippet: string;
+}
+
+export interface ChatSearchFilters {
+  channelId?: string | null;
+  fromMemberId?: string | null;
+  hasFile?: boolean;
+  dateFrom?: Date | null;
+  dateTo?: Date | null;
+  inThreads?: boolean;
+  limit?: number;
+}
+
+export type MemberNotificationPolicy = "all" | "mentions" | "none";
+
+/** Per-user notification defaults (spec 08 §8). Quiet hours use "HH:MM" 24h clock strings; a null
+ * start or end means the window is disabled. A window that crosses midnight is supported. */
+export interface MemberNotificationPrefs {
+  defaultPolicy: MemberNotificationPolicy;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
+}
+
+export interface ChatTeamSummary {
+  id: string;
+  name: string;
+  handle: string;
+  memberCount: number;
+}
+
+export interface ChannelMemberSetting {
+  channelId: string;
+  memberId: string;
+  notificationLevel: ChannelNotificationLevel;
 }
 
 export interface CreateChannelInput {

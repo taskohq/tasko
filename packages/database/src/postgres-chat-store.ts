@@ -1,11 +1,16 @@
 import type { PlatformActor } from "../../contracts/src/platform";
-import type { Channel, ChannelNotificationLevel, ChannelReadState, ChatMessage, ChatPin, ChatPushSubscription, ChatReminder, ChatReminderStatus, ChatSearchResult, CreateChannelInput, MessageReactionSummary, SaveMessageInput, SavedMessage, SendMessageInput, UpdateChannelInput } from "../../contracts/src/chat";
+import type { Channel, ChannelMemberSetting, ChannelNotificationLevel, ChannelReadState, ChatMessage, ChatPin, ChatPushSubscription, ChatReminder, ChatReminderStatus, ChatSearchFilters, ChatSearchResult, ChatTeamSummary, CreateChannelInput, MemberNotificationPrefs, MessageReactionSummary, SaveMessageInput, SavedMessage, SendMessageInput, UpdateChannelInput } from "../../contracts/src/chat";
 import type { ChatStore } from "./chat-store";
 import { Pool, type PoolClient } from "pg";
 
 type Row = Record<string, unknown>;
 const tko_date = (tko_value: unknown): Date | null => tko_value ? new Date(String(tko_value)) : null;
 const tko_body = (tko_value: unknown): ChatMessage["body"] => typeof tko_value === "string" ? JSON.parse(tko_value) as ChatMessage["body"] : tko_value as ChatMessage["body"];
+const tko_parseMemberPrefs = (tko_value: unknown): MemberNotificationPrefs => {
+  const tko_source = (typeof tko_value === "string" ? JSON.parse(tko_value) : tko_value ?? {}) as Partial<MemberNotificationPrefs> | null;
+  return { defaultPolicy: tko_source?.defaultPolicy === "all" || tko_source?.defaultPolicy === "none" ? tko_source.defaultPolicy : "mentions", quietHoursStart: typeof tko_source?.quietHoursStart === "string" ? tko_source.quietHoursStart : null, quietHoursEnd: typeof tko_source?.quietHoursEnd === "string" ? tko_source.quietHoursEnd : null };
+};
+const tko_teamRow = (tko_row: Row): ChatTeamSummary => ({ id: String(tko_row.id), name: String(tko_row.name), handle: String(tko_row.handle), memberCount: Number(tko_row.member_count ?? 0) });
 
 export class PostgresChatStore implements ChatStore {
   readonly mode = "postgres" as const;
@@ -106,7 +111,9 @@ export class PostgresChatStore implements ChatStore {
 
   async sendMessage(tko_actor: PlatformActor, tko_input: SendMessageInput, tko_correlationId: string): Promise<ChatMessage> {
     return this.tko_transaction(tko_actor.tenantId, async tko_client => {
-      const tko_existing = await tko_client.query(`select * from messages where tenant_id=$1 and channel_id=$2 and client_message_id=$3`, [tko_actor.tenantId, tko_input.channelId, tko_input.clientMessageId]);
+      // Spec 13 §5: idempotency is scoped to (tenant_id, sender_id, client_message_id); a retry
+      // always returns the original message regardless of channel.
+      const tko_existing = await tko_client.query(`select * from messages where tenant_id=$1 and author_member_id=$2 and client_message_id=$3`, [tko_actor.tenantId, tko_input.authorMemberId, tko_input.clientMessageId]);
       if (tko_existing.rowCount) return this.tko_message(tko_client, tko_existing.rows[0]);
       const tko_channel = await tko_client.query(`select * from channels where tenant_id=$1 and id=$2 for update`, [tko_actor.tenantId, tko_input.channelId]);
       if (!tko_channel.rowCount) throw new Error("CHAT_CHANNEL_NOT_FOUND");
@@ -119,7 +126,7 @@ export class PostgresChatStore implements ChatStore {
       if (tko_message.parentMessageId) await tko_client.query(`update messages set reply_count=reply_count+1,latest_reply_at=now() where tenant_id=$1 and id=$2`, [tko_actor.tenantId, tko_message.parentMessageId]);
       const tko_mentions = Array.from(new Set(tko_message.body.mentions ?? [])).filter(tko_memberId => tko_memberId !== tko_actor.memberId);
       if (tko_mentions.length) await tko_client.query(`update channel_members set unread_mentions=unread_mentions+1,last_notified_seq=greatest(last_notified_seq,$3) where tenant_id=$1 and channel_id=$2 and member_id=any($4::uuid[])`, [tko_actor.tenantId, tko_message.channelId, tko_message.sequence, tko_mentions]);
-      await this.tko_emit(tko_client, tko_actor, "chat.message_created.v1", "chat.message", { channelId: tko_message.channelId, messageId: tko_message.id, sequence: tko_message.sequence, parentMessageId: tko_message.parentMessageId, attachmentCount: tko_message.attachments.length, mentionCount: tko_mentions.length }, "chat.message.created", "message", tko_message.id, tko_correlationId);
+      await this.tko_emit(tko_client, tko_actor, "chat.message_created.v1", "chat.message", { channelId: tko_message.channelId, messageId: tko_message.id, sequence: tko_message.sequence, parentMessageId: tko_message.parentMessageId, attachmentCount: tko_message.attachments.length, mentionCount: tko_mentions.length, mentionMemberIds: tko_mentions, teamMentionIds: Array.from(new Set(tko_message.body.teamMentions ?? [])) }, "chat.message.created", "message", tko_message.id, tko_correlationId);
       return tko_message;
     });
   }
@@ -146,10 +153,13 @@ export class PostgresChatStore implements ChatStore {
 
   async toggleReaction(tko_actor: PlatformActor, tko_messageId: string, tko_emoji: string, tko_correlationId: string): Promise<{ added: boolean }> {
     return this.tko_transaction(tko_actor.tenantId, async tko_client => {
+      const tko_target = await tko_client.query(`select id,channel_id from messages where tenant_id=$1 and id=$2`, [tko_actor.tenantId, tko_messageId]);
+      if (!tko_target.rowCount) throw new Error("CHAT_MESSAGE_NOT_FOUND");
+      const tko_channelId = String(tko_target.rows[0].channel_id);
       const tko_removed = await tko_client.query(`delete from message_reactions where tenant_id=$1 and message_id=$2 and member_id=$3 and emoji=$4 returning message_id`, [tko_actor.tenantId, tko_messageId, tko_actor.memberId, tko_emoji]);
       const tko_added = !tko_removed.rowCount;
       if (tko_added) await tko_client.query(`insert into message_reactions (tenant_id,message_id,member_id,emoji) values ($1,$2,$3,$4)`, [tko_actor.tenantId, tko_messageId, tko_actor.memberId, tko_emoji]);
-      await this.tko_emit(tko_client, tko_actor, "chat.reaction_toggled.v1", "chat.message", { messageId: tko_messageId, emoji: tko_emoji, added: tko_added }, "chat.reaction.toggled", "message", tko_messageId, tko_correlationId);
+      await this.tko_emit(tko_client, tko_actor, "chat.reaction_toggled.v1", "chat.message", { channelId: tko_channelId, messageId: tko_messageId, emoji: tko_emoji, added: tko_added }, "chat.reaction.toggled", "message", tko_messageId, tko_correlationId);
       return { added: tko_added };
     });
   }
@@ -227,10 +237,33 @@ export class PostgresChatStore implements ChatStore {
     });
   }
 
-  async search(tko_tenantId: string, tko_memberId: string, tko_query: string): Promise<ChatSearchResult[]> {
+  async search(tko_tenantId: string, tko_memberId: string, tko_query: string, tko_filters?: ChatSearchFilters): Promise<ChatSearchResult[]> {
     return this.tko_read(tko_tenantId, async tko_client => {
-      const tko_result = await tko_client.query(`select m.*,c.id as channel_ref,c.kind as channel_kind,c.name as channel_name,c.topic as channel_topic,c.visibility as channel_visibility,c.last_sequence as channel_last_sequence,c.created_at as channel_created_at from messages m join channels c on c.id=m.channel_id and c.tenant_id=m.tenant_id left join channel_members cm on cm.channel_id=c.id and cm.member_id=$2 where m.tenant_id=$1 and m.deleted_at is null and (c.kind='public' or cm.member_id=$2) and m.plain_text ilike $3 order by m.created_at desc limit 50`, [tko_tenantId, tko_memberId, `%${tko_query.trim()}%`]);
-      return Promise.all(tko_result.rows.map(async tko_row => ({ message: await this.tko_message(tko_client, tko_row), channel: await this.tko_channel(tko_client, { ...tko_row, id: tko_row.channel_ref, kind: tko_row.channel_kind, name: tko_row.channel_name, topic: tko_row.channel_topic, visibility: tko_row.channel_visibility, last_sequence: tko_row.channel_last_sequence, created_at: tko_row.channel_created_at }), snippet: String(tko_row.plain_text).slice(0, 220) })));
+      const tko_limit = Math.min(Math.max(tko_filters?.limit ?? 50, 1), 100);
+      const tko_conditions = [
+        `m.tenant_id=$1`,
+        `m.deleted_at is null`,
+        `(c.kind='public' or cm.member_id=$2)`,
+        `m.search_vector @@ websearch_to_tsquery('simple', $3)`,
+      ];
+      const tko_args: unknown[] = [tko_tenantId, tko_memberId, tko_query.trim()];
+      if (tko_filters?.channelId) { tko_args.push(tko_filters.channelId); tko_conditions.push(`m.channel_id=$${tko_args.length}`); }
+      if (tko_filters?.fromMemberId) { tko_args.push(tko_filters.fromMemberId); tko_conditions.push(`m.author_member_id=$${tko_args.length}`); }
+      if (tko_filters?.hasFile) tko_conditions.push(`exists (select 1 from message_attachments ma where ma.tenant_id=m.tenant_id and ma.message_id=m.id)`);
+      if (tko_filters?.inThreads) tko_conditions.push(`m.parent_message_id is not null`);
+      if (tko_filters?.dateFrom) { tko_args.push(new Date(tko_filters.dateFrom)); tko_conditions.push(`m.created_at >= $${tko_args.length}`); }
+      if (tko_filters?.dateTo) { tko_args.push(new Date(tko_filters.dateTo)); tko_conditions.push(`m.created_at <= $${tko_args.length}`); }
+      tko_args.push(tko_limit);
+      const tko_result = await tko_client.query(
+        `select m.*, ts_headline('simple', m.plain_text, websearch_to_tsquery('simple', $3), 'StartSel=<<,StopSel=>>,MaxFragments=1,MaxWords=36,MinWords=12,FragmentDelimiter= … ') as headline, c.id as channel_ref, c.kind as channel_kind, c.name as channel_name, c.topic as channel_topic, c.visibility as channel_visibility, c.last_sequence as channel_last_sequence, c.created_at as channel_created_at
+         from messages m
+         join channels c on c.id=m.channel_id and c.tenant_id=m.tenant_id
+         left join channel_members cm on cm.channel_id=c.id and cm.tenant_id=c.tenant_id and cm.member_id=$2
+         where ${tko_conditions.join(" and ")}
+         order by m.created_at desc limit $${tko_args.length}`,
+        tko_args,
+      );
+      return Promise.all(tko_result.rows.map(async tko_row => ({ message: await this.tko_message(tko_client, tko_row), channel: await this.tko_channel(tko_client, { ...tko_row, id: tko_row.channel_ref, kind: tko_row.channel_kind, name: tko_row.channel_name, topic: tko_row.channel_topic, visibility: tko_row.channel_visibility, last_sequence: tko_row.channel_last_sequence, created_at: tko_row.channel_created_at }), snippet: String(tko_row.headline ?? tko_row.plain_text).slice(0, 320) })));
     });
   }
 
@@ -241,8 +274,53 @@ export class PostgresChatStore implements ChatStore {
       const tko_result = await tko_client.query(`update messages set linked_work_item_id=$1 where tenant_id=$2 and id=$3 returning *`, [tko_workItemId, tko_actor.tenantId, tko_messageId]);
       if (!tko_result.rowCount) throw new Error("CHAT_MESSAGE_NOT_FOUND");
       const tko_message = await this.tko_message(tko_client, tko_result.rows[0]);
-      await this.tko_emit(tko_client, tko_actor, "chat.message_linked_work_item.v1", "chat.message", { messageId: tko_message.id, workItemId: tko_workItemId }, "chat.message.work_item_linked", "message", tko_message.id, tko_correlationId);
+      await this.tko_emit(tko_client, tko_actor, "chat.message_linked_work_item.v1", "chat.message", { channelId: tko_message.channelId, messageId: tko_message.id, workItemId: tko_workItemId }, "chat.message.work_item_linked", "message", tko_message.id, tko_correlationId);
       return tko_message;
+    });
+  }
+
+  async getMemberNotificationPrefs(tko_tenantId: string, tko_memberId: string): Promise<MemberNotificationPrefs> {
+    return this.tko_read(tko_tenantId, async tko_client => {
+      const tko_result = await tko_client.query(`select notification_prefs_json from tenant_members where tenant_id=$1 and id=$2`, [tko_tenantId, tko_memberId]);
+      return tko_parseMemberPrefs(tko_result.rows[0]?.notification_prefs_json);
+    });
+  }
+
+  async setMemberNotificationPrefs(tko_actor: PlatformActor, tko_prefs: MemberNotificationPrefs, tko_correlationId: string): Promise<MemberNotificationPrefs> {
+    return this.tko_transaction(tko_actor.tenantId, async tko_client => {
+      const tko_normalized: MemberNotificationPrefs = { defaultPolicy: tko_prefs.defaultPolicy, quietHoursStart: tko_prefs.quietHoursStart ?? null, quietHoursEnd: tko_prefs.quietHoursEnd ?? null };
+      const tko_result = await tko_client.query(`update tenant_members set notification_prefs_json=$2::jsonb,updated_at=now() where tenant_id=$1 and id=$3 returning notification_prefs_json`, [tko_actor.tenantId, JSON.stringify(tko_normalized), tko_actor.memberId]);
+      if (!tko_result.rowCount) throw new Error("CHAT_MEMBER_NOT_FOUND");
+      await this.tko_emit(tko_client, tko_actor, "chat.member_notification_prefs_updated.v1", "chat.notification", { memberId: tko_actor.memberId, ...tko_normalized }, "chat.notification.member_prefs_updated", "tenant_member", tko_actor.memberId, tko_correlationId);
+      return tko_parseMemberPrefs(tko_result.rows[0].notification_prefs_json);
+    });
+  }
+
+  async getTeam(tko_tenantId: string, tko_teamId: string): Promise<ChatTeamSummary | null> {
+    return this.tko_read(tko_tenantId, async tko_client => {
+      const tko_result = await tko_client.query(`select t.id, t.name, t.handle, (select count(*)::int from team_members tm2 join tenant_members mem on mem.tenant_id=tm2.tenant_id and mem.user_id=tm2.user_id and mem.status='active' where tm2.tenant_id=t.tenant_id and tm2.team_id=t.id) as member_count from teams t where t.tenant_id=$1 and t.id=$2`, [tko_tenantId, tko_teamId]);
+      return tko_result.rowCount ? tko_teamRow(tko_result.rows[0]) : null;
+    });
+  }
+
+  async listTeamMemberIds(tko_tenantId: string, tko_teamId: string): Promise<string[]> {
+    return this.tko_read(tko_tenantId, async tko_client => {
+      const tko_result = await tko_client.query(`select mem.id from team_members tm2 join tenant_members mem on mem.tenant_id=tm2.tenant_id and mem.user_id=tm2.user_id and mem.status='active' where tm2.tenant_id=$1 and tm2.team_id=$2`, [tko_tenantId, tko_teamId]);
+      return tko_result.rows.map((tko_row: Row) => String(tko_row.id));
+    });
+  }
+
+  async listListableTeams(tko_tenantId: string): Promise<ChatTeamSummary[]> {
+    return this.tko_read(tko_tenantId, async tko_client => {
+      const tko_result = await tko_client.query(`select t.id, t.name, t.handle, (select count(*)::int from team_members tm2 join tenant_members mem on mem.tenant_id=tm2.tenant_id and mem.user_id=tm2.user_id and mem.status='active' where tm2.tenant_id=t.tenant_id and tm2.team_id=t.id) as member_count from teams t where t.tenant_id=$1 order by t.name`, [tko_tenantId]);
+      return tko_result.rows.map(tko_teamRow);
+    });
+  }
+
+  async listChannelMemberSettings(tko_tenantId: string, tko_channelId: string): Promise<ChannelMemberSetting[]> {
+    return this.tko_read(tko_tenantId, async tko_client => {
+      const tko_result = await tko_client.query(`select channel_id, member_id, notification_level from channel_members where tenant_id=$1 and channel_id=$2`, [tko_tenantId, tko_channelId]);
+      return tko_result.rows.map((tko_row: Row) => ({ channelId: String(tko_row.channel_id), memberId: String(tko_row.member_id), notificationLevel: tko_row.notification_level as ChannelNotificationLevel }));
     });
   }
 
