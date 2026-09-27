@@ -1,4 +1,4 @@
-import { trpc } from "@/lib/trpc";
+import { trpc, tko_workspaceHeaders } from "@/lib/trpc";
 import { COOKIE_NAME, UNAUTHED_ERR_MSG } from '@shared/const';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
@@ -8,36 +8,36 @@ import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
 
-const queryClient = new QueryClient();
+const tko_queryClient = new QueryClient();
 
-const redirectToLoginIfUnauthorized = (error: unknown) => {
+const tko_redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;
   if (typeof window === "undefined") return;
 
-  const isUnauthorized = error.message === UNAUTHED_ERR_MSG;
+  const tko_isUnauthorized = error.message === UNAUTHED_ERR_MSG;
 
-  if (!isUnauthorized) return;
+  if (!tko_isUnauthorized) return;
 
   startLogin();
 };
 
-queryClient.getQueryCache().subscribe(event => {
+tko_queryClient.getQueryCache().subscribe(event => {
   if (event.type === "updated" && event.action.type === "error") {
-    const error = event.query.state.error;
-    redirectToLoginIfUnauthorized(error);
-    console.error("[API Query Error]", error);
+    const tko_error = event.query.state.error;
+    tko_redirectToLoginIfUnauthorized(tko_error);
+    console.error("[API Query Error]", tko_error);
   }
 });
 
-queryClient.getMutationCache().subscribe(event => {
+tko_queryClient.getMutationCache().subscribe(event => {
   if (event.type === "updated" && event.action.type === "error") {
-    const error = event.mutation.state.error;
-    redirectToLoginIfUnauthorized(error);
-    console.error("[API Mutation Error]", error);
+    const tko_error = event.mutation.state.error;
+    tko_redirectToLoginIfUnauthorized(tko_error);
+    console.error("[API Mutation Error]", tko_error);
   }
 });
 
-const trpcClient = trpc.createClient({
+const tko_trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
       url: "/api/trpc",
@@ -48,19 +48,19 @@ const trpcClient = trpc.createClient({
         // session into sessionStorage so we can forward it as a Bearer token.
         // The regular OAuth cookie flow keeps working and takes priority server-side.
         try {
-          const raw = sessionStorage.getItem("manus-cookie");
-          if (raw) {
-            const prefix = `${COOKIE_NAME}=`;
-            const pair = raw.split(";").find(s => s.trim().startsWith(prefix));
-            const token = pair?.trim().slice(prefix.length);
-            if (token) {
-              return { Authorization: `Bearer ${token}` };
+          const tko_raw = sessionStorage.getItem("manus-cookie");
+          if (tko_raw) {
+            const tko_prefix = `${COOKIE_NAME}=`;
+            const tko_pair = tko_raw.split(";").find(s => s.trim().startsWith(tko_prefix));
+            const tko_token = tko_pair?.trim().slice(tko_prefix.length);
+            if (tko_token) {
+              return { Authorization: `Bearer ${tko_token}`, ...tko_workspaceHeaders() };
             }
           }
         } catch {
           // sessionStorage unavailable
         }
-        return {};
+        return { ...tko_workspaceHeaders() };
       },
       fetch(input, init) {
         return globalThis.fetch(input, {
@@ -73,8 +73,8 @@ const trpcClient = trpc.createClient({
 });
 
 createRoot(document.getElementById("root")!).render(
-  <trpc.Provider client={trpcClient} queryClient={queryClient}>
-    <QueryClientProvider client={queryClient}>
+  <trpc.Provider client={tko_trpcClient} queryClient={tko_queryClient}>
+    <QueryClientProvider client={tko_queryClient}>
       <App />
     </QueryClientProvider>
   </trpc.Provider>

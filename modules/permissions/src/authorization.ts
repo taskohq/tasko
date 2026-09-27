@@ -8,11 +8,12 @@ import type {
 
 const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
   owner: [
-    "workspace.read", "workspace.settings.manage", "workspace.members.manage", "workspace.audit.read",
+    "workspace.read", "workspace.settings.manage", "workspace.members.manage", "workspace.audit.read", "teams.manage",
     "attachment.upload", "attachment.download", "realtime.connect", "job.enqueue",
     "work.space.read", "work.space.manage", "work.project.read", "work.project.manage", "work.item.read",
     "work.item.create", "work.item.update", "work.item.transition", "work.item.archive", "work.comment.create",
     "work.comment.moderate", "work.sprint.manage", "work.view.manage", "work.custom_field.manage",
+    "work.item.watch", "work.label.manage", "work.time_log.manage",
     "chat.channel.create", "chat.channel.read", "chat.channel.manage", "chat.message.read", "chat.message.send", "chat.message.edit_own",
     "chat.message.delete_own", "chat.message.moderate", "chat.reaction.toggle", "chat.read_cursor.update",
     "chat.notification.manage", "chat.saved_message.manage", "chat.search",
@@ -22,14 +23,16 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "workspace.form.read", "workspace.form.manage", "workspace.form.submit", "workspace.automation.manage",
     "saas.entitlement.read", "saas.entitlement.manage", "saas.usage.read", "saas.billing.manage", "saas.backup.manage", "saas.restore.manage", "saas.metrics.read",
     "ecosystem.import.read", "ecosystem.import.manage", "ecosystem.api_token.manage", "ecosystem.webhook.manage", "ecosystem.integration.manage",
+    "data.export",
     "ai.context.read", "ai.draft.create", "ai.action.propose", "ai.action.confirm", "mcp.connect",
   ],
   admin: [
-    "workspace.read", "workspace.settings.manage", "workspace.members.manage", "workspace.audit.read",
+    "workspace.read", "workspace.settings.manage", "workspace.members.manage", "workspace.audit.read", "teams.manage",
     "attachment.upload", "attachment.download", "realtime.connect", "job.enqueue",
     "work.space.read", "work.space.manage", "work.project.read", "work.project.manage", "work.item.read",
     "work.item.create", "work.item.update", "work.item.transition", "work.item.archive", "work.comment.create",
     "work.comment.moderate", "work.sprint.manage", "work.view.manage", "work.custom_field.manage",
+    "work.item.watch", "work.label.manage", "work.time_log.manage",
     "chat.channel.create", "chat.channel.read", "chat.channel.manage", "chat.message.read", "chat.message.send", "chat.message.edit_own",
     "chat.message.delete_own", "chat.message.moderate", "chat.reaction.toggle", "chat.read_cursor.update",
     "chat.notification.manage", "chat.saved_message.manage", "chat.search",
@@ -39,12 +42,14 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
     "workspace.form.read", "workspace.form.manage", "workspace.form.submit", "workspace.automation.manage",
     "saas.entitlement.read", "saas.usage.read", "saas.billing.manage", "saas.backup.manage", "saas.restore.manage", "saas.metrics.read",
     "ecosystem.import.read", "ecosystem.import.manage", "ecosystem.api_token.manage", "ecosystem.webhook.manage", "ecosystem.integration.manage",
+    "data.export",
     "ai.context.read", "ai.draft.create", "ai.action.propose", "ai.action.confirm", "mcp.connect",
   ],
   member: [
     "workspace.read", "attachment.upload", "attachment.download", "realtime.connect",
     "work.space.read", "work.project.read", "work.item.read", "work.item.create", "work.item.update",
     "work.item.transition", "work.comment.create", "work.view.manage",
+    "work.item.watch", "work.label.manage", "work.time_log.manage",
     "chat.channel.create", "chat.channel.read", "chat.message.read", "chat.message.send", "chat.message.edit_own", "chat.message.delete_own",
     "chat.reaction.toggle", "chat.read_cursor.update", "chat.notification.manage", "chat.saved_message.manage", "chat.search",
     "crm.read", "crm.lead.manage", "crm.lead.convert", "crm.company.manage", "crm.contact.manage",
@@ -56,6 +61,7 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
   guest: [
     "workspace.read", "attachment.download", "realtime.connect",
     "work.space.read", "work.project.read", "work.item.read", "work.comment.create",
+    "work.item.watch",
     "chat.channel.read", "chat.message.read", "chat.message.send", "chat.message.edit_own", "chat.message.delete_own",
     "chat.reaction.toggle", "chat.read_cursor.update", "chat.notification.manage", "chat.saved_message.manage", "chat.search",
     "workspace.search", "workspace.inbox.manage", "workspace.document.read", "workspace.form.read", "workspace.form.submit",
@@ -64,6 +70,7 @@ const tko_roleCapabilities: Record<TenantRole, readonly Capability[]> = {
   service_account: [
     "workspace.read", "attachment.upload", "attachment.download", "job.enqueue", "job.process",
     "work.space.read", "work.space.manage", "work.project.read", "work.project.manage", "work.item.read", "work.item.create", "work.item.update", "work.item.transition",
+    "work.item.watch", "work.label.manage", "work.time_log.manage",
     "chat.channel.create", "chat.channel.read", "chat.channel.manage", "chat.message.read", "chat.message.send", "chat.reaction.toggle",
     "crm.read", "crm.deal.manage", "crm.activity.manage", "crm.follow_up.create", "crm.deal.handoff",
     "workspace.search", "workspace.inbox.manage", "workspace.link.manage", "workspace.document.read", "workspace.document.manage",
@@ -83,6 +90,8 @@ const tko_viewerRestrictedCapabilities = new Set<Capability>([
   "work.comment.create",
   "work.sprint.manage",
   "work.custom_field.manage",
+  "work.label.manage",
+  "work.time_log.manage",
 ]);
 
 function denied(tko_reason: AuthorizationDecision["reason"]): AuthorizationDecision {

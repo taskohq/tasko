@@ -198,3 +198,29 @@ export interface CursorPage<T> {
   data: T[];
   page: { next_cursor: string | null };
 }
+
+/** Module CSV export (spec 19 §7): tenant-scoped tabular exports audited as data.exported.v1. */
+export type CsvExportEntityType =
+  | "work_items"
+  | "time_logs"
+  | "crm_leads"
+  | "crm_companies"
+  | "crm_contacts"
+  | "crm_deals";
+
+export interface CsvExportFilters {
+  projectId?: string | null;
+  pipelineId?: string | null;
+}
+
+export interface CsvExportInput {
+  entityType: CsvExportEntityType;
+  filters?: CsvExportFilters;
+}
+
+export interface CsvExportResult {
+  filename: string;
+  csv: string;
+  rowCount: number;
+  entityType: CsvExportEntityType;
+}
