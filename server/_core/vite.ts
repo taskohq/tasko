@@ -10,7 +10,7 @@ import viteConfig from "../../vite.config";
 
 /** Paths that must never fall through to the SPA HTML handlers. */
 function tko_isApiPath(tko_url: string) {
-  return tko_url.startsWith("/api/") || tko_url.startsWith("/manus-storage/");
+  return tko_url.startsWith("/api/") || tko_url.startsWith("/manus-storage/") || tko_url === "/health" || tko_url === "/ready";
 }
 
 export async function setupVite(fastify: FastifyInstance, server: Server) {
