@@ -1,6 +1,6 @@
 import { COOKIE_NAME, ONE_YEAR_MS, OAUTH_STATE_COOKIE, decodeOAuthState } from "@shared/const";
 import { parse as parseCookieHeader } from "cookie";
-import type { Express, Request, Response } from "express";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
@@ -8,8 +8,13 @@ import { getPlatformStore } from "../../packages/database/src/platform-store";
 import { recordAuthenticationEvent } from "../../modules/audit/src/audit-service";
 import { createPlatformActor } from "../../modules/tenancy/src/tenant-context";
 
-function getQueryParam(req: Request, key: string): string | undefined {
-  const value = req.query[key];
+function tko_headerValue(tko_raw: string | string[] | undefined): string | undefined {
+  if (Array.isArray(tko_raw)) return tko_raw[0];
+  return tko_raw;
+}
+
+function getQueryParam(req: FastifyRequest, key: string): string | undefined {
+  const value = (req.query as Record<string, unknown> | null)?.[key];
   return typeof value === "string" ? value : undefined;
 }
 
@@ -101,24 +106,24 @@ function tko_isOAuthProviderNetworkError(tko_error: unknown): boolean {
 export function tko_createOAuthCallbackHandler(
   tko_dependencies: TkoOAuthCallbackDependencies = tko_defaultOAuthCallbackDependencies,
 ) {
-  return async (req: Request, res: Response) => {
+  return async (tko_req: FastifyRequest, tko_reply: FastifyReply) => {
     const tko_validation = tko_validateOAuthCallbackInput({
-      code: getQueryParam(req, "code"),
-      state: getQueryParam(req, "state"),
-      cookieHeader: req.headers.cookie,
+      code: getQueryParam(tko_req, "code"),
+      state: getQueryParam(tko_req, "state"),
+      cookieHeader: tko_req.headers.cookie,
     });
     if (!tko_validation.ok) {
-      res.status(tko_validation.status).json({ error: tko_validation.error });
+      void tko_reply.code(tko_validation.status).send({ error: tko_validation.error });
       return;
     }
-    res.clearCookie(OAUTH_STATE_COOKIE, { path: "/", secure: true, sameSite: "none" });
+    void tko_reply.clearCookie(OAUTH_STATE_COOKIE, { path: "/", secure: true, sameSite: "none" });
 
     try {
       const tko_tokenResponse = await tko_dependencies.exchangeCodeForToken(tko_validation.code, tko_validation.state);
       const tko_userInfo = await tko_dependencies.getUserInfo(tko_tokenResponse.accessToken);
 
       if (!tko_userInfo.openId) {
-        res.status(400).json({ error: "openId missing from user info" });
+        void tko_reply.code(400).send({ error: "openId missing from user info" });
         return;
       }
 
@@ -130,13 +135,14 @@ export function tko_createOAuthCallbackHandler(
         lastSignedIn: new Date(),
       });
 
+      const tko_requestId = tko_headerValue(tko_req.headers["x-request-id"]);
       const tko_memberships = await tko_dependencies.listMemberships(tko_userInfo.openId);
       await Promise.all(
         tko_memberships.map(tko_membership =>
           tko_dependencies.recordAuthenticationEvent({
-            actor: createPlatformActor(tko_membership, req.header("x-request-id") ?? undefined),
+            actor: createPlatformActor(tko_membership, tko_requestId ?? undefined),
             action: "login",
-            correlationId: req.header("x-request-id") ?? tko_dependencies.newRequestId(),
+            correlationId: tko_requestId ?? tko_dependencies.newRequestId(),
             metadata: { loginMethod: tko_userInfo.loginMethod ?? tko_userInfo.platform ?? "oauth" },
           }),
         ),
@@ -147,9 +153,9 @@ export function tko_createOAuthCallbackHandler(
         expiresInMs: ONE_YEAR_MS,
       });
 
-      const tko_cookieOptions = tko_dependencies.getSessionCookieOptions(req);
-      res.cookie(COOKIE_NAME, tko_sessionToken, { ...tko_cookieOptions, maxAge: ONE_YEAR_MS });
-      res.redirect(302, "/");
+      const tko_cookieOptions = tko_dependencies.getSessionCookieOptions(tko_req);
+      void tko_reply.setCookie(COOKIE_NAME, tko_sessionToken, { ...tko_cookieOptions, maxAge: ONE_YEAR_MS });
+      void tko_reply.code(302).redirect("/");
     } catch (tko_error) {
       const tko_providerNetworkError = tko_isOAuthProviderNetworkError(tko_error);
       const tko_errorDetails = tko_error as { code?: unknown; hostname?: unknown; message?: unknown };
@@ -158,13 +164,13 @@ export function tko_createOAuthCallbackHandler(
         hostname: tko_errorDetails?.hostname,
         message: tko_errorDetails?.message,
       });
-      res.status(tko_providerNetworkError ? 502 : 500).json({
+      void tko_reply.code(tko_providerNetworkError ? 502 : 500).send({
         error: tko_providerNetworkError ? "OAuth provider unavailable" : "OAuth callback failed",
       });
     }
   };
 }
 
-export function registerOAuthRoutes(app: Express) {
-  app.get("/api/oauth/callback", tko_createOAuthCallbackHandler());
+export function registerOAuthRoutes(tko_fastify: FastifyInstance) {
+  tko_fastify.get("/api/oauth/callback", tko_createOAuthCallbackHandler());
 }

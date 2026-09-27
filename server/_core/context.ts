@@ -1,4 +1,4 @@
-import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
+import type { CreateFastifyContextOptions } from "@trpc/server/adapters/fastify";
 import type { User } from "../../drizzle/schema";
 import { sdk } from "./sdk";
 import type { TenantRequestContext } from "../../modules/tenancy/src/tenant-context";
@@ -6,20 +6,25 @@ import { resolveTenantRequestContext } from "../../modules/tenancy/src/tenant-co
 import { createCorrelationId } from "../../packages/observability/src/logger";
 
 export type TrpcContext = {
-  req: CreateExpressContextOptions["req"];
-  res: CreateExpressContextOptions["res"];
+  req: CreateFastifyContextOptions["req"];
+  res: CreateFastifyContextOptions["res"];
   user: User | null;
   platform: TenantRequestContext | null;
   correlationId: string;
 };
 
+function tko_headerValue(tko_raw: string | string[] | undefined): string | undefined {
+  if (Array.isArray(tko_raw)) return tko_raw[0];
+  return tko_raw;
+}
+
 export async function createContext(
-  opts: CreateExpressContextOptions
+  opts: CreateFastifyContextOptions
 ): Promise<TrpcContext> {
   let user: User | null = null;
   let tko_platform: TenantRequestContext | null = null;
-  const tko_candidateHeader = opts.req.header("x-tasko-workspace");
-  const tko_correlationId = createCorrelationId(opts.req.header("x-correlation-id"));
+  const tko_candidateHeader = tko_headerValue(opts.req.headers["x-tasko-workspace"]);
+  const tko_correlationId = createCorrelationId(tko_headerValue(opts.req.headers["x-correlation-id"]));
 
   try {
     user = await sdk.authenticateRequest(opts.req);
@@ -28,7 +33,7 @@ export async function createContext(
       candidateTenantSlug: tko_candidateHeader,
       correlationId: tko_correlationId,
     });
-  } catch (error) {
+  } catch {
     // Authentication is optional for public procedures.
     user = null;
   }

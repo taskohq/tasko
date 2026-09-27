@@ -7,6 +7,17 @@ import { can } from "../../modules/permissions/src/authorization";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
+  // Stable error envelope (spec 14 §3): keep the tRPC wire shape so clients
+  // keep working, and attach the correlation id so every failure is traceable.
+  errorFormatter(tko_opts) {
+    return {
+      ...tko_opts.shape,
+      data: {
+        ...tko_opts.shape.data,
+        correlationId: tko_opts.ctx?.correlationId ?? null,
+      },
+    };
+  },
 });
 
 export const router = t.router;

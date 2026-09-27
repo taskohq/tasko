@@ -100,7 +100,7 @@ try {
     await tko_client.query(
       `insert into messages (id, tenant_id, channel_id, sequence, client_message_id, author_member_id, body, plain_text)
        values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
-       on conflict (channel_id, client_message_id) do nothing`,
+       on conflict (tenant_id, author_member_id, client_message_id) do nothing`,
       [randomUUID(), tko_tenantId, tko_channelId, tko_sequence, tko_clientMessageId, tko_ownerMemberId, JSON.stringify({ type: "text", text: tko_text }), tko_text],
     );
   }

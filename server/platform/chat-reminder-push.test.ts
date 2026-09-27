@@ -11,9 +11,9 @@ import { deliverChatReminderPush } from "./chat-reminder-push";
 
 const tko_actor: PlatformActor = { authSubject: "chat-owner", tenantId: "tko-tenant-tasko-demo", tenantSlug: "tasko-demo", memberId: "tko-member-demo-owner", role: "owner", membershipStatus: "active", correlationId: "push-test" };
 const tko_response = () => {
-  const tko_json = vi.fn();
-  const tko_status = vi.fn(() => ({ json: tko_json }));
-  return { status: tko_status, json: tko_json } as any;
+  const tko_send = vi.fn();
+  const tko_code = vi.fn(() => ({ send: tko_send }));
+  return { code: tko_code, send: tko_send } as any;
 };
 
 describe("chat reminder Web Push callback", () => {
@@ -33,10 +33,10 @@ describe("chat reminder Web Push callback", () => {
     tko_sendNotification.mockResolvedValue(undefined);
     const tko_res = tko_response();
 
-    await deliverChatReminderPush({ originalUrl: "/api/scheduled/chat-reminder-push" } as any, tko_res);
+    await deliverChatReminderPush({ url: "/api/scheduled/chat-reminder-push" } as any, tko_res);
 
     expect(tko_sendNotification).toHaveBeenCalledTimes(1);
-    expect(tko_res.json).toHaveBeenCalledWith({ ok: true, delivered: 1 });
+    expect(tko_res.send).toHaveBeenCalledWith({ ok: true, delivered: 1 });
     expect(await getChatStore().claimReminderPushDelivery("cron-push-test")).toBeNull();
   });
 
@@ -47,10 +47,10 @@ describe("chat reminder Web Push callback", () => {
     tko_sendNotification.mockRejectedValue({ statusCode: 410 });
     const tko_res = tko_response();
 
-    await deliverChatReminderPush({ originalUrl: "/api/scheduled/chat-reminder-push" } as any, tko_res);
+    await deliverChatReminderPush({ url: "/api/scheduled/chat-reminder-push" } as any, tko_res);
 
     expect(await getChatStore().listPushSubscriptions(tko_actor.tenantId, tko_actor.memberId)).toEqual([]);
     expect(await getChatStore().claimReminderPushDelivery("cron-push-test")).toEqual(expect.objectContaining({ id: tko_reminder.id }));
-    expect(tko_res.status).toHaveBeenCalledWith(500);
+    expect(tko_res.code).toHaveBeenCalledWith(500);
   });
 });

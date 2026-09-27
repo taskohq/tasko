@@ -1,9 +1,9 @@
-import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { COOKIE_NAME } from "@shared/const";
 import { parse as parseCookie } from "cookie";
 import { TRPCError } from "@trpc/server";
-import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router, tenantProcedure } from "./_core/trpc";
+import { clearSessionCookie, setSessionCookie } from "./_core/session-cookies";
 import { tko_config } from "../packages/config/src/tasko-config";
 import { getPlatformStore } from "../packages/database/src/platform-store";
 import { can } from "../modules/permissions/src/authorization";
@@ -19,10 +19,18 @@ import { getSaaSService } from "../modules/saas/src/saas-service";
 import { getImportService } from "../modules/ecosystem/src/import-service";
 import { getDeveloperService } from "../modules/ecosystem/src/developer-service";
 import * as aiService from "../modules/ai/src/ai-service";
-import { signInWithEmailPassword, signUpWithEmailPassword } from "../modules/auth/src/email-password-service";
+import { signUpWithEmailPassword } from "../modules/auth/src/email-password-service";
 import { listAITools } from "../modules/ai/src/tool-registry";
 import { getWorkStore } from "../packages/database/src/work-store";
 import { z } from "zod";
+import { tkoAuthExtraProcedures } from "./routers.auth-extras";
+import { tkoIdentityExtraProcedures } from "./routers.identity-extras";
+import { tkoWorkExtraProcedures } from "./routers.work-extras";
+import { tkoCrmExtraProcedures } from "./routers.crm-extras";
+import { tkoWorkspaceExtraProcedures } from "./routers.workspace-extras";
+import { tkoChatExtraProcedures } from "./routers.chat-extras";
+import { tkoEcosystemExtraProcedures } from "./routers.ecosystem-extras";
+import { tkoAiExtraProcedures } from "./routers.ai-extras";
 
 function tko_sessionToken(tko_request: { headers: { cookie?: string; authorization?: string } }) { return parseCookie(tko_request.headers.cookie ?? "")[COOKIE_NAME] ?? (tko_request.headers.authorization?.startsWith("Bearer ") ? tko_request.headers.authorization.slice(7) : ""); }
 
@@ -30,13 +38,15 @@ export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    // Recovery/MFA extras supersede the base `me` and `signInWithEmailPassword`
+    // procedures (email verification, password reset, TOTP challenge login).
+    ...tkoAuthExtraProcedures,
     signUpWithEmailPassword: publicProcedure
       .input(z.object({ email: z.string().email().max(254), password: z.string().min(12).max(128), displayName: z.string().trim().min(2).max(100), workspaceName: z.string().trim().min(2).max(100).optional() }))
       .mutation(async ({ ctx, input }) => {
         try {
           const tko_result = await signUpWithEmailPassword({ ...input, correlationId: ctx.correlationId });
-          ctx.res.cookie(COOKIE_NAME, tko_result.sessionToken, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
+          setSessionCookie(ctx, tko_result.sessionToken);
           return { account: { email: tko_result.account.email, displayName: tko_result.account.displayName } };
         } catch (tko_error) {
           const tko_code = tko_error instanceof Error ? tko_error.message : "";
@@ -45,22 +55,8 @@ export const appRouter = router({
           throw new TRPCError({ code: "CONFLICT", message: "Unable to create this account." });
         }
       }),
-    signInWithEmailPassword: publicProcedure
-      .input(z.object({ email: z.string().email().max(254), password: z.string().min(1).max(128) }))
-      .mutation(async ({ ctx, input }) => {
-        try {
-          const tko_result = await signInWithEmailPassword({ ...input, correlationId: ctx.correlationId });
-          ctx.res.cookie(COOKIE_NAME, tko_result.sessionToken, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
-          return { account: { email: tko_result.account.email, displayName: tko_result.account.displayName } };
-        } catch (tko_error) {
-          const tko_code = tko_error instanceof Error ? tko_error.message : "";
-          if (tko_code === "TASKO_AUTH_RATE_LIMITED") throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Please wait before trying again." });
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password." });
-        }
-      }),
     logout: publicProcedure.mutation(async ({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      clearSessionCookie(ctx);
       if (ctx.platform) {
         await recordAuthenticationEvent({
           actor: ctx.platform.actor,
@@ -173,6 +169,11 @@ export const appRouter = router({
     }),
   }),
 
+  identity: router({
+    // Session management + teams (M0 security completeness).
+    ...tkoIdentityExtraProcedures,
+  }),
+
   workspaceMembers: router({
     list: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceMembers(ctx.platform.actor)),
     invitations: tenantProcedure.query(({ ctx }) => workspaceMembershipService.listWorkspaceInvitations(ctx.platform.actor)),
@@ -206,6 +207,9 @@ export const appRouter = router({
   }),
 
   work: router({
+    // M1 extras redefine `board` (label filter) and add watchers/labels/time
+    // logs/transitions/types/saved views.
+    ...tkoWorkExtraProcedures,
     spaces: tenantProcedure.query(({ ctx }) => getWorkStore().listSpaces(ctx.platform.actor.tenantId)),
     projects: tenantProcedure.query(({ ctx }) => workService.projects(ctx.platform.actor)),
     assignees: tenantProcedure.query(async ({ ctx }) => {
@@ -223,7 +227,6 @@ export const appRouter = router({
         role: tko_member.role,
       }));
     }),
-    board: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.board(ctx.platform.actor, input.projectId)),
     overview: tenantProcedure.input(z.object({ projectId: z.string().uuid() })).query(({ ctx, input }) => workService.overview(ctx.platform.actor, input.projectId)),
     myWork: tenantProcedure.input(z.object({ due: z.enum(["all", "overdue", "soon", "none"]).default("all") }).optional()).query(({ ctx, input }) => workService.myWork(ctx.platform.actor, input ?? { due: "all" })),
     opsUpdate: tenantProcedure.input(z.object({ since: z.date() })).query(({ ctx, input }) => workService.opsUpdate(ctx.platform.actor, input)),
@@ -276,6 +279,9 @@ export const appRouter = router({
   }),
 
   crm: router({
+    // CRM extras add lead/company/contact readers + updaters and redefine
+    // `moveDeal` (loss reason) + `createFollowUp` (assignees).
+    ...tkoCrmExtraProcedures,
     overview: tenantProcedure.query(({ ctx }) => crmService.overview(ctx.platform.actor)),
     lead: tenantProcedure.input(z.object({ leadId: z.string().uuid() })).query(({ ctx, input }) => crmService.lead(ctx.platform.actor, input.leadId)),
     pipelines: tenantProcedure.query(({ ctx }) => import("../packages/database/src/crm-store").then(({ getCRMStore }) => getCRMStore().listPipelines(ctx.platform.actor.tenantId))),
@@ -286,15 +292,16 @@ export const appRouter = router({
     createContact: tenantProcedure.input(z.object({ companyId: z.string().uuid().nullable().optional(), firstName: z.string().trim().min(1).max(120), lastName: z.string().trim().min(1).max(120), title: z.string().trim().max(180).optional(), emails: z.array(z.string().email().max(320)).max(10).optional(), phones: z.array(z.string().trim().min(1).max(80)).max(10).optional(), tags: z.array(z.string().trim().min(1).max(60)).max(50).optional() })).mutation(({ ctx, input }) => crmService.createContact(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     createPipeline: tenantProcedure.input(z.object({ name: z.string().trim().min(1).max(160), stages: z.array(z.object({ name: z.string().trim().min(1).max(120), probabilityDefault: z.number().int().min(0).max(100), category: z.enum(["open", "won", "lost"]) })).min(2).max(20).optional() })).mutation(({ ctx, input }) => crmService.createPipeline(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     createDeal: tenantProcedure.input(z.object({ companyId: z.string().uuid().nullable().optional(), pipelineId: z.string().uuid(), stageId: z.string().uuid(), name: z.string().trim().min(1).max(320), amountCents: z.number().int().min(0).max(1_000_000_000_000).nullable().optional(), currency: z.string().trim().length(3).optional(), probability: z.number().int().min(0).max(100).optional(), expectedCloseDate: z.date().nullable().optional(), source: z.string().trim().max(120).optional(), nextStep: z.string().trim().max(2_000).optional() })).mutation(({ ctx, input }) => crmService.createDeal(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
-    moveDeal: tenantProcedure.input(z.object({ dealId: z.string().uuid(), stageId: z.string().uuid() })).mutation(({ ctx, input }) => crmService.moveDeal(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     requestDealHandoff: tenantProcedure.input(z.object({ dealId: z.string().uuid() })).mutation(({ ctx, input }) => crmService.requestDealHandoff(ctx.platform.actor, { dealId: input.dealId, correlationId: ctx.correlationId })),
     addActivity: tenantProcedure.input(z.object({ entityType: z.enum(["lead", "company", "contact", "deal"]), entityId: z.string().uuid(), activityType: z.enum(["note", "call", "meeting", "email_reference", "status_change", "file", "linked_work_event"]), subject: z.string().trim().max(500).optional(), body: z.string().max(10_000).optional(), metadata: z.record(z.string(), z.unknown()).optional() })).mutation(({ ctx, input }) => crmService.addActivity(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     convertLead: tenantProcedure.input(z.object({ leadId: z.string().uuid(), conversionKey: z.string().uuid(), companyId: z.string().uuid().optional(), contactId: z.string().uuid().optional(), createDeal: z.boolean().default(true), pipelineId: z.string().uuid().optional(), stageId: z.string().uuid().optional(), dealName: z.string().trim().min(1).max(320).optional(), dealAmountCents: z.number().int().min(0).max(1_000_000_000_000).nullable().optional() })).mutation(({ ctx, input }) => crmService.convertLead({ actor: ctx.platform.actor, ...input, correlationId: ctx.correlationId })),
-    createFollowUp: tenantProcedure.input(z.object({ entityType: z.enum(["lead", "company", "contact", "deal"]), entityId: z.string().uuid(), projectId: z.string().uuid(), title: z.string().trim().min(1).max(500), dueAt: z.date().nullable().optional() })).mutation(({ ctx, input }) => crmService.createFollowUp(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     linkEntity: tenantProcedure.input(z.object({ sourceType: z.enum(["lead", "company", "contact", "deal"]), sourceId: z.string().uuid(), targetType: z.enum(["work_item", "project", "channel", "message"]), targetId: z.string().uuid(), relationType: z.enum(["follow_up", "delivery_project", "delivery_channel", "context"]) })).mutation(({ ctx, input }) => crmService.link(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
   }),
 
   workspace: router({
+    // Unified workspace extras: doc revisions, public-form sharing, automation
+    // v2 (redefines `createAutomationRule` with new triggers/actions).
+    ...tkoWorkspaceExtraProcedures,
     overview: tenantProcedure.query(({ ctx }) => workspaceService.overview(ctx.platform.actor)),
     search: tenantProcedure.input(z.object({ query: z.string().trim().min(2).max(250), kind: z.enum(["work", "chat", "crm", "doc"]).optional() })).query(({ ctx, input }) => workspaceService.search(ctx.platform.actor, input)),
     indexSearchDocument: tenantProcedure.input(z.object({ entityType: z.enum(["work_item", "project", "channel", "message", "crm_lead", "crm_company", "crm_contact", "crm_deal", "document", "form"]), entityId: z.string().uuid(), kind: z.enum(["work", "chat", "crm", "doc"]), title: z.string().trim().min(1).max(500), bodyText: z.string().max(50_000).default(""), href: z.string().trim().min(1).max(2_000), visibility: z.enum(["internal", "private", "guest_shared"]).default("internal"), explicitMemberIds: z.array(z.string().uuid()).max(100).default([]) })).mutation(({ ctx, input }) => workspaceService.indexSearchDocument(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
@@ -315,10 +322,13 @@ export const appRouter = router({
     submitForm: tenantProcedure.input(z.object({ formId: z.string().uuid(), values: z.record(z.string(), z.unknown()), idempotencyKey: z.string().uuid() })).mutation(({ ctx, input }) => workspaceService.submitForm(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     automationRules: tenantProcedure.query(({ ctx }) => workspaceService.automationRules(ctx.platform.actor)),
     automationExecutions: tenantProcedure.query(({ ctx }) => workspaceService.automationExecutions(ctx.platform.actor)),
-    createAutomationRule: tenantProcedure.input(z.object({ name: z.string().trim().min(1).max(240), triggerType: z.enum(["crm.lead_created.v1", "work.work_item_created.v1", "workspace.form_submitted.v1"]), condition: z.record(z.string(), z.unknown()).optional(), actions: z.array(z.object({ type: z.enum(["create_work_item", "create_crm_activity"]), config: z.record(z.string(), z.unknown()) })).min(1).max(10) })).mutation(({ ctx, input }) => workspaceService.createAutomationRule(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
   }),
 
   chat: router({
+    // Chat extras redefine `sendMessage` (@team mentions) and `search` (FTS +
+    // filters) and add realtime helpers, per-member notification prefs and
+    // team mention lookups.
+    ...tkoChatExtraProcedures,
     channels: tenantProcedure.query(({ ctx }) => chatService.listChannels(ctx.platform.actor)),
     creationPolicy: tenantProcedure.query(({ ctx }) => chatService.channelCreationPolicy(ctx.platform.actor)),
     updateCreationPolicy: tenantProcedure.input(z.object({ roles: z.array(z.enum(["owner", "admin", "member"])).min(1).max(3) })).mutation(({ ctx, input }) => chatService.updateChannelCreationPolicy(ctx.platform.actor, input.roles, ctx.correlationId)),
@@ -332,7 +342,6 @@ export const appRouter = router({
     memberCandidates: tenantProcedure.input(z.object({ channelId: z.string().uuid() })).query(({ ctx, input }) => chatService.channelMemberCandidates(ctx.platform.actor, input.channelId)),
     addMembers: tenantProcedure.input(z.object({ channelId: z.string().uuid(), memberIds: z.array(z.string().uuid()).min(1).max(100) })).mutation(({ ctx, input }) => chatService.addChannelMembers(ctx.platform.actor, input.channelId, input.memberIds, ctx.correlationId)),
     removeMember: tenantProcedure.input(z.object({ channelId: z.string().uuid(), memberId: z.string().uuid() })).mutation(({ ctx, input }) => chatService.removeChannelMember(ctx.platform.actor, input.channelId, input.memberId, ctx.correlationId)),
-    sendMessage: tenantProcedure.input(z.object({ channelId: z.string().uuid(), clientMessageId: z.string().uuid(), body: z.object({ type: z.literal("text"), text: z.string().max(40_000), mentions: z.array(z.string().uuid()).max(100).optional(), broadcastMention: z.enum(["channel", "here"]).optional(), quotedMessageId: z.string().uuid().nullable().optional() }), attachments: z.array(z.object({ filename: z.string().trim().min(1).max(180), contentType: z.string().trim().min(3).max(160), dataBase64: z.string().min(4).max(6_700_000) })).max(5).default([]), parentMessageId: z.string().uuid().nullable().optional() }).refine(tko_input => Boolean(tko_input.body.text.trim()) || tko_input.attachments.length > 0, { message: "A message needs text or an attachment." })).mutation(({ ctx, input }) => chatService.sendMessage(ctx.platform.actor, input, ctx.correlationId)),
     editMessage: tenantProcedure.input(z.object({ messageId: z.string().uuid(), text: z.string().trim().min(1).max(40_000) })).mutation(({ ctx, input }) => chatService.editMessage(ctx.platform.actor, input.messageId, input.text, ctx.correlationId)),
     deleteMessage: tenantProcedure.input(z.object({ messageId: z.string().uuid() })).mutation(({ ctx, input }) => chatService.deleteMessage(ctx.platform.actor, input.messageId, ctx.correlationId)),
     toggleReaction: tenantProcedure.input(z.object({ messageId: z.string().uuid(), emoji: z.string().trim().min(1).max(64) })).mutation(({ ctx, input }) => chatService.toggleReaction(ctx.platform.actor, input.messageId, input.emoji, ctx.correlationId)),
@@ -351,7 +360,6 @@ export const appRouter = router({
     upsertPushSubscription: tenantProcedure.input(z.object({ endpoint: z.string().url().max(4_000), p256dh: z.string().min(16).max(500), auth: z.string().min(8).max(500), userAgent: z.string().max(1_000).nullable().optional() })).mutation(({ ctx, input }) => chatService.upsertPushSubscription(ctx.platform.actor, input, ctx.correlationId)),
     forwardMessage: tenantProcedure.input(z.object({ messageId: z.string().uuid(), targetChannelId: z.string().uuid(), note: z.string().trim().max(4_000).optional() })).mutation(({ ctx, input }) => chatService.forwardMessage(ctx.platform.actor, input, ctx.correlationId)),
     togglePin: tenantProcedure.input(z.object({ messageId: z.string().uuid() })).mutation(({ ctx, input }) => chatService.togglePin(ctx.platform.actor, input.messageId, ctx.correlationId)),
-    search: tenantProcedure.input(z.object({ query: z.string().trim().min(2).max(250) })).query(({ ctx, input }) => chatService.search(ctx.platform.actor, input.query)),
     linkWorkItem: tenantProcedure.input(z.object({ messageId: z.string().uuid(), workItemId: z.string().uuid() })).mutation(({ ctx, input }) => chatService.linkWorkItem(ctx.platform.actor, input.messageId, input.workItemId, ctx.correlationId)),
     attachmentUrl: tenantProcedure.input(z.object({ messageId: z.string().uuid(), attachmentId: z.string().uuid() })).query(({ ctx, input }) => chatService.attachmentUrl(ctx.platform.actor, input.messageId, input.attachmentId)),
     setPresence: tenantProcedure.input(z.object({ status: z.enum(["online", "away", "offline"]) })).mutation(({ ctx, input }) => chatService.setPresence(ctx.platform.actor, input.status)),
@@ -379,6 +387,8 @@ export const appRouter = router({
   }),
 
   ecosystem: router({
+    // Ecosystem extras: CSV exports + feature flags.
+    ...tkoEcosystemExtraProcedures,
     imports: tenantProcedure.query(({ ctx }) => getImportService().list(ctx.platform.actor)),
     createImport: tenantProcedure.input(z.object({ source: z.enum(["jira", "clickup", "slack", "crm_csv"]), name: z.string().trim().min(1).max(240), sourceObjectKey: z.string().trim().max(1024).nullable().optional(), idempotencyKey: z.string().uuid() })).mutation(({ ctx, input }) => getImportService().create(ctx.platform.actor, { ...input, correlationId: ctx.correlationId })),
     previewImport: tenantProcedure.input(z.object({ jobId: z.string().uuid() })).query(({ ctx, input }) => getImportService().preview(ctx.platform.actor, input.jobId)),
@@ -397,6 +407,8 @@ export const appRouter = router({
   }),
 
   ai: router({
+    // AI extras: proposal entry point for the expanded tool registry.
+    ...tkoAiExtraProcedures,
     tools: tenantProcedure.query(({ ctx }) => { require("../modules/permissions/src/authorization").requireCapability(ctx.platform.actor, "ai.context.read", { tenantId: ctx.platform.actor.tenantId, type: "ai_tool", id: "list", visibility: "internal" }); return listAITools(); }),
     runs: tenantProcedure.query(({ ctx }) => aiService.listRuns(ctx.platform.actor)),
     proposals: tenantProcedure.query(({ ctx }) => aiService.listProposals(ctx.platform.actor)),

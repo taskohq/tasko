@@ -1,9 +1,16 @@
 import "dotenv/config";
-import express from "express";
-import { createServer } from "http";
+import Fastify from "fastify";
+import fastifyCookie from "@fastify/cookie";
 import net from "net";
-import pinoHttp from "pino-http";
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { parse as parseCookieHeader } from "cookie";
+import { COOKIE_NAME } from "@shared/const";
+import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
+import {
+  tko_extractSessionTokenFromHeaders,
+  tko_isOriginAllowed,
+  tko_shouldRevokeSessionForRequest,
+} from "./security";
+import { tko_revokeSessionByToken } from "../../modules/auth/src/session-service";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
@@ -13,6 +20,7 @@ import { createCorrelationId, tko_logger } from "../../packages/observability/sr
 import { getPlatformHealth, getPlatformReadiness } from "../platform/health";
 import { registerWebSocketGateway } from "../platform/websocket-gateway";
 import { registerPublicApiRoutes } from "../ecosystem/public-api";
+import { registerPublicFormRoutes } from "../platform/public-forms";
 import { registerEcosystemWebhookObserver } from "../../modules/ecosystem/src/developer-service";
 import { registerMCPRoutes } from "../ai/mcp-server";
 import { registerCRMHandoffWorker } from "../../modules/crm/src/crm-handoff-worker";
@@ -41,50 +49,93 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
-  const app = express();
-  const server = createServer(app);
-  app.use(
-    pinoHttp({
-      logger: tko_logger,
-      genReqId: tko_request => createCorrelationId(tko_request.headers["x-correlation-id"] as string | undefined),
-      redact: ["req.headers.authorization", "req.headers.cookie"],
-    }),
-  );
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  registerStorageProxy(app);
-  registerOAuthRoutes(app);
-  registerPublicApiRoutes(app);
-  registerMCPRoutes(app);
+  // `loggerInstance` narrows the instance's logger generic to our pino logger;
+  // erase it so the route-registration helpers keep their default
+  // `FastifyInstance` parameter type (runtime behavior is unchanged).
+  const tko_fastify = Fastify({
+    loggerInstance: tko_logger,
+    genReqId: tko_request => createCorrelationId(
+      Array.isArray(tko_request.headers["x-correlation-id"])
+        ? tko_request.headers["x-correlation-id"][0]
+        : tko_request.headers["x-correlation-id"]
+    ),
+    // Base64 attachment uploads ride through the JSON API.
+    bodyLimit: 50 * 1024 * 1024,
+  }) as unknown as import("fastify").FastifyInstance;
+  await tko_fastify.register(fastifyCookie);
+
+  // CSRF hardening: Origin/Referer validation for unsafe methods on
+  // cookie-authenticated routes (pure verdict from ./security.ts). Requests
+  // without the session cookie (Bearer/native clients, health checks) and safe
+  // methods pass unconditionally; mismatches are rejected with 403.
+  tko_fastify.addHook("onRequest", async (tko_req, tko_reply) => {
+    if (!parseCookieHeader(tko_req.headers.cookie ?? "")[COOKIE_NAME]) return;
+    const tko_verdict = tko_isOriginAllowed({
+      method: tko_req.method,
+      origin: tko_req.headers.origin,
+      referer: tko_req.headers.referer,
+      host: tko_req.headers.host,
+      forwardedHost: tko_req.headers["x-forwarded-host"],
+    });
+    if (!tko_verdict.allowed) {
+      void tko_reply.code(403).send({ error: "Cross-origin request rejected", reason: tko_verdict.reason });
+    }
+  });
+
+  // Acceptance-test K: the logout mutation must revoke the presented session
+  // row so its cookie stops working immediately. The tRPC procedure in
+  // routers.ts stays untouched; this hook adapts Fastify to the
+  // framework-agnostic session service.
+  tko_fastify.addHook("onRequest", async tko_req => {
+    if (!tko_shouldRevokeSessionForRequest({ method: tko_req.method, path: (tko_req.url ?? "").split("?")[0] })) return;
+    const tko_sessionToken = tko_extractSessionTokenFromHeaders({
+      cookieHeader: tko_req.headers.cookie,
+      authorizationHeader: tko_req.headers.authorization,
+      parseCookie: tko_header => parseCookieHeader(tko_header),
+    });
+    if (!tko_sessionToken) return;
+    try {
+      await tko_revokeSessionByToken(tko_sessionToken);
+    } catch (tko_error) {
+      tko_logger.error({ err: tko_error }, "[Auth] Logout session revocation failed");
+    }
+  });
+
+  registerStorageProxy(tko_fastify);
+  registerOAuthRoutes(tko_fastify);
+  registerPublicApiRoutes(tko_fastify);
+  registerMCPRoutes(tko_fastify);
+  registerPublicFormRoutes(tko_fastify);
   registerEcosystemWebhookObserver();
   registerCRMHandoffWorker();
   registerWorkspaceWorker();
   registerWorkRealtimeWorker();
   const tko_stopWorker = startWorker();
-  registerWebSocketGateway(server);
-  app.get("/health", async (_req, res) => {
-    res.status(200).json(await getPlatformHealth());
-  });
-  app.get("/ready", async (_req, res) => {
+
+  tko_fastify.get("/health", async () => getPlatformHealth());
+  tko_fastify.get("/ready", async (_tko_req, tko_reply) => {
     const tko_readiness = await getPlatformReadiness();
-    res.status(tko_readiness.status === "ready" ? 200 : 503).json(tko_readiness);
+    return tko_reply.code(tko_readiness.status === "ready" ? 200 : 503).send(tko_readiness);
   });
-  app.post("/api/scheduled/chat-reminder-push", deliverChatReminderPush);
+  tko_fastify.post("/api/scheduled/chat-reminder-push", async (tko_req, tko_reply) => deliverChatReminderPush(tko_req, tko_reply));
+
   // tRPC API
-  app.use(
-    "/api/trpc",
-    createExpressMiddleware({
+  await tko_fastify.register(fastifyTRPCPlugin, {
+    prefix: "/api/trpc",
+    trpcOptions: {
       router: appRouter,
       createContext,
-    })
-  );
+    },
+  });
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
-    await setupVite(app, server);
+    await setupVite(tko_fastify, tko_fastify.server);
   } else {
-    serveStatic(app);
+    await serveStatic(tko_fastify);
   }
+
+  registerWebSocketGateway(tko_fastify.server);
 
   const preferredPort = parseInt(process.env.PORT || "3000");
   const port = await findAvailablePort(preferredPort);
@@ -93,12 +144,12 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-  });
+  await tko_fastify.listen({ port, host: "0.0.0.0" });
 
   for (const tko_signal of ["SIGINT", "SIGTERM"] as const) {
-    process.once(tko_signal, () => tko_stopWorker());
+    process.once(tko_signal, () => {
+      void tko_fastify.close().finally(() => tko_stopWorker());
+    });
   }
 }
 

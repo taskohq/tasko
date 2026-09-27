@@ -18,6 +18,8 @@ export interface EmailPasswordStore {
   getByAuthSubject(tko_authSubject: string): Promise<EmailPasswordAccount | null>;
   touchLastSignedIn(tko_authSubject: string): Promise<void>;
   delete(tko_authSubject: string): Promise<void>;
+  /** Additive (spec 06 §2 P1): replace the scrypt password hash (reset/change flows). */
+  updatePasswordHash(tko_authSubject: string, tko_passwordHash: string): Promise<void>;
 }
 
 function tko_clone(tko_account: EmailPasswordAccount): EmailPasswordAccount {
@@ -39,6 +41,7 @@ export class MemoryEmailPasswordStore implements EmailPasswordStore {
   async getByAuthSubject(tko_authSubject: string): Promise<EmailPasswordAccount | null> { const tko_account = this.tko_bySubject.get(tko_authSubject); return tko_account ? tko_clone(tko_account) : null; }
   async touchLastSignedIn(tko_authSubject: string): Promise<void> { const tko_account = this.tko_bySubject.get(tko_authSubject); if (tko_account) tko_account.lastSignedInAt = new Date(); }
   async delete(tko_authSubject: string): Promise<void> { const tko_account = this.tko_bySubject.get(tko_authSubject); if (!tko_account) return; this.tko_bySubject.delete(tko_authSubject); this.tko_byEmail.delete(tko_account.email); }
+  async updatePasswordHash(tko_authSubject: string, tko_passwordHash: string): Promise<void> { const tko_account = this.tko_bySubject.get(tko_authSubject); if (tko_account) tko_account.passwordHash = tko_passwordHash; }
 }
 
 export class PostgresEmailPasswordStore implements EmailPasswordStore {
@@ -48,6 +51,12 @@ export class PostgresEmailPasswordStore implements EmailPasswordStore {
     return { id: String(tko_row.id), authSubject: String(tko_row.auth_subject), email: String(tko_row.email), displayName: String(tko_row.display_name), passwordHash: String(tko_row.password_hash), createdAt: new Date(String(tko_row.created_at)), lastSignedInAt: tko_row.last_signed_in_at ? new Date(String(tko_row.last_signed_in_at)) : null };
   }
   async create(tko_input: Omit<EmailPasswordAccount, "id" | "createdAt" | "lastSignedInAt">): Promise<EmailPasswordAccount> {
+    // email_password_credentials.auth_subject has an FK to users(auth_subject):
+    // mirror the platform-store owner upsert so the identity row exists first.
+    await this.tko_pool.query(
+      "insert into users(id,auth_subject,email,status) values(gen_random_uuid(),$1,$2,'active') on conflict(auth_subject) do update set email=excluded.email, status='active'",
+      [tko_input.authSubject, tko_input.email],
+    );
     const tko_result = await this.tko_pool.query(
       "insert into email_password_credentials(auth_subject,email,display_name,password_hash) values($1,$2,$3,$4) returning id,auth_subject,email,display_name,password_hash,created_at,last_signed_in_at",
       [tko_input.authSubject, tko_input.email, tko_input.displayName, tko_input.passwordHash],
@@ -58,6 +67,7 @@ export class PostgresEmailPasswordStore implements EmailPasswordStore {
   async getByAuthSubject(tko_authSubject: string): Promise<EmailPasswordAccount | null> { const tko_result = await this.tko_pool.query("select id,auth_subject,email,display_name,password_hash,created_at,last_signed_in_at from email_password_credentials where auth_subject=$1", [tko_authSubject]); return tko_result.rowCount ? this.tko_map(tko_result.rows[0]) : null; }
   async touchLastSignedIn(tko_authSubject: string): Promise<void> { await this.tko_pool.query("update email_password_credentials set last_signed_in_at=now() where auth_subject=$1", [tko_authSubject]); }
   async delete(tko_authSubject: string): Promise<void> { await this.tko_pool.query("delete from email_password_credentials where auth_subject=$1", [tko_authSubject]); }
+  async updatePasswordHash(tko_authSubject: string, tko_passwordHash: string): Promise<void> { await this.tko_pool.query("update email_password_credentials set password_hash=$2 where auth_subject=$1", [tko_authSubject, tko_passwordHash]); }
 }
 
 let tko_store: EmailPasswordStore | null = null;

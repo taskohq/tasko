@@ -21,15 +21,15 @@ function tko_mockResponse() {
     cookies: [] as Array<{ name: string; value: string; options: Record<string, unknown> }>,
     cleared: [] as string[],
     redirectTarget: undefined as string | undefined,
-    status(tko_status: number) {
+    code(tko_status: number) {
       this.statusCode = tko_status;
       return this;
     },
-    json(tko_body: unknown) {
+    send(tko_body: unknown) {
       this.body = tko_body;
       return this;
     },
-    cookie(tko_name: string, tko_value: string, tko_options: Record<string, unknown>) {
+    setCookie(tko_name: string, tko_value: string, tko_options: Record<string, unknown>) {
       this.cookies.push({ name: tko_name, value: tko_value, options: tko_options });
       return this;
     },
@@ -37,8 +37,7 @@ function tko_mockResponse() {
       this.cleared.push(tko_name);
       return this;
     },
-    redirect(tko_status: number, tko_target: string) {
-      this.statusCode = tko_status;
+    redirect(tko_target: string) {
       this.redirectTarget = tko_target;
       return this;
     },
@@ -49,7 +48,6 @@ function tko_mockRequest() {
   return {
     query: { code: "authorization-code", state: tko_validState },
     headers: { cookie: tko_cookieHeader },
-    header: () => undefined,
   };
 }
 
